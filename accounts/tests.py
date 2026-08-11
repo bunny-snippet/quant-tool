@@ -1,11 +1,83 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
 from .access import has_function_access
 from .function_catalog import sync_access_function_catalog
-from .models import AccessFunction, EmployeeProfile, Role, UserFunctionOverride
+from .models import AccessFunction, EmployeeProfile, Role, RoleFunctionPermission, UserFunctionOverride
+
+
+class RoleConfigurationCommandTests(TestCase):
+    def test_import_replaces_roles_and_preserves_user_overrides(self):
+        projects = AccessFunction.objects.get(code="projects.view")
+        attempts = AccessFunction.objects.get(code="attempts.view")
+        source_role = Role.objects.create(
+            name="Quest operator",
+            slug="quest-operator",
+            description="Transferred role",
+            rank=27,
+            cpi_visibility_percent="72.50",
+        )
+        RoleFunctionPermission.objects.create(role=source_role, function=projects, allowed=True)
+        RoleFunctionPermission.objects.create(role=source_role, function=attempts, allowed=False)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            export_path = root / "quest-roles.json"
+            backup_path = root / "quant-roles-before-import.json"
+            call_command("role_config", export_path=str(export_path))
+
+            source_role.name = "Changed locally"
+            source_role.cpi_visibility_percent = "10.00"
+            source_role.save(update_fields=["name", "cpi_visibility_percent", "updated_at"])
+            source_role.function_assignments.all().delete()
+
+            extra_role = Role.objects.create(name="Quant only", slug="quant-only", rank=90)
+            user = get_user_model().objects.create_user(username="quant-user", password="password-123")
+            profile = user.employee_profile
+            profile.role = extra_role
+            profile.save(update_fields=["role", "updated_at"])
+            override = UserFunctionOverride.objects.create(
+                user=user,
+                function=attempts,
+                effect=UserFunctionOverride.Effect.ALLOW,
+            )
+
+            call_command("role_config", import_path=str(export_path), dry_run=True)
+            self.assertTrue(Role.objects.filter(slug="quant-only").exists())
+
+            call_command(
+                "role_config",
+                import_path=str(export_path),
+                replace=True,
+                backup=str(backup_path),
+            )
+
+            restored = Role.objects.get(slug="quest-operator")
+            self.assertEqual(restored.name, "Quest operator")
+            self.assertEqual(str(restored.cpi_visibility_percent), "72.50")
+            self.assertEqual(
+                dict(restored.function_assignments.values_list("function__code", "allowed")),
+                {"attempts.view": False, "projects.view": True},
+            )
+            self.assertFalse(Role.objects.filter(slug="quant-only").exists())
+            profile.refresh_from_db()
+            self.assertEqual(profile.role.slug, "employee")
+            self.assertTrue(UserFunctionOverride.objects.filter(pk=override.pk).exists())
+            self.assertTrue(backup_path.is_file())
+
+    def test_import_requires_explicit_replace_confirmation(self):
+        with TemporaryDirectory() as temporary_directory:
+            export_path = Path(temporary_directory) / "roles.json"
+            call_command("role_config", export_path=str(export_path))
+            with self.assertRaises(CommandError):
+                call_command("role_config", import_path=str(export_path))
 
 
 class LoginAndSetupTests(TestCase):
