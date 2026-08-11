@@ -124,11 +124,12 @@ def manageable_user_ids(user) -> set[int]:
 def activity_visible_user_ids(user) -> set[int]:
     """Return users whose tracking activity is visible to ``user``.
 
-    Shift assignment determines the tracking boundary. A Team Lead (or a higher
-    employee role) assigned anywhere below a Branch can see lower-ranked
-    employees across every Sub-branch and Shift in that Branch. A normal
-    employee can only see their own tracking records, even when another user was
-    created beneath them. Vendor and super-admin workspace rules remain intact.
+    Shift assignment determines the Team Lead tracking boundary. A Team Lead
+    sees lower-ranked employees only inside the exact Shift to which the lead is
+    assigned. Managers and higher employee roles retain Branch-wide visibility.
+    A normal employee can only see their own tracking records, even when another
+    user was created beneath them. Vendor and super-admin workspace rules remain
+    intact.
     """
     if not user or not user.is_authenticated:
         return set()
@@ -163,10 +164,11 @@ def activity_visible_user_ids(user) -> set[int]:
         return visible_ids
 
     if profile.organization_unit_id:
-        branch = profile.organization_unit
-        while branch.parent_id and branch.unit_type != "branch":
-            branch = branch.parent
-        unit_ids = organization_unit_descendant_ids(branch)
+        scope_unit = profile.organization_unit
+        if profile.role.rank > 20:
+            while scope_unit.parent_id and scope_unit.unit_type != "branch":
+                scope_unit = scope_unit.parent
+        unit_ids = organization_unit_descendant_ids(scope_unit)
         visible_ids.update(
             EmployeeProfile.objects.filter(
                 organization_unit_id__in=unit_ids,

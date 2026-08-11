@@ -846,7 +846,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(scoped_api.get(reverse("survey-attempt-list"), {"status": "1"}).status_code, 403)
         self.assertEqual(scoped_api.get(reverse("survey-attempt-list"), {"country": "US"}).status_code, 403)
 
-    def test_team_lead_sees_lower_rank_employee_activity_across_own_branch_only(self):
+    def test_team_lead_sees_lower_rank_employee_activity_in_own_shift_only(self):
         team_lead = get_user_model().objects.create_user(
             username="tracking-lead", first_name="Tracking", last_name="Lead"
         )
@@ -933,29 +933,29 @@ class StudiesTrackingTests(TestCase):
         lead_api.force_authenticate(team_lead)
         studies = lead_api.get(reverse("survey-attempt-list"))
         self.assertEqual(studies.status_code, 200)
-        self.assertEqual(studies.data["count"], 2)
-        self.assertEqual({row["rid"] for row in studies.data["results"]}, {visible_attempt.rid, other_shift_attempt.rid})
+        self.assertEqual(studies.data["count"], 1)
+        self.assertEqual({row["rid"] for row in studies.data["results"]}, {visible_attempt.rid})
         branch_studies = lead_api.get(reverse("survey-attempt-list"), {"branch": str(delhi.pk)})
         self.assertEqual(branch_studies.status_code, 200)
-        self.assertEqual(branch_studies.data["count"], 2)
+        self.assertEqual(branch_studies.data["count"], 1)
         sub_branch_studies = lead_api.get(reverse("survey-attempt-list"), {"sub_branch": str(delhi_support.pk)})
         self.assertEqual(sub_branch_studies.status_code, 200)
-        self.assertEqual({row["rid"] for row in sub_branch_studies.data["results"]}, {other_shift_attempt.rid})
+        self.assertEqual(sub_branch_studies.data["count"], 0)
         shift_studies = lead_api.get(reverse("survey-attempt-list"), {"shift": str(delhi_morning.pk)})
         self.assertEqual(shift_studies.status_code, 200)
         self.assertEqual({row["rid"] for row in shift_studies.data["results"]}, {visible_attempt.rid})
 
         hits = lead_api.get(reverse("user-hits-api"))
         self.assertEqual(hits.status_code, 200)
-        self.assertEqual(hits.data["count"], 2)
-        self.assertEqual({row["user_id"] for row in hits.data["results"]}, {employee.pk, other_shift_employee.pk})
+        self.assertEqual(hits.data["count"], 1)
+        self.assertEqual({row["user_id"] for row in hits.data["results"]}, {employee.pk})
         morning_hit = next(row for row in hits.data["results"] if row["user_id"] == employee.pk)
         self.assertEqual(morning_hit["branch"], "Delhi")
         self.assertEqual(morning_hit["sub_branch"], "Operations")
         self.assertEqual(morning_hit["shift"], "Morning")
         branch_hits = lead_api.get(reverse("user-hits-api"), {"branch": str(delhi.pk)})
         self.assertEqual(branch_hits.status_code, 200)
-        self.assertEqual(branch_hits.data["count"], 2)
+        self.assertEqual(branch_hits.data["count"], 1)
         shift_hits = lead_api.get(reverse("user-hits-api"), {"shift": str(delhi_morning.pk)})
         self.assertEqual(shift_hits.status_code, 200)
         self.assertEqual({row["user_id"] for row in shift_hits.data["results"]}, {employee.pk})
@@ -964,8 +964,8 @@ class StudiesTrackingTests(TestCase):
         second_lead_api.force_authenticate(second_team_lead)
         second_lead_studies = second_lead_api.get(reverse("survey-attempt-list"))
         self.assertEqual(second_lead_studies.status_code, 200)
-        self.assertEqual(second_lead_studies.data["count"], 2)
-        self.assertEqual({row["rid"] for row in second_lead_studies.data["results"]}, {visible_attempt.rid, other_shift_attempt.rid})
+        self.assertEqual(second_lead_studies.data["count"], 1)
+        self.assertEqual({row["rid"] for row in second_lead_studies.data["results"]}, {visible_attempt.rid})
 
         for code in ("attempts.view", "user_hits.view"):
             UserFunctionOverride.objects.update_or_create(
@@ -986,7 +986,7 @@ class StudiesTrackingTests(TestCase):
         self.client.force_login(team_lead)
         page = self.client.get(reverse("studies"))
         self.assertContains(page, "Branch Employee")
-        self.assertContains(page, "Evening Employee")
+        self.assertNotContains(page, "Evening Employee")
         self.assertNotContains(page, "Other Branch")
         self.assertNotContains(page, "Branch Manager")
 
