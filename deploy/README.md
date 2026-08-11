@@ -109,3 +109,12 @@ The `.env` in the repository root must be mode `600`, use MySQL, have `DJANGO_DE
 tail -f "$HOME/logs/quest-tool-web-error.log"
 curl -I http://127.0.0.1:8091/login/
 ```
+
+For the independent Quant Tool VPS, clone into `$HOME/htdocs/quant-tool` and use the dedicated wrapper/config. It keeps Supervisor sockets, logs, worker identity and Celery Beat state separate from Quest Tool:
+
+```bash
+cd "$HOME/htdocs/quant-tool"
+chmod +x deploy/rootless-install.sh deploy/rootless-install-quant.sh
+PUBLIC_STATIC_DIR="$HOME/htdocs/your-quant-domain.example/static" ./deploy/rootless-install-quant.sh
+.venv/bin/supervisorctl -c deploy/supervisord-quant.conf status
+```
