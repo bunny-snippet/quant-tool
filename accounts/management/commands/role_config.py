@@ -9,6 +9,12 @@ from accounts.models import AccessFunction, EmployeeProfile, Role, RoleFunctionP
 
 
 FORMAT_VERSION = 1
+LEGACY_PERMISSION_PREFIXES = {
+    "termination_reasons.summary": "termination_reasons.card.",
+    "user_hits.summary": "user_hits.card.",
+    "organization.summary": "organization.card.",
+    "vendors.summary": "vendors.card.",
+}
 
 
 def serialize_role_config():
@@ -58,6 +64,13 @@ def validate_role_config(payload):
     slugs = [str(role.get("slug") or "").strip() for role in roles]
     if any(not slug for slug in slugs) or len(slugs) != len(set(slugs)):
         raise CommandError("Role slugs must be non-empty and unique.")
+    replacement_codes = {
+        legacy_code: list(
+            AccessFunction.objects.filter(code__startswith=prefix).values_list("code", flat=True)
+        )
+        for legacy_code, prefix in LEGACY_PERMISSION_PREFIXES.items()
+    }
+    normalized_roles = []
     permission_codes = []
     for role in roles:
         permissions = role.get("permissions", [])
@@ -66,7 +79,23 @@ def validate_role_config(payload):
         codes = [str(item.get("code") or "").strip() for item in permissions]
         if any(not code for code in codes) or len(codes) != len(set(codes)):
             raise CommandError(f"Permission codes for role {role['slug']} must be non-empty and unique.")
-        permission_codes.extend(codes)
+        permission_map = {
+            str(item["code"]).strip(): bool(item.get("allowed", True))
+            for item in permissions
+        }
+        for legacy_code, replacements in replacement_codes.items():
+            if legacy_code not in permission_map or not replacements:
+                continue
+            allowed = permission_map.pop(legacy_code)
+            for replacement in replacements:
+                permission_map.setdefault(replacement, allowed)
+        normalized_role = dict(role)
+        normalized_role["permissions"] = [
+            {"code": code, "allowed": permission_map[code]}
+            for code in sorted(permission_map)
+        ]
+        normalized_roles.append(normalized_role)
+        permission_codes.extend(permission_map)
     known_codes = set(
         AccessFunction.objects.filter(code__in=set(permission_codes)).values_list("code", flat=True)
     )
@@ -75,7 +104,7 @@ def validate_role_config(payload):
         raise CommandError(
             "Target is missing AccessFunction codes required by the source: " + ", ".join(missing_codes)
         )
-    return roles
+    return normalized_roles
 
 
 class Command(BaseCommand):

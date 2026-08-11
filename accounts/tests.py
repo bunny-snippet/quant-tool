@@ -105,6 +105,41 @@ class RoleConfigurationCommandTests(TestCase):
             self.assertIsNone(user.employee_profile.role)
             self.assertFalse(Role.objects.filter(slug__in=["employee", "quant-only"]).exists())
 
+    def test_import_translates_legacy_summary_permission_to_current_cards(self):
+        legacy = AccessFunction.objects.create(
+            code="user_hits.summary",
+            name="Legacy User Hits summary",
+            module="User Hits",
+        )
+        source_role = Role.objects.create(name="Legacy operator", slug="legacy-operator", rank=25)
+        RoleFunctionPermission.objects.create(role=source_role, function=legacy, allowed=False)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            export_path = root / "legacy-roles.json"
+            call_command("role_config", export_path=str(export_path))
+            legacy.delete()
+
+            call_command(
+                "role_config",
+                import_path=str(export_path),
+                replace=True,
+                backup=str(root / "target-backup.json"),
+            )
+
+            assignments = dict(
+                Role.objects.get(slug="legacy-operator").function_assignments.filter(
+                    function__code__startswith="user_hits.card."
+                ).values_list("function__code", "allowed")
+            )
+            self.assertEqual(set(assignments), {
+                "user_hits.card.total_hits",
+                "user_hits.card.completes",
+                "user_hits.card.conversion",
+                "user_hits.card.active_users",
+            })
+            self.assertEqual(set(assignments.values()), {False})
+
 
 class LoginAndSetupTests(TestCase):
     def test_anonymous_internal_page_redirects_to_login(self):
