@@ -9,34 +9,26 @@ function is first created; later administrator changes are never overwritten.
 from django.db import transaction
 
 
-ALL_ROLES = ("employee", "team-lead", "manager", "admin", "super-admin")
-TRACKING_ROLES = ("team-lead", "manager", "admin", "super-admin")
+ALL_ROLES = ("employee", "employees", "team-lead", "tl", "manager", "admin", "super-admin")
+TRACKING_ROLES = ("team-lead", "tl", "manager", "admin", "super-admin")
 ADMIN_ROLES = ("admin", "super-admin")
 
 
 # code, name, page-wise group, description, default system roles
 FUNCTION_CATALOG = (
     ("dashboard.view", "View dashboard page and sidebar item", "Dashboard - Page & navigation", "Open the dashboard and display its sidebar navigation item.", ALL_ROLES),
-    ("dashboard.filter.client", "Use Client filter", "Dashboard - Filters", "Filter dashboard analytics by one or more permitted clients.", ALL_ROLES),
-    ("dashboard.filter.country", "Use Country filter", "Dashboard - Filters", "Filter dashboard analytics by one or more survey countries.", ALL_ROLES),
-    ("dashboard.filter.branch", "Use Branch filter", "Dashboard - Filters", "Filter dashboard analytics by one or more authorized branches.", TRACKING_ROLES),
-    ("dashboard.filter.sub_branch", "Use Sub-branch filter", "Dashboard - Filters", "Filter dashboard analytics by one or more authorized sub-branches.", TRACKING_ROLES),
-    ("dashboard.filter.shift", "Use Shift filter", "Dashboard - Filters", "Filter dashboard analytics by one or more authorized shifts.", TRACKING_ROLES),
-    ("dashboard.filter.user", "Use User filter", "Dashboard - Filters", "Filter dashboard analytics by one or more visible users.", TRACKING_ROLES),
-    ("dashboard.filter.date", "Use Date and time filter", "Dashboard - Filters", "Filter dashboard analytics by an IST entry date and time range.", ALL_ROLES),
-    ("dashboard.filters.clear", "Clear Dashboard filters", "Dashboard - Filters", "Use the Clear filters action on Dashboard.", ALL_ROLES),
     ("dashboard.card.hits", "Show Total hits card", "Dashboard - Summary cards", "Display the filtered respondent journey count.", ALL_ROLES),
     ("dashboard.card.completes", "Show Completes card", "Dashboard - Summary cards", "Display successful survey outcomes.", ALL_ROLES),
     ("dashboard.card.conversion", "Show Conversion card", "Dashboard - Summary cards", "Display completes divided by total hits.", ALL_ROLES),
     ("dashboard.card.active_users", "Show Active users card", "Dashboard - Summary cards", "Display users with activity matching the current filters.", ALL_ROLES),
     ("dashboard.card.average_loi", "Show Average LOI card", "Dashboard - Summary cards", "Display average recorded survey journey duration.", ALL_ROLES),
     ("dashboard.card.revenue", "Show Revenue card", "Dashboard - Summary cards", "Display completed revenue from immutable hit-time CPI snapshots.", ADMIN_ROLES),
+    ("dashboard.card.ir", "Show IR card", "Dashboard - Summary cards", "Display completes divided by completes plus survey terminations; local pre-screen terminations, quota and security outcomes are excluded.", ALL_ROLES),
     ("dashboard.chart.performance", "Show Performance graph", "Dashboard - Charts", "Display last-five-day and monthly hits versus completes trends.", ALL_ROLES),
     ("dashboard.chart.client_share", "Show Client contribution chart", "Dashboard - Charts", "Display each client's share of filtered completes.", ALL_ROLES),
     ("dashboard.chart.status", "Show Outcome mix chart", "Dashboard - Charts", "Display initiated, complete, terminated, quota and security outcomes.", ALL_ROLES),
     ("dashboard.chart.device", "Show Device performance chart", "Dashboard - Charts", "Display completed outcomes by Desktop, Mobile and Tablet.", ALL_ROLES),
     ("dashboard.chart.top_users", "Show Top performers chart", "Dashboard - Charts", "Display visible users ranked by filtered completes.", TRACKING_ROLES),
-    ("dashboard.chart.recent", "Show Live activity feed", "Dashboard - Charts", "Display the most recent permitted respondent journeys.", ALL_ROLES),
 
     ("projects.view", "View Projects page, sidebar and rows", "Projects - Page & navigation", "Open Projects, display its sidebar item and read project rows through the API.", ALL_ROLES),
     ("projects.filter.search", "Use Search filter", "Projects - Filters", "Search project identifiers and descriptive fields.", ALL_ROLES),
@@ -102,6 +94,7 @@ FUNCTION_CATALOG = (
     ("studies.card.mobile", "Show Mobile completes card", "Studies - Summary cards", "Display completed Mobile journeys.", TRACKING_ROLES),
     ("studies.card.tablet", "Show Tablet completes card", "Studies - Summary cards", "Display completed Tablet journeys.", TRACKING_ROLES),
     ("studies.card.revenue", "Show Total Revenue card", "Studies - Summary cards", "Display completed revenue using the CPI snapshot captured at hit time.", ADMIN_ROLES),
+    ("studies.card.ir", "Show IR card", "Studies - Summary cards", "Display completes divided by completes plus actual survey terminations.", TRACKING_ROLES),
 
     ("termination_reasons.view", "View Termination Reasons page and sidebar", "Termination Reasons - Page & navigation", "Open the administrator-only provider outcome lookup page and display its sidebar item.", ADMIN_ROLES),
     ("termination_reasons.filter.rid", "Search by RID", "Termination Reasons - Filters", "Filter final unsuccessful survey attempts by respondent RID.", ADMIN_ROLES),
@@ -141,6 +134,8 @@ FUNCTION_CATALOG = (
     ("user_hits.card.completes", "Show Completes card", "User Hits - Summary cards", "Display successful completes.", TRACKING_ROLES),
     ("user_hits.card.conversion", "Show Conversion card", "User Hits - Summary cards", "Display completes divided by hits.", TRACKING_ROLES),
     ("user_hits.card.active_users", "Show Active users card", "User Hits - Summary cards", "Display users matching current filters.", TRACKING_ROLES),
+    ("user_hits.card.devices", "Show Completed devices card", "User Hits - Summary cards", "Display completed Desktop, Mobile and Tablet journeys.", TRACKING_ROLES),
+    ("user_hits.card.ir", "Show IR card", "User Hits - Summary cards", "Display completes divided by completes plus actual survey terminations.", TRACKING_ROLES),
     ("user_hits.control.page_size", "Change rows per page", "User Hits - Page controls", "Change the number of user-hit rows displayed per page.", TRACKING_ROLES),
     ("user_hits.control.pagination", "Use pagination", "User Hits - Page controls", "Move between pages of user-hit rows.", TRACKING_ROLES),
     ("user_hits.column.branch", "Show Branch column", "User Hits - Table columns", "Display the user's branch.", TRACKING_ROLES),

@@ -14,6 +14,7 @@
 </section>
 
 {% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
+  {% if 'ir' in study_cards %}<article class="study-summary-card ir-summary"><header><span>IR</span><div><small>Incidence rate</small><em>Actual survey outcomes</em></div></header><div class="ir-metric"><strong id="studyMetricIR">—</strong><small>Completes ÷ (completes + terminates)</small></div></article>{% endif %}
   {% if 'revenue' in study_cards %}<article class="revenue"><span>↗</span><div><small>Total revenue</small><strong id="studyMetricRevenue">—</strong><em>All completed · historical CPI recovered</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
   {% if 'total' in study_cards or 'completed' in study_cards or 'conversion' in study_cards %}<article class="study-summary-card traffic-summary"><header><span>H</span><div><small>Traffic</small><em>Filtered journeys</em></div></header><div class="summary-metrics">
     {% if 'total' in study_cards %}<span><small>Total hits</small><strong id="studyMetricTotal">—</strong></span>{% endif %}
@@ -167,4 +168,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=14" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=16" defer></script>{% endblock %}

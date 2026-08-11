@@ -14,6 +14,7 @@ from surveys.models import Survey, SurveyAttempt
 from .models import (
     AllocationReservation,
     Client,
+    ClientIntegration,
     OrganizationClientAccess,
     OrganizationUnit,
     VendorAPIKey,
@@ -87,6 +88,35 @@ class VendorFoundationTests(TestCase):
             user_id=str(self.external.pk),
             status=status,
         )
+
+    def test_hidden_biobrain_client_is_not_published_before_inventory(self):
+        hidden = Client.objects.create(
+            code="catalog-hidden-biobrain", name="BioBrain", provider_code="biobrain", is_active=False
+        )
+        integration = ClientIntegration.objects.create(
+            client=hidden,
+            name="Hidden BioBrain",
+            provider_code="biobrain",
+            base_url="https://partner-api.voqall.com/api/v1/surveys",
+            credential_env_key="BIOBRAIN_API_KEY",
+        )
+        api = APIClient()
+        api.force_authenticate(self.owner)
+        response = api.get(reverse("vendor-client-list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(hidden.pk, [row["id"] for row in response.data["results"]])
+        response = api.get(reverse("client-integration-list"))
+        self.assertNotIn(integration.pk, [row["id"] for row in response.data["results"]])
+        response = api.get(reverse("client-integration-providers"))
+        self.assertNotIn("biobrain", [row["code"] for row in response.data])
+        hidden.is_active = True
+        hidden.save(update_fields=["is_active", "updated_at"])
+        response = api.get(reverse("vendor-client-list"))
+        self.assertIn(hidden.pk, [row["id"] for row in response.data["results"]])
+        response = api.get(reverse("client-integration-list"))
+        self.assertIn(integration.pk, [row["id"] for row in response.data["results"]])
+        response = api.get(reverse("client-integration-providers"))
+        self.assertIn("biobrain", [row["code"] for row in response.data])
 
     def test_external_cut_and_internal_full_cpi_rules(self):
         self.assertEqual(payable_cpi(Decimal("10.00"), Decimal("30.00")), Decimal("7.00"))

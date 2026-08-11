@@ -23,6 +23,7 @@
       conversion: byId('studyMetricConversion'), desktop: byId('studyMetricDesktop'),
       mobile: byId('studyMetricMobile'), tablet: byId('studyMetricTablet'),
       revenue: byId('studyMetricRevenue'),
+      ir: byId('studyMetricIR'),
     },
   };
   if (!elements.rows) return;
@@ -284,6 +285,7 @@
     };
     Object.entries(values).forEach(([key, value]) => animateMetric(elements.metrics[key], value));
     animateMetric(elements.metrics.conversion, summary.conversion_rate, { suffix: '%', maximumFractionDigits: 2 });
+    animateMetric(elements.metrics.ir, summary.incidence_rate, { suffix: '%', maximumFractionDigits: 2 });
     animateRevenue(summary.total_revenue, summary.revenue_currency || 'USD');
   }
 

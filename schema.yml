@@ -530,54 +530,10 @@ paths:
   /api/v1/dashboard/:
     get:
       operationId: api_v1_dashboard_retrieve
-      description: Returns filtered KPI totals, immutable hit-time CPI revenue, client
-        completion share, five-day and six-month performance, outcome/device breakdowns,
-        top users and recent activity. Every response component and filter is controlled
-        by a separate function permission.
+      description: Returns permission-scoped KPI totals, incidence rate, immutable
+        hit-time CPI revenue, client completion share, performance, outcome/device
+        breakdowns and top users.
       summary: Get permission-scoped dashboard analytics
-      parameters:
-      - in: query
-        name: branch
-        schema:
-          type: string
-        description: Comma-separated authorized Branch IDs.
-      - in: query
-        name: client
-        schema:
-          type: string
-        description: Comma-separated permitted client IDs.
-      - in: query
-        name: country
-        schema:
-          type: string
-        description: Comma-separated survey country codes.
-      - in: query
-        name: initiated_from
-        schema:
-          type: string
-          format: date-time
-        description: Inclusive survey-entry timestamp.
-      - in: query
-        name: initiated_to
-        schema:
-          type: string
-          format: date-time
-        description: Inclusive survey-entry timestamp.
-      - in: query
-        name: shift
-        schema:
-          type: string
-        description: Comma-separated authorized Shift IDs.
-      - in: query
-        name: sub_branch
-        schema:
-          type: string
-        description: Comma-separated authorized Sub-branch IDs.
-      - in: query
-        name: user
-        schema:
-          type: string
-        description: Comma-separated visible platform user IDs.
       tags:
       - Dashboard
       security:
@@ -4130,32 +4086,6 @@ components:
       - hits
       - key
       - label
-    DashboardRecentActivity:
-      type: object
-      properties:
-        rid:
-          type: string
-        user_name:
-          type: string
-        project_id:
-          type: string
-        client_name:
-          type: string
-        status:
-          type: string
-        status_label:
-          type: string
-        initiated_at:
-          type: string
-          format: date-time
-      required:
-      - client_name
-      - initiated_at
-      - project_id
-      - rid
-      - status
-      - status_label
-      - user_name
     DashboardResponse:
       type: object
       properties:
@@ -4183,11 +4113,6 @@ components:
           items:
             $ref: '#/components/schemas/DashboardTopUser'
           nullable: true
-        recent_activity:
-          type: array
-          items:
-            $ref: '#/components/schemas/DashboardRecentActivity'
-          nullable: true
         generated_at:
           type: string
           format: date-time
@@ -4196,7 +4121,6 @@ components:
       - device_breakdown
       - generated_at
       - performance
-      - recent_activity
       - status_breakdown
       - summary
       - top_users
@@ -4240,6 +4164,11 @@ components:
           format: double
           minimum: 0
           nullable: true
+        incidence_rate:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
         active_users:
           type: integer
           minimum: 0
@@ -4262,6 +4191,7 @@ components:
       - completes
       - conversion_rate
       - hits
+      - incidence_rate
       - revenue
       - revenue_currency
     DashboardTopUser:
@@ -5815,6 +5745,10 @@ components:
           type: number
           format: double
           nullable: true
+        incidence_rate:
+          type: number
+          format: double
+          nullable: true
         total_revenue:
           type: string
           format: decimal
@@ -5829,6 +5763,7 @@ components:
       - completed
       - completed_devices
       - conversion_rate
+      - incidence_rate
       - initiated
       - over_quota
       - revenue_currency
@@ -6635,15 +6570,19 @@ components:
         desktop:
           type: integer
           minimum: 0
+          nullable: true
         mobile:
           type: integer
           minimum: 0
+          nullable: true
         tablet:
           type: integer
           minimum: 0
+          nullable: true
         unclassified:
           type: integer
           minimum: 0
+          nullable: true
       required:
       - desktop
       - mobile
@@ -6705,12 +6644,18 @@ components:
           format: double
           minimum: 0
           nullable: true
+        incidence_rate:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
       required:
       - active_users
       - completes
       - conversion_rate
       - days
       - hits
+      - incidence_rate
     UserHitsResponse:
       type: object
       properties:

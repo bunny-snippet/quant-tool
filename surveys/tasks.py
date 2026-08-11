@@ -6,6 +6,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from vendors.models import ClientIntegration
+from vendors.credentials import resolve_integration_token
 
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncLease
@@ -26,14 +27,19 @@ def _stale_surveys(integration, limit):
 def dispatch_due_integrations_task():
     now = timezone.now()
     queued = []
-    integrations = ClientIntegration.objects.filter(
-        is_active=True, client__is_active=True,
+    integrations = ClientIntegration.objects.filter(is_active=True).filter(
+        Q(client__is_active=True) | Q(provider_code__in=("biobrain", "voqall")),
     ).filter(
         Q(scheduled_sync_enabled=True)
         | Q(provider_code="innovatemr")
         | Q(provider_code="rfg", last_test_status="success")
-    ).only("id", "provider_code", "sync_interval_seconds", "last_sync_started_at")
+    ).only(
+        "id", "provider_code", "sync_interval_seconds", "last_sync_started_at",
+        "credential_env_key", "encrypted_api_token",
+    )
     for integration in integrations:
+        if integration.provider_code in {"biobrain", "voqall"} and not resolve_integration_token(integration):
+            continue
         interval_seconds = {
             "innovatemr": settings.CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS,
             "rfg": settings.CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS,
@@ -82,6 +88,10 @@ def sync_client_integration_task(integration_id):
             return summary
         api = InnovateMRClient(integration=integration)
         summary = sync_surveys(api, integration=integration).__dict__
+        inventory_count = sum(int(summary.get(key) or 0) for key in ("created", "updated", "unchanged"))
+        if integration.provider_code in {"biobrain", "voqall"} and inventory_count > 0 and not integration.client.is_active:
+            integration.client.is_active = True
+            integration.client.save(update_fields=["is_active", "updated_at"])
         refreshed = failures = 0
         for survey in _stale_surveys(integration, integration.detail_refresh_batch):
             try:

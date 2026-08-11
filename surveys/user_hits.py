@@ -208,7 +208,7 @@ def aggregate_user_hits(user, params) -> tuple[list[dict], dict]:
         raise ValueError("from date/time cannot be after to date/time.")
 
     attempts = SurveyAttempt.objects.filter(platform_user_id__in=visible_ids).only(
-        "id", "platform_user_id", "status", "entry_device", "initiated_at"
+        "id", "platform_user_id", "status", "status_source", "entry_device", "initiated_at"
     )
     if lower:
         attempts = attempts.filter(initiated_at__gte=lower)
@@ -231,6 +231,7 @@ def aggregate_user_hits(user, params) -> tuple[list[dict], dict]:
             "date": local_date.isoformat(),
             "hits": {"total": 0, **_empty_counts()},
             "completes": {"total": 0, **_empty_counts()},
+            "_survey_terminations": 0,
         })
         device = _device_key(attempt.entry_device)
         row["hits"]["total"] += 1
@@ -238,6 +239,8 @@ def aggregate_user_hits(user, params) -> tuple[list[dict], dict]:
         if attempt.status == SurveyAttempt.Status.COMPLETED:
             row["completes"]["total"] += 1
             row["completes"][device] += 1
+        elif attempt.status == SurveyAttempt.Status.TERMINATED and attempt.status_source != "local_prescreener":
+            row["_survey_terminations"] += 1
 
     rows = list(grouped.values())
     if search:
@@ -257,6 +260,7 @@ def aggregate_user_hits(user, params) -> tuple[list[dict], dict]:
         "active_users": len({row["user_id"] for row in rows}),
         "days": len({row["date"] for row in rows}),
         "conversion_rate": 0,
+        "incidence_rate": 0,
     }
     for row in rows:
         for metric in ("hits", "completes"):
@@ -264,4 +268,8 @@ def aggregate_user_hits(user, params) -> tuple[list[dict], dict]:
                 summary[metric][key] += row[metric][key]
     if summary["hits"]["total"]:
         summary["conversion_rate"] = round(summary["completes"]["total"] / summary["hits"]["total"] * 100, 1)
+    survey_terminations = sum(row.pop("_survey_terminations", 0) for row in rows)
+    ir_denominator = summary["completes"]["total"] + survey_terminations
+    if ir_denominator:
+        summary["incidence_rate"] = round(summary["completes"]["total"] / ir_denominator * 100, 2)
     return rows, summary

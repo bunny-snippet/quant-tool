@@ -128,12 +128,13 @@ DASHBOARD_CARD_PERMISSIONS = {
     "hits": "dashboard.card.hits", "completes": "dashboard.card.completes",
     "conversion_rate": "dashboard.card.conversion", "active_users": "dashboard.card.active_users",
     "average_loi_seconds": "dashboard.card.average_loi", "revenue": "dashboard.card.revenue",
+    "incidence_rate": "dashboard.card.ir",
 }
 
 DASHBOARD_CHART_PERMISSIONS = {
     "performance": "dashboard.chart.performance", "client_share": "dashboard.chart.client_share",
     "status": "dashboard.chart.status", "device": "dashboard.chart.device",
-    "top_users": "dashboard.chart.top_users", "recent": "dashboard.chart.recent",
+    "top_users": "dashboard.chart.top_users",
 }
 
 STUDY_CARD_PERMISSIONS = {
@@ -143,6 +144,7 @@ STUDY_CARD_PERMISSIONS = {
     "conversion": "studies.card.conversion", "desktop": "studies.card.desktop",
     "mobile": "studies.card.mobile", "tablet": "studies.card.tablet",
     "revenue": "studies.card.revenue",
+    "ir": "studies.card.ir",
 }
 
 USER_HIT_COLUMN_PERMISSIONS = {
@@ -160,6 +162,7 @@ USER_HIT_FILTER_PERMISSIONS = {
 USER_HIT_CARD_PERMISSIONS = {
     "total_hits": "user_hits.card.total_hits", "completes": "user_hits.card.completes",
     "conversion": "user_hits.card.conversion", "active_users": "user_hits.card.active_users",
+    "devices": "user_hits.card.devices", "ir": "user_hits.card.ir",
 }
 
 TERM_REASON_FIELD_PERMISSIONS = {
@@ -231,36 +234,10 @@ def _enforce_query_permissions(request, permission_parameters):
 @function_permission_required("dashboard.view")
 def dashboard_page(request):
     codes = effective_permission_codes(request.user)
-    hierarchy_options = user_hit_filter_options(request.user)
-    visible_surveys = scope_surveys_for_user(Survey.objects.all(), request.user)
-    countries = list(
-        visible_surveys.exclude(country_code="")
-        .values("country_code", "country").distinct().order_by("country_code")
-    )
-    client_rows = visible_surveys.values(
-        "client_id", "client__name", "company_name"
-    ).distinct().order_by("client__name", "company_name")
-    clients = []
-    seen_clients = set()
-    for row in client_rows:
-        value = str(row["client_id"] or "")
-        name = row["client__name"] or row["company_name"] or "Unassigned client"
-        key = value or name.casefold()
-        if key in seen_clients or not value:
-            continue
-        seen_clients.add(key)
-        clients.append({"value": value, "name": name})
     return render(request, "surveys/dashboard.html", {
         "active_page": "dashboard",
-        "dashboard_filters": _component_access(codes, DASHBOARD_FILTER_PERMISSIONS),
         "dashboard_cards": _permitted_columns(codes, DASHBOARD_CARD_PERMISSIONS),
         "dashboard_charts": _permitted_columns(codes, DASHBOARD_CHART_PERMISSIONS),
-        "dashboard_clients": clients,
-        "dashboard_countries": countries,
-        "dashboard_branches": hierarchy_options["branches"],
-        "dashboard_sub_branches": hierarchy_options["sub_branches"],
-        "dashboard_shifts": hierarchy_options["shifts"],
-        "dashboard_users": hierarchy_options["users"],
     })
 
 
@@ -1402,11 +1379,15 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
 
     def _filtered_summary(self, queryset):
         completed_filter = Q(status=SurveyAttempt.Status.COMPLETED)
+        survey_termination_filter = Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
+            status_source="local_prescreener"
+        )
         summary = queryset.aggregate(
             total=Count("id"),
             initiated=Count("id", filter=Q(status__in=[SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED])),
             completed=Count("id", filter=completed_filter),
             terminated=Count("id", filter=Q(status=SurveyAttempt.Status.TERMINATED)),
+            survey_terminated=Count("id", filter=survey_termination_filter),
             over_quota=Count("id", filter=Q(status=SurveyAttempt.Status.OVER_QUOTA)),
             security_terminated=Count("id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)),
             desktop=Count("id", filter=completed_filter & Q(entry_device__icontains="desktop")),
@@ -1416,6 +1397,7 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             revenue_currency=Max("cpi_currency_snapshot", filter=completed_filter),
         )
         completed = summary["completed"]
+        ir_denominator = completed + summary["survey_terminated"]
         classified = summary["desktop"] + summary["mobile"] + summary["tablet"]
         profile = getattr(self.request.user, "employee_profile", None)
         role = getattr(profile, "role", None) if profile else None
@@ -1437,6 +1419,9 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             "conversion_rate": visible(
                 "conversion",
                 round((completed / summary["total"] * 100), 2) if summary["total"] else 0.0,
+            ),
+            "incidence_rate": visible(
+                "ir", round((completed / ir_denominator * 100), 2) if ir_denominator else 0.0,
             ),
             "total_revenue": visible("revenue", summary["total_revenue"]),
             "revenue_currency": visible(
@@ -1542,34 +1527,15 @@ class DashboardAPIView(APIView):
         tags=["Dashboard"],
         summary="Get permission-scoped dashboard analytics",
         description=(
-            "Returns filtered KPI totals, immutable hit-time CPI revenue, client completion share, "
-            "five-day and six-month performance, outcome/device breakdowns, top users and recent activity. "
-            "Every response component and filter is controlled by a separate function permission."
+            "Returns permission-scoped KPI totals, incidence rate, immutable hit-time CPI revenue, "
+            "client completion share, performance, outcome/device breakdowns and top users."
         ),
-        parameters=[
-            OpenApiParameter("client", OpenApiTypes.STR, description="Comma-separated permitted client IDs."),
-            OpenApiParameter("country", OpenApiTypes.STR, description="Comma-separated survey country codes."),
-            OpenApiParameter("branch", OpenApiTypes.STR, description="Comma-separated authorized Branch IDs."),
-            OpenApiParameter("sub_branch", OpenApiTypes.STR, description="Comma-separated authorized Sub-branch IDs."),
-            OpenApiParameter("shift", OpenApiTypes.STR, description="Comma-separated authorized Shift IDs."),
-            OpenApiParameter("user", OpenApiTypes.STR, description="Comma-separated visible platform user IDs."),
-            OpenApiParameter("initiated_from", OpenApiTypes.DATETIME, description="Inclusive survey-entry timestamp."),
-            OpenApiParameter("initiated_to", OpenApiTypes.DATETIME, description="Inclusive survey-entry timestamp."),
-        ],
+        parameters=[],
         responses={200: DashboardResponseSerializer},
     )
     def get(self, request):
-        _enforce_query_permissions(request, {
-            "dashboard.filter.client": ("client",),
-            "dashboard.filter.country": ("country",),
-            "dashboard.filter.branch": ("branch",),
-            "dashboard.filter.sub_branch": ("sub_branch",),
-            "dashboard.filter.shift": ("shift",),
-            "dashboard.filter.user": ("user",),
-            "dashboard.filter.date": ("initiated_from", "initiated_to"),
-        })
         try:
-            queryset = dashboard_attempts(request.user, request.query_params)
+            queryset = dashboard_attempts(request.user, {})
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         codes = effective_permission_codes(request.user)
@@ -1629,6 +1595,11 @@ class UserHitsAPIView(APIView):
             summary["conversion_rate"] = None
         if USER_HIT_CARD_PERMISSIONS["active_users"] not in codes:
             summary["active_users"] = None
+        if USER_HIT_CARD_PERMISSIONS["devices"] not in codes:
+            for device in ("desktop", "mobile", "tablet", "unclassified"):
+                summary["completes"][device] = None
+        if USER_HIT_CARD_PERMISSIONS["ir"] not in codes:
+            summary["incidence_rate"] = None
         paginator = SurveyPagination()
         page = paginator.paginate_queryset(rows, request, view=self)
         response = paginator.get_paginated_response(page)

@@ -18,13 +18,19 @@ Client onboarding uses a hybrid model: owners configure non-secret metadata in *
    | Country | Optional two-letter ISO code, for example `US` |
    | Category | Optional `B2C` or `B2B` |
    | Public supplier code | `1000` |
-   | Sync interval | `600` seconds or longer |
+   | Sync interval | `60` seconds or longer |
 
    Generic REST endpoint, API-header, token and Advanced fields are intentionally hidden for RFG because the backend adapter owns its signed-command contract.
 5. Run **Test connection**. Only a verified connection can enable scheduled sync.
 6. Use **Preview inventory** for a read-only check, then **Sync now**. Enable scheduled sync after validation.
 
 Verified RFG inventory is synchronized automatically every 60 seconds. InnovateMR inventory is synchronized every 150 seconds. Celery Beat checks due integrations every 30 seconds, while `last_sync_started_at` and a database lease prevent overlapping provider calls. Inventory rows are keyed by `(integration, source_key)`, so equal upstream IDs belonging to separate client accounts cannot overwrite one another.
+
+## BioBrain / Voqall
+
+BioBrain is provisioned in both Quest and Quant as a hidden client integration. Add only `BIOBRAIN_API_KEY` to the relevant VPS `.env`, then restart the web, worker and beat processes. With no key, the dispatcher skips the integration and the BioBrain client is excluded from client catalogs, organization grants, vendor allocations and Projects. The first successful sync containing at least one inventory row activates and publishes the client automatically.
+
+The adapter uses `https://partner-api.voqall.com/api/v1/surveys`, sends the key only in `EQ-PARTNER-ACCESS-KEY`, and normalizes BioBrain inventory, quota and qualification payloads into the same internal survey models used by other providers. Each deployment has its own environment, so the client remains independently hidden in Quest or Quant until that deployment receives a valid key and inventory.
 
 Inventory sync stores normalized projects first, then runs a bounded detail refresh outside the inventory transaction. The detail adapter stores targeting, quotas, every displayable provider answer and the permanent entry link. The respondent flow collects birthday, gender and country-valid postal code plus relevant targeting answers. Non-matching answers end locally with a recorded reason. Immediately before an eligible redirect it obtains RFG's official browser fingerprint when available, calls `duplicateCheck` with the RID/IP/fingerprint, then appends RID and profile parameters to the provider link. If fingerprint generation is unavailable, RFG's documented `fingerprint: 0` plus mandatory RID fallback is used.
 

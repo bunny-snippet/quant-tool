@@ -145,6 +145,7 @@
     animateNumber(byId('dashboardHits'), summary.hits);
     animateNumber(byId('dashboardCompletes'), summary.completes);
     animateNumber(byId('dashboardConversion'), summary.conversion_rate, (value) => `${value.toFixed(1)}%`);
+    animateNumber(byId('dashboardIR'), summary.incidence_rate, (value) => `${value.toFixed(1)}%`);
     animateNumber(byId('dashboardActiveUsers'), summary.active_users);
     animateNumber(byId('dashboardAverageLoi'), summary.average_loi_seconds, (value) => formatLoi(value));
     animateNumber(byId('dashboardRevenue'), summary.revenue, (value) => formatCurrency(value, summary.revenue_currency));
@@ -236,7 +237,7 @@
     updateSummary(data.summary || {});
     state.performance = data.performance; renderPerformance();
     renderClients(data.client_distribution); renderStatus(data.status_breakdown);
-    renderDevices(data.device_breakdown); renderTopUsers(data.top_users); renderRecent(data.recent_activity);
+    renderDevices(data.device_breakdown); renderTopUsers(data.top_users);
     const updated = byId('dashboardUpdatedAt');
     if (updated) updated.textContent = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(data.generated_at)) + ' IST';
   }

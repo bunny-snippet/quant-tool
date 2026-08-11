@@ -177,11 +177,15 @@ def _recent_activity(queryset):
 
 def build_dashboard_payload(queryset, user, card_access, chart_access):
     completed_filter = Q(status=COMPLETED)
+    survey_termination_filter = Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
+        status_source="local_prescreener"
+    )
     totals = queryset.aggregate(
         hits=Count("id"),
         completes=Count("id", filter=completed_filter),
         initiated=Count("id", filter=Q(status__in=INITIATED)),
         terminated=Count("id", filter=Q(status=SurveyAttempt.Status.TERMINATED)),
+        survey_terminated=Count("id", filter=survey_termination_filter),
         quota=Count("id", filter=Q(status=SurveyAttempt.Status.OVER_QUOTA)),
         security=Count("id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)),
         active_users=Count("platform_user_id", distinct=True),
@@ -193,10 +197,13 @@ def build_dashboard_payload(queryset, user, card_access, chart_access):
         tablet=Count("id", filter=completed_filter & (Q(entry_device__icontains="tablet") | Q(entry_device__iexact="tab"))),
     )
     conversion = round(totals["completes"] / totals["hits"] * 100, 2) if totals["hits"] else 0.0
+    ir_denominator = totals["completes"] + totals["survey_terminated"]
+    incidence_rate = round(totals["completes"] / ir_denominator * 100, 2) if ir_denominator else 0.0
     summary_values = {
         "hits": totals["hits"],
         "completes": totals["completes"],
         "conversion_rate": conversion,
+        "incidence_rate": incidence_rate,
         "active_users": totals["active_users"],
         "average_loi_seconds": round(totals["average_loi"] or 0),
         "revenue": _visible_revenue(user, totals["revenue"]),
@@ -221,6 +228,5 @@ def build_dashboard_payload(queryset, user, card_access, chart_access):
             "unclassified": max(0, totals["completes"] - completed_classified),
         } if chart_access.get("device") else None,
         "top_users": _top_users(queryset) if chart_access.get("top_users") else None,
-        "recent_activity": _recent_activity(queryset) if chart_access.get("recent") else None,
         "generated_at": timezone.now(),
     }

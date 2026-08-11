@@ -1,4 +1,5 @@
 import csv
+import os
 from datetime import datetime, time, timedelta
 from io import StringIO
 from unittest.mock import Mock, patch
@@ -166,6 +167,44 @@ class SurveySyncTests(TestCase):
             set(ClientIntegration.objects.filter(last_sync_status="queued").values_list("pk", flat=True)),
             {innovate.pk, rfg.pk},
         )
+
+
+    @patch("surveys.tasks.sync_client_integration_task.delay")
+    def test_hidden_biobrain_is_queued_only_after_its_api_key_exists(self, delay):
+        from .tasks import dispatch_due_integrations_task
+
+        client = Client.objects.create(
+            code="auto-biobrain", name="BioBrain", provider_code="biobrain", is_active=False
+        )
+        integration = ClientIntegration.objects.create(
+            client=client, name="BioBrain automatic", provider_code="biobrain",
+            base_url="https://partner-api.voqall.com/api/v1/surveys",
+            credential_env_key="TEST_BIOBRAIN_API_KEY", scheduled_sync_enabled=True,
+            sync_interval_seconds=60, last_sync_started_at=timezone.now() - timedelta(seconds=61),
+        )
+        with patch.dict(os.environ, {"TEST_BIOBRAIN_API_KEY": ""}):
+            self.assertNotIn(integration.pk, dispatch_due_integrations_task()["queued"])
+        with patch.dict(os.environ, {"TEST_BIOBRAIN_API_KEY": "bio-secret"}):
+            self.assertIn(integration.pk, dispatch_due_integrations_task()["queued"])
+
+    @patch("surveys.tasks.sync_surveys")
+    def test_successful_biobrain_inventory_publishes_hidden_client(self, sync_mock):
+        from types import SimpleNamespace
+        from .tasks import sync_client_integration_task
+
+        client = Client.objects.create(
+            code="publish-biobrain", name="BioBrain", provider_code="biobrain", is_active=False
+        )
+        integration = ClientIntegration.objects.create(
+            client=client, name="BioBrain publish", provider_code="biobrain",
+            base_url="https://partner-api.voqall.com/api/v1/surveys",
+            credential_env_key="TEST_BIOBRAIN_PUBLISH_KEY", scheduled_sync_enabled=True,
+        )
+        sync_mock.return_value = SimpleNamespace(created=1, updated=0, unchanged=0, closed=0)
+        with patch.dict(os.environ, {"TEST_BIOBRAIN_PUBLISH_KEY": "bio-secret"}):
+            sync_client_integration_task(integration.pk)
+        client.refresh_from_db()
+        self.assertTrue(client.is_active)
 
 
 class InnovateMRClientTests(TestCase):
@@ -754,6 +793,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(summary["over_quota"], 1)
         self.assertEqual(summary["security_terminated"], 1)
         self.assertEqual(summary["conversion_rate"], 50.0)
+        self.assertEqual(summary["incidence_rate"], 100.0)
         self.assertEqual(summary["completed_devices"], {"desktop": 1, "mobile": 1, "tablet": 1, "unclassified": 0})
 
     def test_filtered_csv_contains_full_backend_record_not_only_ui_columns(self):
@@ -1090,6 +1130,7 @@ class TerminationReasonPageTests(TestCase):
             response, "Selected threat potential score at joblevel does not allow the survey"
         )
         self.assertNotContains(response, "TqU3aQwdQTeKvf3U5r2DPSE")
+        self.assertNotContains(response, "Platform status")
         lookup.assert_not_called()
 
     def test_admin_role_has_page_by_default_and_employee_is_forbidden(self):
@@ -1273,6 +1314,8 @@ class UserHitsTests(TestCase):
         self.assertContains(page, "Idle Employee")
         self.assertContains(page, 'aria-label="Search users"')
         self.assertContains(page, 'aria-label="Search branches"')
+        self.assertContains(page, 'id="hitIncidenceRate"')
+        self.assertContains(page, 'id="hitCompleteDesktop"')
 
         response = self.api.get(reverse("user-hits-api"), {
             "user": self.kanik.pk,
@@ -1291,6 +1334,7 @@ class UserHitsTests(TestCase):
             "total": 1, "desktop": 1, "mobile": 0, "tablet": 0, "unclassified": 0,
         })
         self.assertEqual(response.data["summary"]["conversion_rate"], 50.0)
+        self.assertEqual(response.data["summary"]["incidence_rate"], 50.0)
 
     def test_time_filters_narrow_ist_date_boundaries(self):
         response = self.api.get(reverse("user-hits-api"), {
@@ -1384,7 +1428,7 @@ class DashboardAnalyticsTests(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(self.owner)
 
-    def test_dashboard_page_has_animated_widgets_and_permission_aware_filters(self):
+    def test_dashboard_page_has_animated_widgets_without_filters_or_activity_feed(self):
         self.client.force_login(self.owner)
         page = self.client.get(reverse("dashboard"))
 
@@ -1392,8 +1436,9 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(page, "Performance dashboard")
         self.assertContains(page, 'id="performanceChart"')
         self.assertContains(page, 'id="clientShareChart"')
-        self.assertContains(page, 'data-dashboard-filter="branch"')
-        self.assertContains(page, 'aria-label="Search clients"')
+        self.assertNotContains(page, 'data-dashboard-filter="branch"')
+        self.assertNotContains(page, "Recent activity")
+        self.assertContains(page, 'id="dashboardIR"')
         self.assertContains(page, "Hit-time CPI snapshots")
 
     def test_dashboard_api_returns_overall_kpis_client_share_and_time_series(self):
@@ -1403,6 +1448,7 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["summary"]["hits"], 2)
         self.assertEqual(response.data["summary"]["completes"], 1)
         self.assertEqual(response.data["summary"]["conversion_rate"], 50.0)
+        self.assertEqual(response.data["summary"]["incidence_rate"], 50.0)
         self.assertEqual(response.data["summary"]["active_users"], 2)
         self.assertEqual(response.data["summary"]["average_loi_seconds"], 90)
         self.assertEqual(str(response.data["summary"]["revenue"]), "4.00")
@@ -1414,13 +1460,13 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(len(response.data["performance"]["monthly"]), 6)
         self.assertEqual(sum(point["hits"] for point in response.data["performance"]["daily"]), 2)
         self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
-        self.assertEqual(len(response.data["recent_activity"]), 2)
+        self.assertNotIn("recent_activity", response.data)
 
-    def test_dashboard_filters_and_employee_visibility_are_enforced(self):
+    def test_dashboard_is_unfiltered_and_employee_visibility_is_enforced(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})
         self.assertEqual(filtered.status_code, 200)
-        self.assertEqual(filtered.data["summary"]["hits"], 1)
-        self.assertEqual(filtered.data["summary"]["completes"], 0)
+        self.assertEqual(filtered.data["summary"]["hits"], 2)
+        self.assertEqual(filtered.data["summary"]["completes"], 1)
 
         scoped = APIClient()
         scoped.force_authenticate(self.employee)
@@ -1430,8 +1476,8 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(own.data["summary"]["completes"], 1)
         self.assertIsNone(own.data["summary"]["revenue"])
         self.assertIsNone(own.data["top_users"])
-        self.assertEqual(own.data["recent_activity"][0]["rid"], self.complete.rid)
-        self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 403)
+        self.assertNotIn("recent_activity", own.data)
+        self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 200)
 
     def test_individual_card_permission_hides_only_that_metric(self):
         UserFunctionOverride.objects.create(
@@ -1447,3 +1493,13 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.data["summary"]["hits"])
         self.assertEqual(response.data["summary"]["completes"], 1)
+
+    def test_local_prescreener_termination_is_excluded_from_ir(self):
+        SurveyAttempt.objects.create(
+            rid="LocalPr3Sc", survey=self.survey_a, platform_user=self.employee,
+            user_id=str(self.employee.pk), status=SurveyAttempt.Status.TERMINATED,
+            status_source="local_prescreener",
+        )
+        response = self.api.get(reverse("dashboard-api"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["incidence_rate"], 50.0)

@@ -1,6 +1,6 @@
 # Synchronization runbook
 
-Client integrations are isolated by `(integration, source_key)`. Beat checks due integrations every 30 seconds. Active InnovateMR integrations synchronize every 150 seconds; verified active Research For Good integrations synchronize every 60 seconds. Other providers continue to use their configured scheduled interval. The Projects page silently reloads normalized database inventory every 30 seconds, so users do not need to press Sync to see background updates. See [client integrations](client-integrations.md).
+Client integrations are isolated by `(integration, source_key)`. Beat checks due integrations every 30 seconds. Active InnovateMR integrations synchronize every 150 seconds; verified active Research For Good integrations synchronize every 60 seconds. Hidden BioBrain integrations are skipped until their deployment has `BIOBRAIN_API_KEY`; after the first non-empty successful sync they become active and visible. Other providers continue to use their configured scheduled interval. The Projects page silently reloads normalized database inventory every 30 seconds, so users do not need to press Sync to see background updates. See [client integrations](client-integrations.md).
 
 ## Upstream endpoints
 

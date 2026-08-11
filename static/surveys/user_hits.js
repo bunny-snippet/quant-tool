@@ -9,6 +9,8 @@
     first: byId('hitFirstPage'), prev: byId('hitPrevPage'), next: byId('hitNextPage'), last: byId('hitLastPage'),
     totalHits: byId('totalHitCount'), totalCompletes: byId('totalCompleteCount'), conversion: byId('conversionRate'),
     activeUsers: byId('activeUserCount'), dayCount: byId('hitDayCount'),
+    incidenceRate: byId('hitIncidenceRate'), completeDesktop: byId('hitCompleteDesktop'),
+    completeMobile: byId('hitCompleteMobile'), completeTablet: byId('hitCompleteTablet'),
     branchFilters: document.querySelector('[data-hit-filter="branch"]'),
     subBranchFilters: document.querySelector('[data-hit-filter="sub_branch"]'),
     shiftFilters: document.querySelector('[data-hit-filter="shift"]'),
@@ -155,6 +157,10 @@
     if (elements.totalCompletes) elements.totalCompletes.textContent = number(summary.completes.total);
     if (elements.conversion) elements.conversion.textContent = `${Number(summary.conversion_rate || 0).toLocaleString('en-IN')}%`;
     if (elements.activeUsers) elements.activeUsers.textContent = number(summary.active_users);
+    if (elements.incidenceRate) elements.incidenceRate.textContent = `${Number(summary.incidence_rate || 0).toLocaleString('en-IN')}%`;
+    if (elements.completeDesktop) elements.completeDesktop.textContent = number(summary.completes.desktop);
+    if (elements.completeMobile) elements.completeMobile.textContent = number(summary.completes.mobile);
+    if (elements.completeTablet) elements.completeTablet.textContent = number(summary.completes.tablet);
     if (elements.dayCount) elements.dayCount.textContent = `${number(summary.days)} selected ${Number(summary.days) === 1 ? 'day' : 'days'}`;
   }
 

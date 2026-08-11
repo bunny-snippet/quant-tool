@@ -17,6 +17,8 @@
   {% if 'completes' in hit_cards %}<article><span class="overview-icon completes" aria-hidden="true">✓</span><div><small>Completes</small><strong id="totalCompleteCount">—</strong><em>Successful survey outcomes</em></div></article>{% endif %}
   {% if 'conversion' in hit_cards %}<article><span class="overview-icon conversion" aria-hidden="true">%</span><div><small>Conversion</small><strong id="conversionRate">—</strong><em>Completes divided by hits</em></div></article>{% endif %}
   {% if 'active_users' in hit_cards %}<article><span class="overview-icon users" aria-hidden="true">◎</span><div><small>Active users</small><strong id="activeUserCount">—</strong><em>Users matching filters</em></div></article>{% endif %}
+  {% if 'ir' in hit_cards %}<article class="hit-ir-card"><span class="overview-icon ir" aria-hidden="true">IR</span><div><small>Incidence rate</small><strong id="hitIncidenceRate">—</strong><em>Actual survey outcomes only</em></div></article>{% endif %}
+  {% if 'devices' in hit_cards %}<article class="hit-devices-card"><span class="overview-icon devices" aria-hidden="true">▣</span><div><small>Completed devices</small><strong class="hit-device-values"><b>D <i id="hitCompleteDesktop">—</i></b><b>M <i id="hitCompleteMobile">—</i></b><b>T <i id="hitCompleteTablet">—</i></b></strong><em>Desktop · Mobile · Tablet</em></div></article>{% endif %}
 </section>{% endif %}
 
 <section class="filter-panel user-hits-filters" aria-label="User hit filters">
@@ -94,4 +96,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/user_hits.js' %}?v=8" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/user_hits.js' %}?v=9" defer></script>{% endblock %}

@@ -96,25 +96,6 @@
   </form>
 </section>{% endif %}
 
-{% if can_view_integrations %}<section class="organization-modal integration-modal" id="integrationModal" role="dialog" aria-modal="true" aria-labelledby="integrationModalTitle" hidden>
-  <form id="integrationForm">
-    <header><div><p class="eyebrow">Secure upstream connection</p><h2 id="integrationModalTitle">Add integration</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
-    <div class="organization-modal-body">
-      <div class="integration-client-banner"><span>Client</span><strong data-integration-client>—</strong><em data-integration-status>Draft</em></div>
-      <div class="organization-form-grid">
-        <label><span>Connection name</span><input name="name" maxlength="120" placeholder="RFG Live Alert" required></label><label><span>Provider</span><select name="provider_code" required></select></label>
-        <label class="wide"><span>API base URL</span><input name="base_url" type="url" maxlength="500" required></label>
-        <label><span>APID environment variable</span><input name="apid_env" maxlength="120" placeholder="RFG_APID" pattern="[A-Za-z_][A-Za-z0-9_]*" required><small>Name only—never paste the APID here.</small></label>
-        <label><span>Secret environment variable</span><input name="secret_env" maxlength="120" placeholder="RFG_SECRET" pattern="[A-Za-z_][A-Za-z0-9_]*" required><small>Name only—secret stays on the server.</small></label>
-        <label><span>Sync interval (seconds)</span><input name="sync_interval_seconds" type="number" min="60" step="30" value="60" required></label><label><span>Country (optional)</span><input name="country" maxlength="2" placeholder="US"></label>
-      </div>
-      <div class="integration-toggles"><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active integration</span><small>Disabling stops all provider activity.</small></label><label class="organization-toggle"><input name="scheduled_sync_enabled" type="checkbox"><span>Automatic sync</span><small>Enabled automatically after a successful connection test.</small></label><label class="organization-toggle"><input name="enforce_local_targeting" type="checkbox" checked><span>Strict local targeting</span><small>Turn off to let RFG make the final eligibility decision.</small></label></div>
-      <div class="integration-actions" data-integration-actions hidden><button type="button" data-test-integration>Test connection</button><button type="button" data-preview-integration>Preview inventory</button><button type="button" data-sync-integration>Sync now</button></div>
-      <div class="integration-preview" data-integration-preview hidden></div><div class="organization-error" data-integration-error hidden></div>
-    </div>
-    <footer><button class="organization-secondary" type="button" data-close-organization-modal>{% if can_manage_integrations %}Cancel{% else %}Close{% endif %}</button>{% if can_manage_integrations %}<button class="primary-button" type="submit"><span data-integration-submit>Save integration</span></button>{% endif %}</footer>
-  </form>
-</section>{% endif %}
 <div class="organization-toast" data-organization-toast aria-live="polite"></div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=7" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=8" defer></script>{% endblock %}

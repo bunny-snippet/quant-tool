@@ -445,7 +445,9 @@ class VendorDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
     destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a survey client"),
 )
 class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
-    queryset = Client.objects.select_related("created_by").prefetch_related("integrations").all()
+    queryset = Client.objects.select_related("created_by").prefetch_related("integrations").exclude(
+        is_active=False, provider_code__in=("biobrain", "voqall")
+    )
     serializer_class = ClientSerializer
     permission_classes = [HasFunctionPermission]
     view_permission = "clients.view"
@@ -467,7 +469,9 @@ class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate client integration metadata"),
 )
 class ClientIntegrationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
-    queryset = ClientIntegration.objects.select_related("client", "created_by").all()
+    queryset = ClientIntegration.objects.select_related("client", "created_by").exclude(
+        client__is_active=False, provider_code__in=("biobrain", "voqall")
+    )
     serializer_class = ClientIntegrationSerializer
     permission_classes = [HasFunctionPermission]
     view_permission = "clients.integration.view"
@@ -495,7 +499,13 @@ class ClientIntegrationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     def providers(self, request):
         from surveys.providers import provider_catalog
 
-        return Response(provider_catalog())
+        providers = provider_catalog()
+        biobrain_is_published = Client.objects.filter(
+            is_active=True, provider_code__in=("biobrain", "voqall")
+        ).exists()
+        if not biobrain_is_published:
+            providers = [item for item in providers if item.get("code") not in {"biobrain", "voqall"}]
+        return Response(providers)
 
     @action(detail=True, methods=["post"], url_path="test-connection")
     def test_connection(self, request, pk=None):

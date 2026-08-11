@@ -298,10 +298,10 @@ class RFGCallbackResponseSerializer(serializers.Serializer):
 
 class UserHitDeviceCountsSerializer(serializers.Serializer):
     total = serializers.IntegerField(min_value=0, allow_null=True)
-    desktop = serializers.IntegerField(min_value=0)
-    mobile = serializers.IntegerField(min_value=0)
-    tablet = serializers.IntegerField(min_value=0)
-    unclassified = serializers.IntegerField(min_value=0)
+    desktop = serializers.IntegerField(min_value=0, allow_null=True)
+    mobile = serializers.IntegerField(min_value=0, allow_null=True)
+    tablet = serializers.IntegerField(min_value=0, allow_null=True)
+    unclassified = serializers.IntegerField(min_value=0, allow_null=True)
 
 
 class UserHitRowSerializer(serializers.Serializer):
@@ -323,6 +323,7 @@ class UserHitSummarySerializer(serializers.Serializer):
     active_users = serializers.IntegerField(min_value=0, allow_null=True)
     days = serializers.IntegerField(min_value=0)
     conversion_rate = serializers.FloatField(min_value=0, allow_null=True)
+    incidence_rate = serializers.FloatField(min_value=0, allow_null=True)
 
 
 class UserHitsResponseSerializer(serializers.Serializer):
@@ -337,6 +338,7 @@ class DashboardSummarySerializer(serializers.Serializer):
     hits = serializers.IntegerField(min_value=0, allow_null=True)
     completes = serializers.IntegerField(min_value=0, allow_null=True)
     conversion_rate = serializers.FloatField(min_value=0, allow_null=True)
+    incidence_rate = serializers.FloatField(min_value=0, allow_null=True)
     active_users = serializers.IntegerField(min_value=0, allow_null=True)
     average_loi_seconds = serializers.IntegerField(min_value=0, allow_null=True)
     revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
@@ -402,7 +404,6 @@ class DashboardResponseSerializer(serializers.Serializer):
     status_breakdown = DashboardStatusBreakdownSerializer(allow_null=True)
     device_breakdown = DashboardDeviceBreakdownSerializer(allow_null=True)
     top_users = DashboardTopUserSerializer(many=True, allow_null=True)
-    recent_activity = DashboardRecentActivitySerializer(many=True, allow_null=True)
     generated_at = serializers.DateTimeField()
 
 
@@ -493,6 +494,7 @@ class SurveyAttemptSummarySerializer(serializers.Serializer):
     over_quota = serializers.IntegerField(allow_null=True)
     security_terminated = serializers.IntegerField(allow_null=True)
     conversion_rate = serializers.FloatField(allow_null=True)
+    incidence_rate = serializers.FloatField(allow_null=True)
     total_revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     revenue_currency = serializers.CharField(allow_null=True)
     completed_devices = SurveyAttemptCompletedDeviceSummarySerializer()
