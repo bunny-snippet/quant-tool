@@ -397,4 +397,4 @@ class DelegatedVendorTests(TestCase):
             "allow_codes": ["users.create"], "deny_codes": [],
         }, format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("external vendors cannot receive", str(response.data).lower())
+        self.assertIn("external suppliers cannot receive", str(response.data).lower())

@@ -80,7 +80,7 @@ class OrganizationOwnerOptionSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
     username = serializers.CharField()
-    type = serializers.ChoiceField(choices=[("owner", "Main office"), ("internal_vendor", "Internal vendor")])
+    type = serializers.ChoiceField(choices=[("owner", "Main office"), ("internal_vendor", "Internal supplier")])
 
 
 class OrganizationManagementOptionsSerializer(serializers.Serializer):
@@ -449,12 +449,12 @@ class VendorCommercialProfileSerializer(serializers.ModelSerializer):
             EmployeeProfile.AccountType.INTERNAL_VENDOR,
             EmployeeProfile.AccountType.EXTERNAL_VENDOR,
         }:
-            raise serializers.ValidationError({"vendor": "Select an internal or external vendor account."})
+            raise serializers.ValidationError({"vendor": "Select an internal or external supplier account."})
         if profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut != Decimal("0.00"):
-            raise serializers.ValidationError({"default_cpi_cut_percent": "Internal vendor cut must be zero."})
+            raise serializers.ValidationError({"default_cpi_cut_percent": "Internal supplier cut must be zero."})
         delivery_mode = attrs.get("delivery_mode", getattr(self.instance, "delivery_mode", VendorCommercialProfile.DeliveryMode.PANEL))
         if profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and delivery_mode != VendorCommercialProfile.DeliveryMode.PANEL:
-            raise serializers.ValidationError({"delivery_mode": "Internal vendors use panel-only delivery."})
+            raise serializers.ValidationError({"delivery_mode": "Internal suppliers use panel-only delivery."})
         return attrs
 
 
@@ -483,10 +483,10 @@ class VendorAPIKeySerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         vendor = attrs.get("vendor", getattr(self.instance, "vendor", None))
         if self.instance and "vendor" in attrs and attrs["vendor"] != self.instance.vendor:
-            raise serializers.ValidationError({"vendor": "An issued API key cannot be transferred to another vendor."})
+            raise serializers.ValidationError({"vendor": "An issued API key cannot be transferred to another supplier."})
         profile = getattr(vendor, "employee_profile", None) if vendor else None
         if not profile or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
-            raise serializers.ValidationError({"vendor": "API keys can only be issued to external vendors."})
+            raise serializers.ValidationError({"vendor": "API keys can only be issued to external suppliers."})
         commercial = getattr(vendor, "vendor_commercial_profile", None)
         if not commercial or not commercial.is_active or not commercial.api_access_enabled:
             raise serializers.ValidationError({"vendor": "Enable API or Panel + API delivery before issuing a key."})
@@ -542,9 +542,9 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
             EmployeeProfile.AccountType.INTERNAL_VENDOR,
             EmployeeProfile.AccountType.EXTERNAL_VENDOR,
         }:
-            raise serializers.ValidationError({"vendor": "Select an internal or external vendor account."})
+            raise serializers.ValidationError({"vendor": "Select an internal or external supplier account."})
         if profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut not in {None, Decimal("0.00")}:
-            raise serializers.ValidationError({"cpi_cut_override_percent": "Internal vendor cut must be zero."})
+            raise serializers.ValidationError({"cpi_cut_override_percent": "Internal supplier cut must be zero."})
         instance = self.instance
         used = (instance.consumed_quantity + instance.reserved_quantity) if instance else 0
         if quantity_limit < used:
@@ -596,7 +596,7 @@ class VendorSurveyAllocationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"survey": "Survey must belong to the parent allocation's client."})
         account_type = getattr(getattr(parent.vendor, "employee_profile", None), "account_type", "") if parent else ""
         if account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut not in {None, Decimal("0.00")}:
-            raise serializers.ValidationError({"cpi_cut_override_percent": "Internal vendor cut must be zero."})
+            raise serializers.ValidationError({"cpi_cut_override_percent": "Internal supplier cut must be zero."})
         instance = self.instance
         used = (instance.consumed_quantity + instance.reserved_quantity) if instance else 0
         if quantity_limit < used:

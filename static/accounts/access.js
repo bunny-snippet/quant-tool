@@ -33,12 +33,12 @@
     const type = userForm.elements.account_type.value;
     const role = userForm.elements.role;
     const note = $('[data-role-note]', userModal);
-    const forcedRole = type === 'internal_vendor' ? ['admin', 'Admin'] : type === 'external_vendor' ? ['external-vendor', 'External Vendor'] : null;
+    const forcedRole = type === 'internal_vendor' ? ['admin', 'Admin'] : type === 'external_vendor' ? ['external-vendor', 'External Supplier'] : null;
     if (forcedRole) {
       ensureRoleOption(...forcedRole);
       role.value = forcedRole[0];
       role.disabled = true;
-      note.textContent = type === 'internal_vendor' ? 'Admin is assigned automatically.' : 'Safe External Vendor defaults are assigned automatically.';
+      note.textContent = type === 'internal_vendor' ? 'Admin is assigned automatically.' : 'Safe External Supplier defaults are assigned automatically.';
     } else {
       role.disabled = false;
       note.textContent = 'Choose a role for this respondent.';

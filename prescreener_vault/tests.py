@@ -105,6 +105,23 @@ class PrescreenerVaultFlowTests(TestCase):
         self.assertNotEqual(first.prescreener_uid, second.prescreener_uid)
         self.assertEqual(PrescreenerSubmission.objects.using(DATABASE_ALIAS).count(), 2)
 
+    def test_admin_can_filter_and_expand_prescreened_data_page(self):
+        attempt = self._attempt()
+        self.assertEqual(self._submit(attempt, age="24", gender="1").status_code, 302)
+        admin = get_user_model().objects.create_superuser(
+            username="vault-admin", email="vault-admin@example.test", password="test-password"
+        )
+        self.client.force_login(admin)
+        response = self.client.get(reverse("prescreened-data"), {
+            "country": "US", "age_group": "18-24", "gender": "male",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Prescreened Data")
+        self.assertContains(response, attempt.rid)
+        self.assertContains(response, "What is your age?")
+        self.assertContains(response, "Male")
+        self.assertContains(response, "All countries")
+
     def test_vault_failure_does_not_redirect_or_lose_the_retry(self):
         attempt = self._attempt()
         with patch(

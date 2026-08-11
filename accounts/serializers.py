@@ -169,13 +169,13 @@ class UserAccessSerializer(serializers.ModelSerializer):
         forbidden_allows = sorted(set(attrs.get("allow_codes", [])) & EXTERNAL_VENDOR_FORBIDDEN_CODES)
         if requested_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR and forbidden_allows:
             raise serializers.ValidationError({
-                "allow_codes": f"External vendors cannot receive management functions: {', '.join(forbidden_allows)}"
+                "allow_codes": f"External suppliers cannot receive management functions: {', '.join(forbidden_allows)}"
             })
         if requested_type in {
             EmployeeProfile.AccountType.INTERNAL_VENDOR,
             EmployeeProfile.AccountType.EXTERNAL_VENDOR,
         } and organization_unit:
-            raise serializers.ValidationError({"organization_unit": "Vendor accounts are workspace roots and cannot belong to a shift."})
+            raise serializers.ValidationError({"organization_unit": "Supplier accounts are workspace roots and cannot belong to a shift."})
         if organization_unit:
             from vendors.access import organization_workspace_owner_ids
             if organization_unit.workspace_owner_id not in organization_workspace_owner_ids(request.user):
@@ -194,17 +194,17 @@ class UserAccessSerializer(serializers.ModelSerializer):
         creator_profile = getattr(request.user, "employee_profile", None)
         creator_type = getattr(creator_profile, "account_type", EmployeeProfile.AccountType.EMPLOYEE)
         if creator_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
-            raise serializers.ValidationError("External vendors cannot create subordinate accounts.")
+            raise serializers.ValidationError("External suppliers cannot create subordinate accounts.")
         if creator_type == EmployeeProfile.AccountType.INTERNAL_VENDOR:
             if not has_function_access(request.user, "respondents.create"):
-                raise serializers.ValidationError("This internal vendor cannot create respondents.")
+                raise serializers.ValidationError("This internal supplier cannot create respondents.")
             if requested_type != EmployeeProfile.AccountType.EMPLOYEE:
-                raise serializers.ValidationError({"account_type": "Internal vendors can only create respondent employees."})
+                raise serializers.ValidationError({"account_type": "Internal suppliers can only create respondent employees."})
         elif requested_type in {
             EmployeeProfile.AccountType.INTERNAL_VENDOR,
             EmployeeProfile.AccountType.EXTERNAL_VENDOR,
         } and not has_function_access(request.user, "vendors.manage"):
-            raise serializers.ValidationError({"account_type": "Vendor accounts require Manage vendor policies access."})
+            raise serializers.ValidationError({"account_type": "Supplier accounts require Manage supplier policies access."})
         return attrs
 
     @staticmethod

@@ -11,6 +11,7 @@ from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
 from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
+from .outcomes import provider_outcome
 from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
 
@@ -424,16 +425,20 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     buyer_id = serializers.CharField(source="survey.buyer_id", read_only=True)
     vendor_name = serializers.SerializerMethodField()
+    supplier = serializers.IntegerField(source="vendor_id", read_only=True, allow_null=True)
+    supplier_name = serializers.SerializerMethodField()
     source_cpi_snapshot = serializers.SerializerMethodField()
+    termination_reason = serializers.SerializerMethodField()
+    termination_category = serializers.SerializerMethodField()
 
     class Meta:
         model = SurveyAttempt
         fields = [
             "rid", "prescreener_uid", "survey_local_id", "survey_source_id", "survey_name", "company_name", "country", "country_code",
-            "language_code", "platform_user", "user_id", "user_name", "username", "user_email", "vendor",
-            "vendor_name", "client", "client_name", "client_allocation", "survey_allocation", "supplier_code",
+            "language_code", "platform_user", "user_id", "user_name", "username", "user_email", "supplier",
+            "supplier_name", "vendor", "vendor_name", "client", "client_name", "client_allocation", "survey_allocation", "supplier_code",
             "buyer_id", "source_cpi_snapshot", "cpi_snapshot_source", "cpi_cut_percent_snapshot", "payable_cpi_snapshot", "cpi_currency_snapshot",
-            "status_label",
+            "status_label", "termination_reason", "termination_category",
             "status", "initiated_at", "submitted_at", "redirected_at", "callback_at", "last_callback_at",
             "loi_seconds", "entry_ip", "exit_ip", "initiation_ip", "callback_ip", "entry_user_agent",
             "exit_user_agent", "entry_browser", "exit_browser", "entry_device", "exit_device", "entry_os",
@@ -459,6 +464,9 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
             return None
         return obj.vendor.get_full_name() or obj.vendor.username
 
+    def get_supplier_name(self, obj) -> str | None:
+        return self.get_vendor_name(obj)
+
     @extend_schema_field(serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True))
     def get_source_cpi_snapshot(self, obj):
         request = self.context.get("request")
@@ -477,6 +485,24 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
         if obj.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}:
             return "Initiated"
         return obj.get_status_display()
+
+    def get_termination_reason(self, obj) -> str:
+        if obj.status not in {
+            SurveyAttempt.Status.TERMINATED,
+            SurveyAttempt.Status.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED,
+        }:
+            return ""
+        return provider_outcome(obj).get("reason", "")
+
+    def get_termination_category(self, obj) -> str:
+        if obj.status not in {
+            SurveyAttempt.Status.TERMINATED,
+            SurveyAttempt.Status.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED,
+        }:
+            return ""
+        return provider_outcome(obj).get("category", "")
 
 
 class SurveyAttemptCompletedDeviceSummarySerializer(serializers.Serializer):

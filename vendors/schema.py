@@ -10,5 +10,5 @@ class VendorAPIKeyAuthenticationScheme(OpenApiAuthenticationExtension):
             "type": "apiKey",
             "in": "header",
             "name": "X-API-Key",
-            "description": "External-vendor API key. The authenticated vendor's permissions, client grants, survey rules and CPI cuts are applied automatically.",
+            "description": "External-supplier API key. The authenticated supplier's permissions, client grants, survey rules and CPI cuts are applied automatically.",
         }

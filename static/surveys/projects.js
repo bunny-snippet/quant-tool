@@ -298,8 +298,8 @@
     const percent = Math.min(100, Number(survey.progress_percent || 0));
     const cells = [];
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    const studyUrl = `/studies/?internal_id=${encodeURIComponent(survey.local_id)}`;
-    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${canOpenProjectStudies ? `<a class="id-link project-study-link" href="${studyUrl}" title="View this project's studies">${escapeHtml(survey.local_id)}</a>` : `<strong class="id-link">${escapeHtml(survey.local_id)}</strong>`}<small>${escapeHtml(clientName)}</small></div></td>`);
+    const studyUrl = `/traffic-reports/?internal_id=${encodeURIComponent(survey.local_id)}`;
+    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${canOpenProjectStudies ? `<a class="id-link project-study-link" href="${studyUrl}" title="View this project's traffic reports">${escapeHtml(survey.local_id)}</a>` : `<strong class="id-link">${escapeHtml(survey.local_id)}</strong>`}<small>${escapeHtml(clientName)}</small></div></td>`);
     if (projectColumns.has('survey')) cells.push(`<td><div class="survey-name"><strong>${escapeHtml(survey.source_id ?? '—')}</strong><span>${survey.buyer_id ? `Buyer ${escapeHtml(survey.buyer_id)}` : 'Buyer ID unavailable'}</span></div></td>`);
     if (projectColumns.has('market')) cells.push(`<td><span class="market-pill">${escapeHtml(survey.country_code || '—')} <i>${escapeHtml(survey.language_code || '')}</i></span><small class="country-name">${escapeHtml(survey.country || '')}</small></td>`);
     if (projectColumns.has('completes')) cells.push(`<td><div class="complete-value"><strong>${survey.completes.toLocaleString()} / ${survey.sample_size.toLocaleString()}</strong><span><i style="width:${percent}%"></i></span></div></td>`);
@@ -314,7 +314,7 @@
   function cardTemplate(survey) {
     if (!projectColumns.size) return '<article class="survey-card"><div class="column-denied">No project columns are assigned to your account.</div></article>';
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    const studyUrl = `/studies/?internal_id=${encodeURIComponent(survey.local_id)}`;
+    const studyUrl = `/traffic-reports/?internal_id=${encodeURIComponent(survey.local_id)}`;
     const top = `${projectColumns.has('project_id') ? `${canOpenProjectStudies ? `<a class="id-link project-study-link" href="${studyUrl}">${escapeHtml(survey.local_id)}</a>` : `<strong class="id-link">${escapeHtml(survey.local_id)}</strong>`}<small class="project-card-client">${escapeHtml(clientName)}</small>` : ''}${projectColumns.has('modified') ? `<span class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</span>` : ''}`;
     const metrics = [];
     if (projectColumns.has('market')) metrics.push(`<span><small>Market</small><b>${escapeHtml(survey.country_code || '—')} ${escapeHtml(survey.language_code || '')}</b></span>`);

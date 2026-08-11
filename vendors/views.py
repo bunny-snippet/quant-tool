@@ -333,8 +333,8 @@ class VendorManagementOptionsView(APIView):
     )
 
     @extend_schema(
-        tags=["Vendors & allocations"],
-        summary="List safe vendor-management selector options",
+        tags=["Suppliers & allocations"],
+        summary="List safe supplier-management selector options",
         description="Returns non-secret active vendor and client labels for allocation modals, scoped to the current vendor hierarchy when applicable.",
         responses={200: VendorManagementOptionsSerializer},
     )
@@ -406,8 +406,8 @@ class PermissionByActionMixin(VendorScopedQuerysetMixin):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List internal and external vendor accounts"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a vendor account and commercial summary"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List internal and external supplier accounts"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a supplier account and commercial summary"),
 )
 class VendorDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = VendorDirectorySerializer
@@ -437,12 +437,12 @@ class VendorDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List survey clients"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Create a survey client"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a survey client"),
-    update=extend_schema(tags=["Vendors & allocations"], summary="Replace a survey client"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a survey client"),
-    destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a survey client"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List survey clients"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Create a survey client"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a survey client"),
+    update=extend_schema(tags=["Suppliers & allocations"], summary="Replace a survey client"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a survey client"),
+    destroy=extend_schema(tags=["Suppliers & allocations"], summary="Deactivate a survey client"),
 )
 class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     queryset = Client.objects.select_related("created_by").prefetch_related("integrations").exclude(
@@ -461,12 +461,12 @@ class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List non-secret client integration metadata"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Create client integration metadata"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get client integration metadata"),
-    update=extend_schema(tags=["Vendors & allocations"], summary="Replace client integration metadata"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update client integration metadata"),
-    destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate client integration metadata"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List non-secret client integration metadata"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Create client integration metadata"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get client integration metadata"),
+    update=extend_schema(tags=["Suppliers & allocations"], summary="Replace client integration metadata"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update client integration metadata"),
+    destroy=extend_schema(tags=["Suppliers & allocations"], summary="Deactivate client integration metadata"),
 )
 class ClientIntegrationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     queryset = ClientIntegration.objects.select_related("client", "created_by").exclude(
@@ -571,12 +571,12 @@ class ClientIntegrationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List vendor CPI policies"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Create a vendor CPI policy"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a vendor CPI policy"),
-    update=extend_schema(tags=["Vendors & allocations"], summary="Replace a vendor CPI policy"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a vendor CPI policy"),
-    destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a vendor CPI policy"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier CPI policies"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Create a supplier CPI policy"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a supplier CPI policy"),
+    update=extend_schema(tags=["Suppliers & allocations"], summary="Replace a supplier CPI policy"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a supplier CPI policy"),
+    destroy=extend_schema(tags=["Suppliers & allocations"], summary="Deactivate a supplier CPI policy"),
 )
 class VendorCommercialProfileViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     queryset = VendorCommercialProfile.objects.select_related(
@@ -593,16 +593,16 @@ class VendorCommercialProfileViewSet(PermissionByActionMixin, viewsets.ModelView
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List external-vendor API keys (masked)"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List external-supplier API keys (masked)"),
     create=extend_schema(
-        tags=["Vendors & allocations"],
-        summary="Issue an external-vendor API key",
+        tags=["Suppliers & allocations"],
+        summary="Issue an external-supplier API key",
         description="Returns the plaintext api_key once. Store it securely; later responses contain only the masked identifier.",
     ),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get masked API-key metadata"),
-    update=extend_schema(tags=["Vendors & allocations"], summary="Replace API-key label or expiration"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update API-key label or expiration"),
-    destroy=extend_schema(tags=["Vendors & allocations"], summary="Revoke an external-vendor API key"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get masked API-key metadata"),
+    update=extend_schema(tags=["Suppliers & allocations"], summary="Replace API-key label or expiration"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update API-key label or expiration"),
+    destroy=extend_schema(tags=["Suppliers & allocations"], summary="Revoke an external-supplier API key"),
 )
 class VendorAPIKeyViewSet(viewsets.ModelViewSet):
     queryset = VendorAPIKey.objects.select_related(
@@ -629,22 +629,22 @@ class VendorAPIKeyViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         if vendor_scope_user_id(request.user):
-            raise PermissionDenied("Only the owner workspace can issue vendor API keys.")
+            raise PermissionDenied("Only the owner workspace can issue supplier API keys.")
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         if vendor_scope_user_id(self.request.user):
-            raise PermissionDenied("Only the owner workspace can issue vendor API keys.")
+            raise PermissionDenied("Only the owner workspace can issue supplier API keys.")
         serializer.save()
 
     def perform_update(self, serializer):
         if vendor_scope_user_id(self.request.user):
-            raise PermissionDenied("Only the owner workspace can change vendor API keys.")
+            raise PermissionDenied("Only the owner workspace can change supplier API keys.")
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         if vendor_scope_user_id(request.user):
-            raise PermissionDenied("Only the owner workspace can revoke vendor API keys.")
+            raise PermissionDenied("Only the owner workspace can revoke supplier API keys.")
         instance = self.get_object()
         if instance.is_active:
             instance.is_active = False
@@ -654,12 +654,12 @@ class VendorAPIKeyViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List vendor client grants and quantities"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Allocate a client and quantity to a vendor"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a vendor client allocation"),
-    update=extend_schema(tags=["Vendors & allocations"], summary="Replace a vendor client allocation"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a vendor client allocation"),
-    destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a vendor client allocation"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier client grants and quantities"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Allocate a client and quantity to a supplier"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a supplier client allocation"),
+    update=extend_schema(tags=["Suppliers & allocations"], summary="Replace a supplier client allocation"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a supplier client allocation"),
+    destroy=extend_schema(tags=["Suppliers & allocations"], summary="Deactivate a supplier client allocation"),
 )
 class VendorClientAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     queryset = VendorClientAllocation.objects.select_related(
@@ -678,7 +678,7 @@ class VendorClientAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List vendor project allocations and complete caps"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier project allocations and complete caps"),
     create=extend_schema(tags=["Vendors & allocations"], summary="Allocate a visible project with a complete cap"),
     retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a project allocation"),
     update=extend_schema(tags=["Vendors & allocations"], summary="Replace a project allocation"),
@@ -706,8 +706,8 @@ class VendorSurveyAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Vendors & allocations"], summary="List allocation reservation audit records"),
-    retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get an allocation reservation audit record"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List allocation reservation audit records"),
+    retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get an allocation reservation audit record"),
 )
 class AllocationReservationViewSet(VendorScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = AllocationReservation.objects.select_related(

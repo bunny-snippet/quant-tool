@@ -7,7 +7,7 @@
 <div class="csrf-source" hidden>{% csrf_token %}</div>
 {{ external_vendor_forbidden_codes|json_script:"externalVendorForbiddenCodes" }}
 <section class="access-intro">
-  <div><p class="eyebrow">People, roles & permissions</p><h1>Access control</h1><p>Create internal or external vendors, build role defaults and add individual permission overrides without leaving this page.</p></div>
+  <div><p class="eyebrow">People, roles & permissions</p><h1>Access control</h1><p>Create internal or external suppliers, build role defaults and add individual permission overrides without leaving this page.</p></div>
   <div class="access-actions">
     {% if can_create_roles %}<button class="secondary-action" type="button" data-open-role>Create role</button>{% endif %}
     {% if can_create_users %}<button class="primary-button" type="button" data-open-user>{{ create_user_label }} <span>+</span></button>{% endif %}
@@ -36,11 +36,11 @@
 </section>
 
 <section class="access-panel employee-panel">
-  <div class="access-panel-head"><div><h2>Users & vendors</h2><p>Internal vendors may own respondent employees. External vendors are terminal accounts and cannot create subordinates.</p></div>{% if can_create_users %}<button type="button" class="text-action" data-open-user>{{ create_user_label }}</button>{% endif %}</div>
+  <div class="access-panel-head"><div><h2>Users & suppliers</h2><p>Internal suppliers may own respondent employees. External suppliers are terminal accounts and cannot create subordinates.</p></div>{% if can_create_users %}<button type="button" class="text-action" data-open-user>{{ create_user_label }}</button>{% endif %}</div>
   <div class="access-filter-grid user-filters">
     <label><span>Search users</span><input id="userSearchFilter" type="search" placeholder="Name, email or company…"></label>
     <label><span>Role</span><select id="userRoleFilter"><option value="">All roles</option>{% for role in roles %}<option value="{{ role.slug }}">{{ role.name }}</option>{% endfor %}</select></label>
-    <label><span>Account type</span><select id="userTypeFilter"><option value="">All types</option><option value="employee">Employee</option><option value="internal_vendor">Internal vendor</option><option value="external_vendor">External vendor</option></select></label>
+    <label><span>Account type</span><select id="userTypeFilter"><option value="">All types</option><option value="employee">Employee</option><option value="internal_vendor">Internal supplier</option><option value="external_vendor">External supplier</option></select></label>
     <label><span>Status</span><select id="userStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
     <button type="button" id="clearUserFilters">Clear</button>
   </div>
@@ -54,7 +54,7 @@
       <td><span class="account-status {% if not employee.is_active %}inactive{% endif %}"><i></i>{% if employee.is_active %}Active{% else %}Inactive{% endif %}</span></td>
       <td><div class="row-actions">{% if 'users.update' in access_codes %}<button type="button" data-edit-user="{{ employee.id }}">Edit</button>{% endif %}{% if 'users.delete' in access_codes and employee != request.user and not employee.is_superuser %}<button type="button" class="danger-link" data-delete-user="{{ employee.id }}" data-label="{{ employee.get_full_name|default:employee.username }}">Delete</button>{% endif %}</div></td>
     </tr>
-    {% empty %}<tr><td colspan="6" class="no-users">No subordinate users yet. Create your first vendor or employee.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="6" class="no-users">No subordinate users yet. Create your first supplier or employee.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 
@@ -68,7 +68,7 @@
         <label><span>Last name</span><input name="last_name" autocomplete="family-name"></label>
         <label class="wide"><span>Email / login</span><input name="email" type="email" required autocomplete="email"></label>
         <label class="wide"><span>Password</span><input name="password" type="password" minlength="8" autocomplete="new-password"><small data-password-note>Required for a new user, minimum 8 characters.</small></label>
-        <label><span>Account type</span><select name="account_type"><option value="employee">Employee / respondent</option>{% if not is_internal_vendor and can_create_vendor_accounts %}<option value="internal_vendor">Internal vendor</option><option value="external_vendor">External vendor</option>{% endif %}</select></label>
+        <label><span>Account type</span><select name="account_type"><option value="employee">Employee / respondent</option>{% if not is_internal_vendor and can_create_vendor_accounts %}<option value="internal_vendor">Internal supplier</option><option value="external_vendor">External supplier</option>{% endif %}</select></label>
         <label data-role-field><span>Default role</span><select name="role" required>{% for role in roles %}<option value="{{ role.slug }}">{{ role.name }}</option>{% endfor %}</select><small data-role-note>Role default can be customized.</small></label>
         <label class="wide" data-organization-field><span>Branch / Sub-branch / Shift</span><select name="organization_unit"><option value="">Unassigned legacy user</option>{% for unit in organization_units %}<option value="{{ unit.id }}" data-unit-type="{{ unit.unit_type }}">{{ unit.workspace_owner.get_full_name|default:unit.workspace_owner.username }} · {{ unit.path_label }} ({{ unit.get_unit_type_display }})</option>{% endfor %}</select><small>Employees and Team Leads should be assigned to a Shift.</small></label>
         <label class="toggle-row wide"><input name="is_active" type="checkbox" checked><span>Account is active</span></label>
@@ -86,7 +86,7 @@
   <header><div><p class="eyebrow">Default access set</p><h2 id="roleModalTitle">Create role</h2></div><button type="button" class="modal-close" data-close-modal aria-label="Close">×</button></header>
   <form id="roleForm">
     <div class="modal-body">
-      <div class="form-grid"><label><span>Role name</span><input name="name" required></label><label><span>Level / rank</span><input name="rank" type="number" min="1" max="999" value="10" required></label><label><span>Visible CPI percentage</span><input name="cpi_visibility_percent" type="number" min="0" max="100" step="0.01" value="100" required><small>Employee accounts on this role see this percentage of source CPI. Example: 70 shows CPI after a 30% reduction.</small></label><label class="wide"><span>Role code</span><input name="slug" required pattern="[a-z0-9-]+" placeholder="example-vendor"></label><label class="wide"><span>Description</span><textarea name="description" rows="3"></textarea></label><label class="toggle-row wide"><input name="is_active" type="checkbox" checked><span>Role is active</span></label></div>
+      <div class="form-grid"><label><span>Role name</span><input name="name" required></label><label><span>Level / rank</span><input name="rank" type="number" min="1" max="999" value="10" required></label><label><span>Visible CPI percentage</span><input name="cpi_visibility_percent" type="number" min="0" max="100" step="0.01" value="100" required><small>Employee accounts on this role see this percentage of source CPI. Example: 70 shows CPI after a 30% reduction.</small></label><label class="wide"><span>Role code</span><input name="slug" required pattern="[a-z0-9-]+" placeholder="example-supplier"></label><label class="wide"><span>Description</span><textarea name="description" rows="3"></textarea></label><label class="toggle-row wide"><input name="is_active" type="checkbox" checked><span>Role is active</span></label></div>
       <section class="permission-editor"><div><h3>Default functions</h3><p>Select a complete page group in one click, then uncheck only the functions this role should not receive.</p></div><div class="role-permission-grid">{% regroup functions by module as role_function_groups %}{% for group in role_function_groups %}<fieldset><legend>{{ group.grouper }}</legend><label class="permission-group-select"><input type="checkbox" data-permission-group-toggle><span><b>Select entire group</b><small>Toggle every function below</small></span></label>{% for function in group.list %}<label><input type="checkbox" name="permission_codes" value="{{ function.code }}"><span><b>{{ function.name }}</b><small>{{ function.code }}</small></span></label>{% endfor %}</fieldset>{% endfor %}</div></section>
       <div class="modal-error" data-role-error hidden></div>
     </div>
@@ -97,4 +97,4 @@
 <section class="confirm-modal" id="confirmModal" role="alertdialog" aria-modal="true" hidden><div class="confirm-icon">!</div><h2>Delete <span data-delete-type>item</span>?</h2><p><strong data-delete-label></strong> will be permanently removed.</p><div><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="button" class="danger-button" data-confirm-delete>Delete</button></div></section>
 <div class="access-toast" data-access-toast aria-live="polite"></div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'accounts/access.js' %}?v=6" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'accounts/access.js' %}?v=7" defer></script>{% endblock %}

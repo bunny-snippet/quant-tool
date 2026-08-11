@@ -1,13 +1,13 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
-{% block title %}Studies · Survey Workspace{% endblock %}
-{% block header_title %}Studies{% endblock %}
+{% block title %}Traffic Reports · Survey Workspace{% endblock %}
+{% block header_title %}Traffic Reports{% endblock %}
 {% block content %}
 {{ study_columns|json_script:"studyColumnAccess" }}
 <section class="page-intro studies-intro">
   <div>
     <p class="eyebrow">Respondent tracking</p>
-    <h1>Studies</h1>
+    <h1>Traffic Reports</h1>
     <p>Follow every survey journey from entry through its final callback.</p>
   </div>
   {% if can_export %}<button class="primary-button export-button" id="exportStudies" type="button"><span aria-hidden="true">↓</span> Export full CSV</button>{% endif %}
@@ -36,7 +36,7 @@
 
 {% if request.GET.internal_id and study_filters.project %}<div class="active-project-scope" id="studyProjectScope"><span>Project filter</span><strong>{{ request.GET.internal_id }}</strong><button type="button" id="clearProjectScope">×</button></div>{% endif %}
 
-<section class="filter-panel studies-filters" aria-label="Study filters">
+<section class="filter-panel studies-filters" aria-label="Traffic report filters">
   {% if study_filters.search %}<div class="field search-field">
     <label for="studySearch">Search</label>
     <div class="field-control"><span aria-hidden="true">⌕</span><input id="studySearch" type="search" placeholder="RID, survey, user, IP, browser…" autocomplete="off"></div>
@@ -159,7 +159,7 @@
   <div class="mobile-cards studies-cards" id="studyCards"></div>
   <div class="panel-foot">
     <span id="studyPageStatus">Page 1</span>
-    {% if can_paginate_studies %}<nav class="pagination" aria-label="Study pages">
+    {% if can_paginate_studies %}<nav class="pagination" aria-label="Traffic report pages">
       <button id="studyFirstPage" type="button" aria-label="First page">«</button><button id="studyPrevPage" type="button" aria-label="Previous page">‹</button>
       <label><span class="sr-only">Current page</span><input id="studyPageInput" type="number" min="1" value="1"></label>
       <span id="studyTotalPages">of 1</span>
@@ -168,4 +168,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=16" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=17" defer></script>{% endblock %}

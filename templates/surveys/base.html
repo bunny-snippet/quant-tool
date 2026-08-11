@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=31">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=32">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="page-{{ active_page|default:'workspace' }}">
@@ -28,22 +28,24 @@
           <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret">⌃</span>
         </a>
         {% if active_page == 'projects' %}<span class="nav-child"><i></i>All surveys</span>{% endif %}{% endif %}
-        {% if 'attempts.view' in access_codes %}<a class="nav-item {% if active_page == 'studies' %}active{% endif %}" href="{% url 'studies' %}">
-          <span class="nav-icon">◎</span><span>Studies</span>
+        {% if 'attempts.view' in access_codes %}<a class="nav-item {% if active_page == 'studies' %}active{% endif %}" href="{% url 'traffic-reports' %}">
+          <span class="nav-icon">◎</span><span>Traffic Reports</span>
         </a>{% endif %}
         {% if 'termination_reasons.view' in access_codes %}<a class="nav-item {% if active_page == 'termination-reasons' %}active{% endif %}" href="{% url 'termination-reasons' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg></span><span>Term Reasons</span><span class="nav-caret">⌃</span>
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg></span><span>Term Reports</span><span class="nav-caret">⌃</span>
         </a>
-        {% if active_page == 'termination-reasons' %}<div class="nav-submenu" aria-label="Termination reasons by client">
-          <a class="nav-child-link {% if not client_filter %}active{% endif %}" href="{% url 'termination-reasons' %}"><i></i>All terms</a>
+        {% if active_page == 'termination-reasons' %}<div class="nav-submenu" aria-label="Term reports by client">
           {% if reason_filters.client %}{% for client in term_reason_clients %}<a class="nav-child-link {% if client_filter == client.survey__client_id|stringformat:'s' %}active{% endif %}" href="{% url 'termination-reasons' %}?client={{ client.survey__client_id }}"><i></i>{{ client.survey__client__name }}</a>{% endfor %}{% endif %}
         </div>{% endif %}{% endif %}
+        {% if 'prescreener_data.view' in access_codes %}<a class="nav-item {% if active_page == 'prescreened-data' %}active{% endif %}" href="{% url 'prescreened-data' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Prescreened Data</span>
+        </a>{% endif %}
         {% if 'user_hits.view' in access_codes %}<a class="nav-item {% if active_page == 'user-hits' %}active{% endif %}" href="{% url 'user-hits' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>User Hits</span>
         </a>{% endif %}
         {% if 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}
         <a class="nav-item {% if active_page == 'vendors' %}active{% endif %}" href="{% url 'vendor-management' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20v-9l8-5 8 5v9"/><path d="M8 20v-5h8v5M9 11h6"/></svg></span><span>Vendors</span>
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20v-9l8-5 8 5v9"/><path d="M8 20v-5h8v5M9 11h6"/></svg></span><span>Suppliers</span>
         </a>
         {% endif %}
         {% if 'clients.integration.view' in access_codes %}<a class="nav-item {% if active_page == 'client-integrations' %}active{% endif %}" href="{% url 'client-integrations' %}">

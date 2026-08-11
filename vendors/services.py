@@ -24,7 +24,7 @@ MONEY_QUANTUM = Decimal("0.01")
 
 
 class AllocationUnavailable(ValueError):
-    """Raised when a vendor cannot reserve capacity for a survey."""
+    """Raised when a supplier cannot reserve capacity for a survey."""
 
 
 @dataclass(frozen=True)
@@ -206,7 +206,7 @@ def scope_surveys_for_user(queryset, user):
 
 
 def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True, for_update=False):
-    """Resolve the vendor's active client grant and mandatory project allocation."""
+    """Resolve the supplier's active client grant and mandatory project allocation."""
 
     organization_client_ids = organization_client_ids_for_user(user)
     if organization_client_ids is not None and survey.client_id not in organization_client_ids:
@@ -229,7 +229,7 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
         is_active=True,
     ).first()
     if not client_allocation or not _is_active_now(client_allocation, now):
-        raise AllocationUnavailable("This client is not allocated to the vendor.")
+        raise AllocationUnavailable("This client is not allocated to the supplier.")
     if require_capacity and client_allocation.remaining_quantity < 1:
         raise AllocationUnavailable("Client quantity is exhausted.")
 
@@ -241,7 +241,7 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
         survey=survey,
     ).first()
     if not survey_allocation:
-        raise AllocationUnavailable("This project is not allocated to the vendor.")
+        raise AllocationUnavailable("This project is not allocated to the supplier.")
     if not _is_active_now(survey_allocation, now):
         raise AllocationUnavailable("This project is disabled or outside its allocation dates.")
     if require_capacity and survey_allocation.remaining_quantity < 1:
@@ -263,7 +263,7 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
 
 
 def survey_pricing_for_user(user, survey: Survey) -> tuple[Decimal | None, Decimal | None]:
-    """Return request-visible CPI and applied cut without exposing source CPI to external vendors."""
+    """Return request-visible CPI and applied cut without exposing source CPI to external suppliers."""
 
     def apply_employee_role_percentage(price, existing_cut):
         profile = getattr(user, "employee_profile", None)
@@ -306,7 +306,7 @@ def reserve_attempt_capacity(
     client_allocation: VendorClientAllocation | None = None,
     expires_at=None,
 ) -> AllocationReservation:
-    """Reserve one unit and freeze the attempt's vendor/client/CPI context.
+    """Reserve one unit and freeze the attempt's supplier/client/CPI context.
 
     The caller may wrap attempt creation and this function in an outer atomic
     transaction when enforcement is connected to the respondent start flow.
@@ -339,9 +339,9 @@ def reserve_attempt_capacity(
 
     commercial_profile = getattr(client_allocation.vendor, "vendor_commercial_profile", None)
     if not client_allocation.vendor.is_active or not client_allocation.client.is_active:
-        raise AllocationUnavailable("Vendor or client access is inactive.")
+        raise AllocationUnavailable("Supplier or client access is inactive.")
     if not commercial_profile or not commercial_profile.is_active:
-        raise AllocationUnavailable("Vendor commercial access is inactive.")
+        raise AllocationUnavailable("Supplier commercial access is inactive.")
     if attempt.survey_id != locked_survey_allocation.survey_id:
         raise AllocationUnavailable("Attempt survey does not match the assigned survey.")
     if attempt.survey.client_id != client_allocation.client_id:

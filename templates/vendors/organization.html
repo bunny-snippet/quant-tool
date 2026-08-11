@@ -50,7 +50,7 @@
   </section>{% endif %}
 
   {% if can_view_clients %}<section class="organization-panel {% if first_organization_tab == 'clients' %}active{% endif %}" data-organization-panel="clients" {% if first_organization_tab != 'clients' %}hidden{% endif %}>
-    <header class="organization-panel-head"><div><h2>Client catalog</h2><p>Create client identities here, then allocate them to vendors and organization units.</p></div><button class="primary-button compact" type="button" data-create-client>Add client <span>+</span></button></header>
+    <header class="organization-panel-head"><div><h2>Client catalog</h2><p>Create client identities here, then allocate them to suppliers and organization units.</p></div><button class="primary-button compact" type="button" data-create-client>Add client <span>+</span></button></header>
     <div class="client-catalog" id="organizationClients"><div class="organization-loading"><i></i>Loading clients…</div></div>
   </section>{% endif %}
 </section>
@@ -77,7 +77,7 @@
     <header><div><p class="eyebrow">Inherited project visibility</p><h2 id="clientAccessModalTitle">Assign client</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
     <div class="organization-modal-body"><div class="organization-form-grid">
       <label class="wide"><span>Organization unit</span><select name="organization_unit" required></select></label>
-      <label class="wide"><span>Client</span><select name="client" required></select><small>Internal vendors can only route clients already allocated to their vendor account.</small></label>
+      <label class="wide"><span>Client</span><select name="client" required></select><small>Internal suppliers can only route clients already allocated to their supplier account.</small></label>
     </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active visibility grant</span><small>Child units inherit every active ancestor grant.</small></label><div class="organization-error" data-client-access-error hidden></div></div>
     <footer>{% if can_remove_unit_clients %}<button class="organization-danger" type="button" data-remove-current-client-access hidden>Remove access</button>{% endif %}<span class="organization-footer-spacer"></span><button class="organization-secondary" type="button" data-close-organization-modal>Cancel</button><button class="primary-button" type="submit"><span data-client-access-submit>Assign client</span></button></footer>
   </form>
@@ -98,4 +98,4 @@
 
 <div class="organization-toast" data-organization-toast aria-live="polite"></div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=8" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=9" defer></script>{% endblock %}

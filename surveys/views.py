@@ -7,7 +7,7 @@ from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Count, Max, Min, Q, Sum
 from django.http import HttpResponseRedirect, StreamingHttpResponse
 from django.core.paginator import Paginator
@@ -45,6 +45,7 @@ from .filters import SurveyAttemptFilter, SurveyFilter
 from .dashboard import build_dashboard_payload, dashboard_attempts
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncRun
+from .outcomes import provider_outcome
 from .serializers import (
     SurveyDetailSerializer,
     DashboardResponseSerializer,
@@ -64,6 +65,7 @@ from prescreener_vault.services import (
     capture_prescreener_submission,
     operational_answer_value,
 )
+from prescreener_vault.models import PrescreenerSubmission
 from .providers import ProviderError, get_provider
 from .rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 from .rfg_text import clean_rfg_display_text
@@ -201,6 +203,23 @@ TERM_REASON_CARD_PERMISSIONS = {
     "terminated": "termination_reasons.card.terminated",
     "quota": "termination_reasons.card.quota",
     "quality": "termination_reasons.card.quality",
+}
+
+PRESCREENER_DATA_FILTER_PERMISSIONS = {
+    "search": "prescreener_data.filter.search",
+    "country": "prescreener_data.filter.country",
+    "language": "prescreener_data.filter.language",
+    "age_group": "prescreener_data.filter.age_group",
+    "gender": "prescreener_data.filter.gender",
+    "clear": "prescreener_data.filters.clear",
+}
+
+PRESCREENER_DATA_COLUMN_PERMISSIONS = {
+    "uid": "prescreener_data.column.uid",
+    "market": "prescreener_data.column.market",
+    "profile": "prescreener_data.column.profile",
+    "answers": "prescreener_data.column.answers",
+    "captured": "prescreener_data.column.captured",
 }
 
 UNSUCCESSFUL_STATUS_LABELS = {
@@ -363,100 +382,76 @@ def user_hits_page(request):
     })
 
 
-def _nested_outcome_value(payload, path):
-    if not path:
-        return ""
-    value = payload
-    for part in str(path).split("."):
-        if not isinstance(value, dict):
-            return ""
-        value = value.get(part)
-    return value if value is not None else ""
+@function_permission_required("prescreener_data.view")
+def prescreener_data_page(request):
+    """Read-only, permission-scoped browser for the isolated pre-screener vault."""
 
-
-def _outcome_text(value):
-    """Return a safe human-readable scalar; never leak raw JSON into the UI."""
-
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return str(value)
-    if isinstance(value, dict):
-        for key in (
-            "title", "label", "name", "text", "value", "status", "reason",
-            "message", "description", "category", "code",
-        ):
-            text_value = _outcome_text(value.get(key))
-            if text_value:
-                return text_value
-        return ""
-    if isinstance(value, (list, tuple)):
-        text_values = [_outcome_text(item) for item in value]
-        return ", ".join(dict.fromkeys(item for item in text_values if item))
-    return ""
-
-
-def _provider_outcome(attempt):
-    """Normalize cached outcome data while preserving each provider's exact wording.
-
-    RFG callbacks have a documented nested shape. Other providers may either use
-    the common status/reason keys below or define ``outcome_mapping`` paths in the
-    integration's non-secret config, so adding a client does not require changing
-    this page's UI.
-    """
-
-    raw_data = attempt.upstream_transaction_data or {}
-    data = raw_data if isinstance(raw_data, dict) else {}
-    integration = attempt.survey.integration if attempt.survey.integration_id else None
-    provider_code = (integration.provider_code if integration else "innovatemr").lower()
-    if provider_code == "rfg":
-        parameters = data.get("rfg_callback") or data.get("rfg_local_outcome") or {}
-        outcome = data.get("rfg_outcome") or describe_rfg_outcome(parameters, attempt=attempt)
-        return {
-            "status": _outcome_text(
-                outcome.get("title") or outcome.get("status") or attempt.get_status_display()
-            ),
-            "reason": _outcome_text(
-                outcome.get("reason") or parameters.get("ruledOutBy") or parameters.get("local_reason")
-            ),
-            "category": _outcome_text(parameters.get("ruledOutBy")),
-        }
-
-    config_mapping = ((integration.config or {}).get("outcome_mapping") or {}) if integration else {}
-    field_mapping = (integration.field_mapping or {}) if integration else {}
-    mapping = {
-        "status": config_mapping.get("status") or field_mapping.get("outcome_status"),
-        "reason": config_mapping.get("reason") or field_mapping.get("outcome_reason"),
-        "category": config_mapping.get("category") or field_mapping.get("outcome_category"),
+    codes = effective_permission_codes(request.user)
+    filters_access = _component_access(codes, PRESCREENER_DATA_FILTER_PERMISSIONS)
+    columns = _permitted_columns(codes, PRESCREENER_DATA_COLUMN_PERMISSIONS)
+    selected = {
+        "search": request.GET.get("search", "").strip(),
+        "country": request.GET.get("country", "").strip(),
+        "language": request.GET.get("language", "").strip(),
+        "age_group": request.GET.get("age_group", "").strip(),
+        "gender": request.GET.get("gender", "").strip(),
     }
-    candidates = [data]
-    candidates.extend(
-        value for key in ("transaction", "outcome", "result")
-        if isinstance((value := data.get(key)), dict)
-    )
+    for name, value in selected.items():
+        if value and not filters_access[name]:
+            raise PermissionDenied(f"Your account cannot use the {name.replace('_', ' ')} filter.")
 
-    def mapped_or_common(canonical, common_keys):
-        mapped = _outcome_text(_nested_outcome_value(data, mapping.get(canonical)))
-        if mapped:
-            return mapped
-        for candidate in candidates:
-            for key in common_keys:
-                value = _outcome_text(candidate.get(key))
-                if value:
-                    return value
-        return ""
+    page_obj = None
+    summary = {"total": 0, "countries": 0, "age_groups": 0, "genders": 0}
+    options = {"countries": [], "languages": [], "age_groups": [], "genders": []}
+    vault_error = ""
+    if not getattr(settings, "PRESCREENER_VAULT_ENABLED", False):
+        vault_error = "The pre-screener vault is not enabled on this environment."
+    else:
+        try:
+            base = PrescreenerSubmission.objects.using("prescreener_vault").all()
+            options = {
+                "countries": list(base.exclude(country_code="").values("country_code", "country").distinct().order_by("country_code")),
+                "languages": list(base.exclude(language_code="").values("language_code", "language").distinct().order_by("language_code")),
+                "age_groups": list(base.exclude(respondent_age_group="").values_list("respondent_age_group", flat=True).distinct().order_by("respondent_age_group")),
+                "genders": list(base.exclude(respondent_gender="").values_list("respondent_gender", flat=True).distinct().order_by("respondent_gender")),
+            }
+            queryset = base.prefetch_related("question_answers")
+            if selected["search"]:
+                queryset = queryset.filter(Q(uid__icontains=selected["search"]) | Q(rid__icontains=selected["search"]))
+            if selected["country"]:
+                queryset = queryset.filter(country_code__iexact=selected["country"])
+            if selected["language"]:
+                queryset = queryset.filter(language_code__iexact=selected["language"])
+            if selected["age_group"]:
+                queryset = queryset.filter(respondent_age_group__iexact=selected["age_group"])
+            if selected["gender"]:
+                queryset = queryset.filter(respondent_gender__iexact=selected["gender"])
+            summary = queryset.aggregate(
+                total=Count("uid"),
+                countries=Count("country_code", distinct=True),
+                age_groups=Count("respondent_age_group", distinct=True),
+                genders=Count("respondent_gender", distinct=True),
+            )
+            page_obj = Paginator(queryset.order_by("-submitted_at"), 20).get_page(request.GET.get("page", 1))
+        except (DatabaseError, PrescreenerVaultError) as exc:
+            logger.exception("Unable to read the pre-screener vault")
+            vault_error = f"Vault data is temporarily unavailable: {exc}"
 
-    return {
-        "status": mapped_or_common("status", ("status", "Status", "resultStatus", "outcome")),
-        "reason": mapped_or_common(
-            "reason", ("termReason", "term_reason", "reason", "ruledOutBy", "message", "description")
-        ),
-        "category": mapped_or_common(
-            "category", ("termReasonCategory", "termReasonCategoryCode", "termCategory", "reasonCategory")
-        ),
-    }
+    query_without_page = request.GET.copy()
+    query_without_page.pop("page", None)
+    return render(request, "surveys/prescreened_data.html", {
+        "active_page": "prescreened-data",
+        "vault_error": vault_error,
+        "page_obj": page_obj,
+        "summary": summary,
+        "options": options,
+        "selected": selected,
+        "vault_filters": filters_access,
+        "vault_columns": columns,
+        "vault_column_count": max(1, len(columns)),
+        "can_paginate_vault": "prescreener_data.control.pagination" in codes,
+        "page_query": query_without_page.urlencode(),
+    })
 
 
 def _refresh_provider_outcome(attempt, integration):
@@ -537,7 +532,7 @@ def termination_reasons_page(request):
         request.GET.get("page", 1)
     )
     for row in page_obj.object_list:
-        row.reason_outcome = _provider_outcome(row)
+        row.reason_outcome = provider_outcome(row)
         row.reason_status_label = UNSUCCESSFUL_STATUS_LABELS.get(row.status, row.get_status_display())
 
     if detail_rid:
@@ -560,7 +555,7 @@ def termination_reasons_page(request):
             detail_attempt.reason_status_label = UNSUCCESSFUL_STATUS_LABELS.get(
                 detail_attempt.status, detail_attempt.get_status_display()
             )
-            detail_outcome = _provider_outcome(detail_attempt)
+            detail_outcome = provider_outcome(detail_attempt)
             integration = detail_attempt.survey.integration if detail_attempt.survey.integration_id else None
             provider_code = (integration.provider_code if integration else "innovatemr").lower()
             supports_lookup = provider_code == "innovatemr" or bool(
@@ -573,7 +568,7 @@ def termination_reasons_page(request):
             ):
                 try:
                     _refresh_provider_outcome(detail_attempt, integration)
-                    detail_outcome = _provider_outcome(detail_attempt)
+                    detail_outcome = provider_outcome(detail_attempt)
                 except (InnovateMRAPIError, ValueError) as exc:
                     provider_label = integration.client.name if integration else "InnovateMR"
                     lookup_error = (
@@ -624,11 +619,13 @@ def workspace_home(request):
     if has_function_access(request.user, "dashboard.view"):
         return HttpResponseRedirect(reverse("dashboard"))
     if has_function_access(request.user, "attempts.view"):
-        return HttpResponseRedirect(reverse("studies"))
+        return HttpResponseRedirect(reverse("traffic-reports"))
     if has_function_access(request.user, "termination_reasons.view"):
         return HttpResponseRedirect(reverse("termination-reasons"))
     if has_function_access(request.user, "user_hits.view"):
         return HttpResponseRedirect(reverse("user-hits"))
+    if has_function_access(request.user, "prescreener_data.view"):
+        return HttpResponseRedirect(reverse("prescreened-data"))
     if any(has_function_access(request.user, code) for code in ("vendors.view", "vendors.manage", "allocations.view", "allocations.manage")):
         return HttpResponseRedirect(reverse("vendor-management"))
     if any(has_function_access(request.user, code) for code in ("access.manage", "users.view", "users.create", "roles.view", "roles.create")):
@@ -1525,7 +1522,7 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             _attempt_csv_rows(queryset, request.user),
             content_type="text/csv; charset=utf-8",
         )
-        response["Content-Disposition"] = f'attachment; filename="studies-{local_now:%Y%m%d-%H%M%S}-IST.csv"'
+        response["Content-Disposition"] = f'attachment; filename="traffic-reports-{local_now:%Y%m%d-%H%M%S}-IST.csv"'
         response["X-Content-Type-Options"] = "nosniff"
         return response
 
@@ -1676,8 +1673,8 @@ def _survey_csv_rows(queryset, request, columns):
 
 def _attempt_csv_rows(queryset, requesting_user=None):
     headers = [
-        "Respondent ID (RID)", "Status code", "Status", "Status source", "Platform user ID", "Username", "Employee name",
-        "Email", "Employee ID", "Account type", "Role", "Vendor ID", "Vendor name", "Vendor account type",
+        "Respondent ID (RID)", "Status code", "Status", "Termination reason", "Termination category", "Status source", "Platform user ID", "Username", "Employee name",
+        "Email", "Employee ID", "Account type", "Role", "Supplier ID", "Supplier name", "Supplier account type",
         "Client ID", "Client name", "Client allocation ID", "Survey allocation ID",
         "Internal project ID", "Survey ID", "Survey name", "Company", "Buyer ID", "Survey type", "Country", "Language", "Supplier code",
         "Current survey CPI", "Source CPI snapshot", "CPI snapshot source", "CPI cut snapshot (%)", "Payable CPI snapshot",
@@ -1707,6 +1704,11 @@ def _attempt_csv_rows(queryset, requesting_user=None):
         return (Decimal(value) * visible_percent / Decimal("100.00")).quantize(Decimal("0.01"))
 
     for attempt in queryset.iterator(chunk_size=1000):
+        outcome = provider_outcome(attempt) if attempt.status in {
+            SurveyAttempt.Status.TERMINATED,
+            SurveyAttempt.Status.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED,
+        } else {"reason": "", "category": ""}
         user = attempt.platform_user
         profile = getattr(user, "employee_profile", None) if user else None
         role = getattr(profile, "role", None) if profile else None
@@ -1716,7 +1718,7 @@ def _attempt_csv_rows(queryset, requesting_user=None):
         values = [
             attempt.rid, attempt.status,
             "Initiated" if attempt.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED} else attempt.get_status_display(),
-            attempt.status_source, user.pk if user else attempt.user_id,
+            outcome["reason"], outcome["category"], attempt.status_source, user.pk if user else attempt.user_id,
             user.username if user else "", (user.get_full_name() or user.username) if user else "Deleted user",
             user.email if user else "", getattr(profile, "employee_id", ""),
             profile.get_account_type_display() if profile else "", role.name if role else "",

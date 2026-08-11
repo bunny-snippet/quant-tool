@@ -1582,7 +1582,7 @@ paths:
   /api/v1/vendors/api-keys/:
     get:
       operationId: api_v1_vendors_api_keys_list
-      summary: List external-vendor API keys (masked)
+      summary: List external-supplier API keys (masked)
       parameters:
       - in: query
         name: is_active
@@ -1617,7 +1617,7 @@ paths:
         schema:
           type: integer
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -1632,9 +1632,9 @@ paths:
       operationId: api_v1_vendors_api_keys_create
       description: Returns the plaintext api_key once. Store it securely; later responses
         contain only the masked identifier.
-      summary: Issue an external-vendor API key
+      summary: Issue an external-supplier API key
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1669,7 +1669,7 @@ paths:
         description: A unique integer value identifying this vendor api key.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -1691,7 +1691,7 @@ paths:
         description: A unique integer value identifying this vendor api key.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1725,7 +1725,7 @@ paths:
         description: A unique integer value identifying this vendor api key.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1749,7 +1749,7 @@ paths:
           description: ''
     delete:
       operationId: api_v1_vendors_api_keys_destroy
-      summary: Revoke an external-vendor API key
+      summary: Revoke an external-supplier API key
       parameters:
       - in: path
         name: id
@@ -1758,7 +1758,7 @@ paths:
         description: A unique integer value identifying this vendor api key.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -1768,7 +1768,7 @@ paths:
   /api/v1/vendors/client-allocations/:
     get:
       operationId: api_v1_vendors_client_allocations_list
-      summary: List vendor client grants and quantities
+      summary: List supplier client grants and quantities
       parameters:
       - in: query
         name: client
@@ -1816,10 +1816,10 @@ paths:
           - internal_vendor
         description: |-
           * `employee` - Employee
-          * `internal_vendor` - Internal vendor
-          * `external_vendor` - External vendor
+          * `internal_vendor` - Internal supplier
+          * `external_vendor` - External supplier
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -1832,9 +1832,9 @@ paths:
           description: ''
     post:
       operationId: api_v1_vendors_client_allocations_create
-      summary: Allocate a client and quantity to a vendor
+      summary: Allocate a client and quantity to a supplier
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1860,7 +1860,7 @@ paths:
   /api/v1/vendors/client-allocations/{id}/:
     get:
       operationId: api_v1_vendors_client_allocations_retrieve
-      summary: Get a vendor client allocation
+      summary: Get a supplier client allocation
       parameters:
       - in: path
         name: id
@@ -1869,7 +1869,7 @@ paths:
         description: A unique integer value identifying this vendor client allocation.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -1882,7 +1882,7 @@ paths:
           description: ''
     put:
       operationId: api_v1_vendors_client_allocations_update
-      summary: Replace a vendor client allocation
+      summary: Replace a supplier client allocation
       parameters:
       - in: path
         name: id
@@ -1891,7 +1891,7 @@ paths:
         description: A unique integer value identifying this vendor client allocation.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1916,7 +1916,7 @@ paths:
           description: ''
     patch:
       operationId: api_v1_vendors_client_allocations_partial_update
-      summary: Update a vendor client allocation
+      summary: Update a supplier client allocation
       parameters:
       - in: path
         name: id
@@ -1925,7 +1925,7 @@ paths:
         description: A unique integer value identifying this vendor client allocation.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -1949,7 +1949,7 @@ paths:
           description: ''
     delete:
       operationId: api_v1_vendors_client_allocations_destroy
-      summary: Deactivate a vendor client allocation
+      summary: Deactivate a supplier client allocation
       parameters:
       - in: path
         name: id
@@ -1958,7 +1958,7 @@ paths:
         description: A unique integer value identifying this vendor client allocation.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2003,7 +2003,7 @@ paths:
         schema:
           type: string
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2018,7 +2018,7 @@ paths:
       operationId: api_v1_vendors_clients_create
       summary: Create a survey client
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2053,7 +2053,7 @@ paths:
         description: A unique integer value identifying this client.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2075,7 +2075,7 @@ paths:
         description: A unique integer value identifying this client.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2109,7 +2109,7 @@ paths:
         description: A unique integer value identifying this client.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2142,7 +2142,7 @@ paths:
         description: A unique integer value identifying this client.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2152,7 +2152,7 @@ paths:
   /api/v1/vendors/commercial-profiles/:
     get:
       operationId: api_v1_vendors_commercial_profiles_list
-      summary: List vendor CPI policies
+      summary: List supplier CPI policies
       parameters:
       - in: query
         name: is_active
@@ -2190,10 +2190,10 @@ paths:
           - internal_vendor
         description: |-
           * `employee` - Employee
-          * `internal_vendor` - Internal vendor
-          * `external_vendor` - External vendor
+          * `internal_vendor` - Internal supplier
+          * `external_vendor` - External supplier
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2206,9 +2206,9 @@ paths:
           description: ''
     post:
       operationId: api_v1_vendors_commercial_profiles_create
-      summary: Create a vendor CPI policy
+      summary: Create a supplier CPI policy
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2234,7 +2234,7 @@ paths:
   /api/v1/vendors/commercial-profiles/{id}/:
     get:
       operationId: api_v1_vendors_commercial_profiles_retrieve
-      summary: Get a vendor CPI policy
+      summary: Get a supplier CPI policy
       parameters:
       - in: path
         name: id
@@ -2243,7 +2243,7 @@ paths:
         description: A unique integer value identifying this vendor commercial profile.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2256,7 +2256,7 @@ paths:
           description: ''
     put:
       operationId: api_v1_vendors_commercial_profiles_update
-      summary: Replace a vendor CPI policy
+      summary: Replace a supplier CPI policy
       parameters:
       - in: path
         name: id
@@ -2265,7 +2265,7 @@ paths:
         description: A unique integer value identifying this vendor commercial profile.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2290,7 +2290,7 @@ paths:
           description: ''
     patch:
       operationId: api_v1_vendors_commercial_profiles_partial_update
-      summary: Update a vendor CPI policy
+      summary: Update a supplier CPI policy
       parameters:
       - in: path
         name: id
@@ -2299,7 +2299,7 @@ paths:
         description: A unique integer value identifying this vendor commercial profile.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2323,7 +2323,7 @@ paths:
           description: ''
     delete:
       operationId: api_v1_vendors_commercial_profiles_destroy
-      summary: Deactivate a vendor CPI policy
+      summary: Deactivate a supplier CPI policy
       parameters:
       - in: path
         name: id
@@ -2332,7 +2332,7 @@ paths:
         description: A unique integer value identifying this vendor commercial profile.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2342,7 +2342,7 @@ paths:
   /api/v1/vendors/directory/:
     get:
       operationId: api_v1_vendors_directory_list
-      summary: List internal and external vendor accounts
+      summary: List internal and external supplier accounts
       parameters:
       - in: query
         name: employee_profile__account_type
@@ -2354,8 +2354,8 @@ paths:
           - internal_vendor
         description: |-
           * `employee` - Employee
-          * `internal_vendor` - Internal vendor
-          * `external_vendor` - External vendor
+          * `internal_vendor` - Internal supplier
+          * `external_vendor` - External supplier
       - in: query
         name: is_active
         schema:
@@ -2385,7 +2385,7 @@ paths:
         schema:
           type: string
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2399,7 +2399,7 @@ paths:
   /api/v1/vendors/directory/{id}/:
     get:
       operationId: api_v1_vendors_directory_retrieve
-      summary: Get a vendor account and commercial summary
+      summary: Get a supplier account and commercial summary
       parameters:
       - in: path
         name: id
@@ -2408,7 +2408,7 @@ paths:
         description: A unique integer value identifying this user.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2459,7 +2459,7 @@ paths:
         schema:
           type: string
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2474,7 +2474,7 @@ paths:
       operationId: api_v1_vendors_integrations_create
       summary: Create client integration metadata
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2509,7 +2509,7 @@ paths:
         description: A unique integer value identifying this client integration.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2531,7 +2531,7 @@ paths:
         description: A unique integer value identifying this client integration.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2565,7 +2565,7 @@ paths:
         description: A unique integer value identifying this client integration.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       requestBody:
         content:
           application/json:
@@ -2598,7 +2598,7 @@ paths:
         description: A unique integer value identifying this client integration.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -2752,9 +2752,9 @@ paths:
       operationId: api_v1_vendors_management_options_retrieve
       description: Returns non-secret active vendor and client labels for allocation
         modals, scoped to the current vendor hierarchy when applicable.
-      summary: List safe vendor-management selector options
+      summary: List safe supplier-management selector options
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3229,7 +3229,7 @@ paths:
         schema:
           type: integer
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3252,7 +3252,7 @@ paths:
         description: A unique integer value identifying this allocation reservation.
         required: true
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3266,7 +3266,7 @@ paths:
   /api/v1/vendors/survey-allocations/:
     get:
       operationId: api_v1_vendors_survey_allocations_list
-      summary: List vendor project allocations and complete caps
+      summary: List supplier project allocations and complete caps
       parameters:
       - in: query
         name: client_allocation
@@ -3313,7 +3313,7 @@ paths:
         schema:
           type: integer
       tags:
-      - Vendors & allocations
+      - Suppliers & allocations
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3586,8 +3586,8 @@ components:
       type: string
       description: |-
         * `employee` - Employee
-        * `internal_vendor` - Internal vendor
-        * `external_vendor` - External vendor
+        * `internal_vendor` - Internal supplier
+        * `external_vendor` - External supplier
     AllocationReservation:
       type: object
       properties:
@@ -4383,7 +4383,7 @@ components:
           readOnly: true
         workspace_owner:
           type: integer
-          description: The super-admin workspace or internal vendor that owns this
+          description: The super-admin workspace or internal supplier that owns this
             hierarchy.
         workspace_owner_name:
           type: string
@@ -4461,7 +4461,7 @@ components:
       properties:
         workspace_owner:
           type: integer
-          description: The super-admin workspace or internal vendor that owns this
+          description: The super-admin workspace or internal supplier that owns this
             hierarchy.
         parent:
           type: integer
@@ -5081,7 +5081,7 @@ components:
       properties:
         workspace_owner:
           type: integer
-          description: The super-admin workspace or internal vendor that owns this
+          description: The super-admin workspace or internal supplier that owns this
             hierarchy.
         parent:
           type: integer
@@ -5232,7 +5232,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional client-specific cut. Blank uses the vendor commercial
+          description: Optional client-specific cut. Blank uses the supplier commercial
             default.
         starts_at:
           type: string
@@ -5261,7 +5261,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/DeliveryModeEnum'
           description: |-
-            Controls whether an external vendor can sign in to the panel, use API keys, or both.
+            Controls whether an external supplier can sign in to the panel, use API keys, or both.
 
             * `panel` - Panel only
             * `api` - API only
@@ -5285,7 +5285,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional survey-specific cut. Blank uses the client/vendor
+          description: Optional survey-specific cut. Blank uses the client/supplier
             policy.
         starts_at:
           type: string
@@ -5449,6 +5449,12 @@ components:
         rid:
           type: string
           maxLength: 10
+        prescreener_uid:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Stable XXXX-XXXX-XXXX-XXXX identity for the isolated prescreener
+            vault.
         survey_local_id:
           type: string
           readOnly: true
@@ -5488,6 +5494,14 @@ components:
           format: email
           readOnly: true
           nullable: true
+        supplier:
+          type: integer
+          readOnly: true
+          nullable: true
+        supplier_name:
+          type: string
+          nullable: true
+          readOnly: true
         vendor:
           type: integer
           nullable: true
@@ -5537,6 +5551,12 @@ components:
           type: string
           maxLength: 3
         status_label:
+          type: string
+          readOnly: true
+        termination_reason:
+          type: string
+          readOnly: true
+        termination_category:
           type: string
           readOnly: true
         status:
@@ -5648,12 +5668,17 @@ components:
       - entry_ip
       - exit_ip
       - language_code
+      - prescreener_uid
       - rid
       - source_cpi_snapshot
       - status_label
+      - supplier
+      - supplier_name
       - survey_local_id
       - survey_name
       - survey_source_id
+      - termination_category
+      - termination_reason
       - updated_at
       - user_email
       - user_id
@@ -6395,7 +6420,7 @@ components:
       type: string
       description: |-
         * `owner` - Main office
-        * `internal_vendor` - Internal vendor
+        * `internal_vendor` - Internal supplier
     UnitTypeEnum:
       enum:
       - branch
@@ -6810,7 +6835,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional client-specific cut. Blank uses the vendor commercial
+          description: Optional client-specific cut. Blank uses the supplier commercial
             default.
         effective_cpi_cut_percent:
           type: string
@@ -6870,7 +6895,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional client-specific cut. Blank uses the vendor commercial
+          description: Optional client-specific cut. Blank uses the supplier commercial
             default.
         starts_at:
           type: string
@@ -6910,7 +6935,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/DeliveryModeEnum'
           description: |-
-            Controls whether an external vendor can sign in to the panel, use API keys, or both.
+            Controls whether an external supplier can sign in to the panel, use API keys, or both.
 
             * `panel` - Panel only
             * `api` - API only
@@ -6954,7 +6979,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/DeliveryModeEnum'
           description: |-
-            Controls whether an external vendor can sign in to the panel, use API keys, or both.
+            Controls whether an external supplier can sign in to the panel, use API keys, or both.
 
             * `panel` - Panel only
             * `api` - API only
@@ -7141,7 +7166,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional survey-specific cut. Blank uses the client/vendor
+          description: Optional survey-specific cut. Blank uses the client/supplier
             policy.
         effective_cpi_cut_percent:
           type: string
@@ -7205,7 +7230,7 @@ components:
           format: decimal
           pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          description: Optional survey-specific cut. Blank uses the client/vendor
+          description: Optional survey-specific cut. Blank uses the client/supplier
             policy.
         starts_at:
           type: string
@@ -7225,7 +7250,7 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: External-vendor API key. The authenticated vendor's permissions,
+      description: External-supplier API key. The authenticated supplier's permissions,
         client grants, survey rules and CPI cuts are applied automatically.
     cookieAuth:
       type: apiKey

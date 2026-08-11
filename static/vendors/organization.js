@@ -22,7 +22,7 @@
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const slug = (value) => value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const label = (type) => ({ branch: 'Branch', sub_branch: 'Sub-branch', shift: 'Shift' }[type] || type);
-  const ownerLabel = (owner) => `${owner.name}${owner.type === 'internal_vendor' ? ' · Internal vendor' : ' · Main office'}`;
+  const ownerLabel = (owner) => `${owner.name}${owner.type === 'internal_vendor' ? ' · Internal supplier' : ' · Main office'}`;
   const option = (value, text, selected = false) => `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(text)}</option>`;
 
   function toast(message, error = false) {
@@ -74,7 +74,7 @@
       const byParent = new Map();
       units.forEach((unit) => { const key = unit.parent ? Number(unit.parent) : null; if (!byParent.has(key)) byParent.set(key, []); byParent.get(key).push(unit); });
       const owner = owners.get(ownerId) || { name: `Workspace ${ownerId}`, type: 'owner' };
-      return `<section class="owner-tree"><header><h3>${escapeHtml(owner.name)}</h3><span>${owner.type === 'internal_vendor' ? 'Internal vendor' : 'Main office'}</span></header>${(byParent.get(null) || []).map((unit) => unitNode(unit, byParent)).join('') || '<div class="organization-empty">No branches in this workspace yet.</div>'}</section>`;
+      return `<section class="owner-tree"><header><h3>${escapeHtml(owner.name)}</h3><span>${owner.type === 'internal_vendor' ? 'Internal supplier' : 'Main office'}</span></header>${(byParent.get(null) || []).map((unit) => unitNode(unit, byParent)).join('') || '<div class="organization-empty">No branches in this workspace yet.</div>'}</section>`;
     }).join('') || '<div class="organization-empty">Create the first Branch to start the hierarchy.</div>';
   }
 

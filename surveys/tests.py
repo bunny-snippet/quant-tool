@@ -654,6 +654,7 @@ class StudiesTrackingTests(TestCase):
         )
         self.client.force_login(self.owner)
         page = self.client.get(reverse("studies"))
+        self.assertContains(page, "Traffic Reports")
         self.assertContains(page, "Respondent activity")
         self.assertContains(page, 'id="studyFromDateTime"')
         self.assertContains(page, 'id="studyToDateTime"')
@@ -694,6 +695,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(result["entry_device"], "Desktop")
         self.assertEqual(result["country_code"], "US")
         self.assertEqual(result["country"], "United States")
+        self.assertEqual(result["termination_reason"], "")
         self.assertEqual(str(result["source_cpi_snapshot"]), "2.50")
         self.assertIsNotNone(result["initiated_at"])
         self.assertIsNotNone(result["callback_at"])
@@ -713,11 +715,22 @@ class StudiesTrackingTests(TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 2)
-
         self.client.force_login(self.owner)
         page = self.client.get(reverse("studies"), {"internal_id": self.survey.local_id})
         self.assertContains(page, "Project filter")
         self.assertContains(page, self.survey.local_id)
+
+    def test_traffic_report_api_exposes_clean_provider_termination_reason(self):
+        self.complete.status = SurveyAttempt.Status.TERMINATED
+        self.complete.upstream_transaction_data = [{
+            "trackId": self.complete.rid,
+            "status": "Pre Survey Termination",
+            "termReason": "Off hours",
+        }]
+        self.complete.save(update_fields=["status", "upstream_transaction_data", "updated_at"])
+        response = self.api.get(reverse("survey-attempt-list"), {"search": self.complete.rid})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["termination_reason"], "Off hours")
 
     def test_country_filter_and_hit_time_cpi_snapshot_are_stable(self):
         created = create_attempt(self.survey, self.kanik, "10.10.10.10")
@@ -1088,7 +1101,7 @@ class TerminationReasonPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Pre Survey Termination")
         self.assertContains(response, "Off hours")
-        self.assertContains(response, "Term Reasons")
+        self.assertContains(response, "Term Reports")
         self.assertEqual(response.context["detail_outcome"], {
             "status": "Pre Survey Termination",
             "reason": "Off hours",

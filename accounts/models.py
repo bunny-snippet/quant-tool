@@ -65,8 +65,8 @@ class RoleFunctionPermission(models.Model):
 class EmployeeProfile(models.Model):
     class AccountType(models.TextChoices):
         EMPLOYEE = "employee", "Employee"
-        INTERNAL_VENDOR = "internal_vendor", "Internal vendor"
-        EXTERNAL_VENDOR = "external_vendor", "External vendor"
+        INTERNAL_VENDOR = "internal_vendor", "Internal supplier"
+        EXTERNAL_VENDOR = "external_vendor", "External supplier"
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="employee_profile")
     role = models.ForeignKey(Role, null=True, blank=True, on_delete=models.SET_NULL, related_name="employees")

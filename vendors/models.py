@@ -140,7 +140,7 @@ class OrganizationUnit(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="organization_units",
-        help_text="The super-admin workspace or internal vendor that owns this hierarchy.",
+        help_text="The super-admin workspace or internal supplier that owns this hierarchy.",
     )
     parent = models.ForeignKey(
         "self",
@@ -201,7 +201,7 @@ class OrganizationUnit(models.Model):
             raise ValidationError({"unit_type": "Select a valid organization unit type."})
         profile = getattr(self.workspace_owner, "employee_profile", None)
         if not self.workspace_owner.is_superuser and getattr(profile, "account_type", "") != "internal_vendor":
-            raise ValidationError({"workspace_owner": "Organization workspaces must belong to a super admin or internal vendor."})
+            raise ValidationError({"workspace_owner": "Organization workspaces must belong to a super admin or internal supplier."})
         expected_parent_type = parent_rules[self.unit_type]
         if expected_parent_type is None and self.parent_id:
             raise ValidationError({"parent": "A branch cannot have a parent."})
@@ -295,14 +295,14 @@ class OrganizationClientAccess(models.Model):
         profile = getattr(owner, "employee_profile", None)
         if getattr(profile, "account_type", "") == "internal_vendor":
             if not VendorClientAllocation.objects.filter(vendor=owner, client=self.client, is_active=True).exists():
-                raise ValidationError({"client": "Allocate this client to the internal vendor before assigning it to a branch."})
+                raise ValidationError({"client": "Allocate this client to the internal supplier before assigning it to a branch."})
 
     def __str__(self):
         return f"{self.organization_unit.path_label} · {self.client.name}"
 
 
 class VendorCommercialProfile(models.Model):
-    """Commercial defaults for a user marked as an internal or external vendor."""
+    """Commercial defaults for a user marked as an internal or external supplier."""
 
     class DeliveryMode(models.TextChoices):
         PANEL = "panel", "Panel only"
@@ -326,7 +326,7 @@ class VendorCommercialProfile(models.Model):
         choices=DeliveryMode.choices,
         default=DeliveryMode.PANEL,
         db_index=True,
-        help_text="Controls whether an external vendor can sign in to the panel, use API keys, or both.",
+        help_text="Controls whether an external supplier can sign in to the panel, use API keys, or both.",
     )
     is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(
@@ -355,18 +355,18 @@ class VendorCommercialProfile(models.Model):
         employee_profile = getattr(self.vendor, "employee_profile", None)
         account_type = getattr(employee_profile, "account_type", "")
         if account_type not in {"internal_vendor", "external_vendor"}:
-            raise ValidationError({"vendor": "Commercial profiles can only be assigned to vendor accounts."})
+            raise ValidationError({"vendor": "Commercial profiles can only be assigned to supplier accounts."})
         if account_type == "internal_vendor" and self.default_cpi_cut_percent != Decimal("0.00"):
-            raise ValidationError({"default_cpi_cut_percent": "Internal vendors must receive the full source CPI."})
+            raise ValidationError({"default_cpi_cut_percent": "Internal suppliers must receive the full source CPI."})
         if account_type == "internal_vendor" and self.delivery_mode != self.DeliveryMode.PANEL:
-            raise ValidationError({"delivery_mode": "Internal vendors use the panel delivery mode."})
+            raise ValidationError({"delivery_mode": "Internal suppliers use the panel delivery mode."})
 
     def __str__(self):
         return self.vendor.get_full_name() or self.vendor.username
 
 
 class VendorAPIKey(models.Model):
-    """Revocable, hashed API credential for one external vendor account."""
+    """Revocable, hashed API credential for one external supplier account."""
 
     vendor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -406,7 +406,7 @@ class VendorAPIKey(models.Model):
         super().clean()
         account_type = getattr(getattr(self.vendor, "employee_profile", None), "account_type", "")
         if account_type != "external_vendor":
-            raise ValidationError({"vendor": "API keys can only be issued to external vendors."})
+            raise ValidationError({"vendor": "API keys can only be issued to external suppliers."})
 
     def __str__(self):
         return f"{self.vendor} · {self.name} · {self.masked_key}"
@@ -430,7 +430,7 @@ class VendorClientAllocation(models.Model):
         null=True,
         blank=True,
         validators=PERCENTAGE_VALIDATORS,
-        help_text="Optional client-specific cut. Blank uses the vendor commercial default.",
+        help_text="Optional client-specific cut. Blank uses the supplier commercial default.",
     )
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
@@ -476,9 +476,9 @@ class VendorClientAllocation(models.Model):
         employee_profile = getattr(self.vendor, "employee_profile", None)
         account_type = getattr(employee_profile, "account_type", "")
         if account_type not in {"internal_vendor", "external_vendor"}:
-            raise ValidationError({"vendor": "Client allocations can only be assigned to vendor accounts."})
+            raise ValidationError({"vendor": "Client allocations can only be assigned to supplier accounts."})
         if account_type == "internal_vendor" and self.cpi_cut_override_percent not in {None, Decimal("0.00")}:
-            raise ValidationError({"cpi_cut_override_percent": "Internal vendors cannot have a CPI cut."})
+            raise ValidationError({"cpi_cut_override_percent": "Internal suppliers cannot have a CPI cut."})
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
         if self.consumed_quantity + self.reserved_quantity > self.quantity_limit:
@@ -506,7 +506,7 @@ class VendorSurveyAllocation(models.Model):
         null=True,
         blank=True,
         validators=PERCENTAGE_VALIDATORS,
-        help_text="Optional survey-specific cut. Blank uses the client/vendor policy.",
+        help_text="Optional survey-specific cut. Blank uses the client/supplier policy.",
     )
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
@@ -568,7 +568,7 @@ class VendorSurveyAllocation(models.Model):
             raise ValidationError({"survey": "Survey must be mapped to a client before it can be allocated."})
         account_type = getattr(getattr(self.vendor, "employee_profile", None), "account_type", "")
         if account_type == "internal_vendor" and self.cpi_cut_override_percent not in {None, Decimal("0.00")}:
-            raise ValidationError({"cpi_cut_override_percent": "Internal vendors cannot have a CPI cut."})
+            raise ValidationError({"cpi_cut_override_percent": "Internal suppliers cannot have a CPI cut."})
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
         if self.consumed_quantity + self.reserved_quantity > self.quantity_limit:
@@ -619,7 +619,7 @@ class AllocationReservation(models.Model):
     def clean(self):
         super().clean()
         if self.survey_allocation and self.survey_allocation.client_allocation_id != self.client_allocation_id:
-            raise ValidationError({"survey_allocation": "Survey and client allocations must belong to the same vendor scope."})
+            raise ValidationError({"survey_allocation": "Survey and client allocations must belong to the same supplier scope."})
         if self.survey_allocation and self.attempt.survey_id != self.survey_allocation.survey_id:
             raise ValidationError({"attempt": "Attempt survey must match the survey allocation."})
 

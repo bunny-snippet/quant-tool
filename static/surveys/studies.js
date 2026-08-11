@@ -273,7 +273,11 @@
 
   const endTimestamp = (attempt) => ['initiated', 'redirected'].includes(attempt.status) ? attempt.initiated_at : (attempt.callback_at || attempt.initiated_at);
   function timestampCell(value) { const stamp = formatIst(value, true); return `<div class="study-timestamp"><strong>${stamp.date}</strong><span>${stamp.time} IST</span></div>`; }
-  function statusPill(attempt) { const label = ['initiated', 'redirected'].includes(attempt.status) ? 'Initiated' : (attempt.status_label || attempt.status); return `<span class="attempt-status ${statusTone[attempt.status] || 'neutral'}"><i></i>${escapeHtml(label)}</span>`; }
+  function statusPill(attempt) {
+    const label = ['initiated', 'redirected'].includes(attempt.status) ? 'Initiated' : (attempt.status_label || attempt.status);
+    const reason = attempt.termination_reason || attempt.termination_category || '';
+    return `<div class="attempt-outcome"><span class="attempt-status ${statusTone[attempt.status] || 'neutral'}"><i></i>${escapeHtml(label)}</span>${reason ? `<small class="attempt-reason" title="${escapeAttr(reason)}">${escapeHtml(reason)}</small>` : ''}</div>`;
+  }
 
   function updateOverview(summary = {}) {
     const completedDevices = summary.completed_devices || {};
@@ -303,11 +307,11 @@
     if (columns.has('status')) cells.push(`<td class="study-col-status">${statusPill(attempt)}</td>`);
     if (columns.has('start')) cells.push(`<td class="study-col-start">${timestampCell(attempt.initiated_at)}</td>`);
     if (columns.has('end')) cells.push(`<td class="study-col-end">${timestampCell(endTimestamp(attempt))}</td>`);
-    return `<tr>${cells.length ? cells.join('') : '<td><div class="column-denied">No Studies columns are assigned to your account.</div></td>'}</tr>`;
+    return `<tr>${cells.length ? cells.join('') : '<td><div class="column-denied">No Traffic Report columns are assigned to your account.</div></td>'}</tr>`;
   }
 
   function cardTemplate(attempt) {
-    if (!columns.size) return '<article class="survey-card study-card"><div class="column-denied">No Studies columns are assigned to your account.</div></article>';
+    if (!columns.size) return '<article class="survey-card study-card"><div class="column-denied">No Traffic Report columns are assigned to your account.</div></article>';
     const head = `${columns.has('respondent_id') ? `<div><strong>${escapeHtml(attempt.rid)}</strong><span>Respondent ID</span></div>` : '<div></div>'}${columns.has('status') ? statusPill(attempt) : ''}`;
     const survey = columns.has('survey_id') || columns.has('project_id') ? `<div class="study-card-survey">${columns.has('survey_id') ? `<span>Survey ${escapeHtml(attempt.survey_source_id)} · ${attempt.buyer_id ? `Buyer ${escapeHtml(attempt.buyer_id)}` : 'Buyer ID unavailable'}</span>` : ''}${columns.has('project_id') ? `<strong>${escapeHtml(attempt.survey_local_id)}</strong><small>${escapeHtml(attempt.client_name || attempt.company_name || 'Survey client')}</small>` : ''}</div>` : '';
     const metrics = `${columns.has('user') ? `<span><small>User</small><b>${escapeHtml(attempt.user_name)}</b></span>` : ''}${columns.has('country') ? `<span><small>Country</small><b>${escapeHtml(attempt.country || attempt.country_code || '—')}</b></span>` : ''}${columns.has('cpi') ? `<span><small>CPI</small><b>${attempt.source_cpi_snapshot == null ? '—' : formatMoney(attempt.source_cpi_snapshot, attempt.cpi_currency_snapshot || 'USD')}</b></span>` : ''}${columns.has('loi') ? `<span><small>LOI</small><b>${formatLoi(attempt.loi_seconds)}</b></span>` : ''}${columns.has('device') ? `<span><small>Device</small>${deviceBadge(attempt)}</span>` : ''}`;
@@ -326,8 +330,8 @@
       state.pages = Math.max(1, Math.ceil(count / state.pageSize));
       if (state.page > state.pages) { state.page = state.pages; return loadAttempts(); }
       elements.summary.innerHTML = count ? `<strong>${count.toLocaleString('en-IN')}</strong> filtered respondent ${count === 1 ? 'journey' : 'journeys'}` : 'No attempts match these filters';
-      elements.rows.innerHTML = results.length ? results.map(rowTemplate).join('') : `<tr><td colspan="${columnCount}"><div class="empty-state"><span>◎</span><strong>No study records found</strong><small>Try clearing the filters or start a survey attempt.</small></div></td></tr>`;
-      elements.cards.innerHTML = results.length ? results.map(cardTemplate).join('') : '<div class="empty-state"><span>◎</span><strong>No study records found</strong><small>Try clearing the filters.</small></div>';
+      elements.rows.innerHTML = results.length ? results.map(rowTemplate).join('') : `<tr><td colspan="${columnCount}"><div class="empty-state"><span>◎</span><strong>No traffic records found</strong><small>Try clearing the filters or start a survey attempt.</small></div></td></tr>`;
+      elements.cards.innerHTML = results.length ? results.map(cardTemplate).join('') : '<div class="empty-state"><span>◎</span><strong>No traffic records found</strong><small>Try clearing the filters.</small></div>';
       if (elements.pageInput) { elements.pageInput.value = state.page; elements.pageInput.max = state.pages; }
       if (elements.totalPages) elements.totalPages.textContent = `of ${state.pages.toLocaleString('en-IN')}`;
       elements.pageStatus.textContent = `Page ${state.page.toLocaleString('en-IN')} of ${state.pages.toLocaleString('en-IN')}`;
@@ -335,7 +339,7 @@
       if (elements.next && elements.last) elements.next.disabled = elements.last.disabled = state.page >= state.pages;
     } catch (error) {
       if (error.name === 'AbortError') return;
-      elements.rows.innerHTML = `<tr><td colspan="${columnCount}"><div class="error-state"><strong>Could not load studies</strong><span>${escapeHtml(error.message)}</span><button type="button" id="retryStudies">Try again</button></div></td></tr>`;
+      elements.rows.innerHTML = `<tr><td colspan="${columnCount}"><div class="error-state"><strong>Could not load traffic reports</strong><span>${escapeHtml(error.message)}</span><button type="button" id="retryStudies">Try again</button></div></td></tr>`;
       byId('retryStudies')?.addEventListener('click', loadAttempts); elements.cards.innerHTML = '';
     }
   }
