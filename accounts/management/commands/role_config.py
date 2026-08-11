@@ -9,7 +9,6 @@ from accounts.models import AccessFunction, EmployeeProfile, Role, RoleFunctionP
 
 
 FORMAT_VERSION = 1
-REQUIRED_FALLBACK_ROLES = {"employee", "super-admin"}
 
 
 def serialize_role_config():
@@ -59,9 +58,6 @@ def validate_role_config(payload):
     slugs = [str(role.get("slug") or "").strip() for role in roles]
     if any(not slug for slug in slugs) or len(slugs) != len(set(slugs)):
         raise CommandError("Role slugs must be non-empty and unique.")
-    missing_fallbacks = REQUIRED_FALLBACK_ROLES - set(slugs)
-    if missing_fallbacks:
-        raise CommandError(f"Missing required fallback roles: {', '.join(sorted(missing_fallbacks))}.")
     permission_codes = []
     for role in roles:
         permissions = role.get("permissions", [])
@@ -145,12 +141,14 @@ class Command(BaseCommand):
             extra_roles = Role.objects.exclude(slug__in=desired_slugs)
             extra_role_ids = list(extra_roles.values_list("id", flat=True))
             if extra_role_ids:
+                employee_fallback = role_objects.get("employee")
+                super_admin_fallback = role_objects.get("super-admin")
                 EmployeeProfile.objects.filter(
                     role_id__in=extra_role_ids, user__is_superuser=True,
-                ).update(role=role_objects["super-admin"])
+                ).update(role=super_admin_fallback)
                 EmployeeProfile.objects.filter(
                     role_id__in=extra_role_ids, user__is_superuser=False,
-                ).update(role=role_objects["employee"])
+                ).update(role=employee_fallback)
                 extra_roles.delete()
 
             imported_roles = list(role_objects.values())

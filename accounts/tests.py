@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -78,6 +79,31 @@ class RoleConfigurationCommandTests(TestCase):
             call_command("role_config", export_path=str(export_path))
             with self.assertRaises(CommandError):
                 call_command("role_config", import_path=str(export_path))
+
+    def test_import_accepts_source_without_employee_role(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            export_path = root / "roles-without-employee.json"
+            call_command("role_config", export_path=str(export_path))
+            payload = json.loads(export_path.read_text(encoding="utf-8"))
+            payload["roles"] = [role for role in payload["roles"] if role["slug"] != "employee"]
+            export_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            extra_role = Role.objects.create(name="Quant only", slug="quant-only", rank=90)
+            user = get_user_model().objects.create_user(username="roleless-user", password="password-123")
+            user.employee_profile.role = extra_role
+            user.employee_profile.save(update_fields=["role", "updated_at"])
+
+            call_command(
+                "role_config",
+                import_path=str(export_path),
+                replace=True,
+                backup=str(root / "target-backup.json"),
+            )
+
+            user.employee_profile.refresh_from_db()
+            self.assertIsNone(user.employee_profile.role)
+            self.assertFalse(Role.objects.filter(slug__in=["employee", "quant-only"]).exists())
 
 
 class LoginAndSetupTests(TestCase):
