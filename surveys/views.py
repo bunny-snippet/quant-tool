@@ -59,6 +59,11 @@ from .serializers import (
     UserHitsResponseSerializer,
 )
 from .pagination import SurveyPagination
+from prescreener_vault.services import (
+    PrescreenerVaultError,
+    capture_prescreener_submission,
+    operational_answer_value,
+)
 from .providers import ProviderError, get_provider
 from .rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 from .rfg_text import clean_rfg_display_text
@@ -743,7 +748,7 @@ def _finish_local_rfg_attempt(attempt, answers, request, *, result, reason):
         if locked.status != SurveyAttempt.Status.INITIATED:
             return locked
         client_data = get_request_client_data(request)
-        locked.answers = answers
+        locked.answers = operational_answer_value(answers)
         locked.submitted_at = now
         locked.callback_at = now
         locked.last_callback_at = now
@@ -890,6 +895,8 @@ def survey_start(request):
         answers, errors = _collect_prescreener_answers(request, attempt.survey)
         if not errors:
             try:
+                if settings.PRESCREENER_VAULT_ENABLED:
+                    capture_prescreener_submission(attempt, answers)
                 provider = None
                 if attempt.survey.integration_id and attempt.survey.integration.provider_code == "rfg":
                     provider = get_provider(attempt.survey.integration)
@@ -926,7 +933,7 @@ def survey_start(request):
                             else build_outbound_url(locked.survey.entry_link, locked.rid, answers)
                         )
                         now = timezone.now()
-                        locked.answers = answers
+                        locked.answers = operational_answer_value(answers)
                         locked.submitted_at = now
                         locked.redirected_at = now
                         locked.outbound_url = outbound_url
@@ -936,7 +943,11 @@ def survey_start(request):
                         ])
                     return HttpResponseRedirect(outbound_url)
             except Exception as exc:
-                detail = str(exc) if isinstance(exc, ProviderError) else "The upstream provider is temporarily unavailable."
+                if isinstance(exc, PrescreenerVaultError):
+                    logger.exception("Prescreener vault capture failed for rid=%s", attempt.rid)
+                    detail = "Secure prescreener storage is temporarily unavailable. Please submit again shortly."
+                else:
+                    detail = str(exc) if isinstance(exc, ProviderError) else "The upstream provider is temporarily unavailable."
                 errors.append(f"Survey provider could not continue: {detail}")
     else:
         errors = []

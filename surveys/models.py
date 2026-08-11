@@ -227,6 +227,14 @@ class SurveyAttempt(models.Model):
         QUALITY_TERMINATED = "4", "Quality terminated"
 
     rid = models.CharField(max_length=10, unique=True, db_index=True)
+    prescreener_uid = models.CharField(
+        max_length=19,
+        unique=True,
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="Stable XXXX-XXXX-XXXX-XXXX identity for the isolated prescreener vault.",
+    )
     survey = models.ForeignKey(Survey, related_name="attempts", on_delete=models.PROTECT)
     platform_user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, related_name="survey_attempts", on_delete=models.SET_NULL

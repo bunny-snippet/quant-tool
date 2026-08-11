@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "accounts.apps.AccountsConfig",
     "vendors.apps.VendorsConfig",
     "surveys",
+    "prescreener_vault.apps.PrescreenerVaultConfig",
 ]
 
 MIDDLEWARE = [
@@ -85,6 +86,35 @@ else:
             "NAME": os.getenv("SQLITE_PATH", BASE_DIR / "db.sqlite3"),
         }
     }
+
+# Prescreener profile data is deliberately isolated from the operational database.
+# The SQLite fallback keeps local development and tests self-contained; production
+# must enable the vault and provide the dedicated MySQL credentials below.
+PRESCREENER_VAULT_ENABLED = env_bool("PRESCREENER_VAULT_ENABLED", False)
+PRESCREENER_DB_ENGINE = os.getenv("PRESCREENER_DB_ENGINE", "sqlite").lower()
+if PRESCREENER_DB_ENGINE == "mysql":
+    DATABASES["prescreener_vault"] = {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": os.getenv("PRESCREENER_DB_NAME", "prescreener-vault"),
+        "USER": os.getenv("PRESCREENER_DB_USER", ""),
+        "PASSWORD": os.getenv("PRESCREENER_DB_PASSWORD", ""),
+        "HOST": os.getenv("PRESCREENER_DB_HOST", "127.0.0.1"),
+        "PORT": os.getenv("PRESCREENER_DB_PORT", "3306"),
+        "CONN_MAX_AGE": int(os.getenv("PRESCREENER_DB_CONN_MAX_AGE", "60")),
+        "OPTIONS": {
+            "charset": "utf8mb4",
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+            "isolation_level": "read committed",
+            "connect_timeout": int(os.getenv("PRESCREENER_DB_CONNECT_TIMEOUT", "10")),
+        },
+    }
+else:
+    DATABASES["prescreener_vault"] = {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": os.getenv("PRESCREENER_SQLITE_PATH", BASE_DIR / "prescreener_vault.sqlite3"),
+    }
+
+DATABASE_ROUTERS = ["prescreener_vault.router.PrescreenerVaultRouter"]
 
 AUTH_PASSWORD_VALIDATORS = []
 LANGUAGE_CODE = "en-us"

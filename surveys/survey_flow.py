@@ -11,6 +11,7 @@ from .models import Survey, SurveyAttempt
 
 
 RID_ALPHABET = string.ascii_letters + string.digits
+PRESCREENER_UID_ALPHABET = string.ascii_letters + string.digits
 
 
 def generate_rid() -> str:
@@ -23,6 +24,40 @@ def generate_rid() -> str:
     ]
     secrets.SystemRandom().shuffle(characters)
     return "".join(characters)
+
+
+def generate_prescreener_uid() -> str:
+    """Generate 16 mixed alphanumeric characters rendered in four groups."""
+    characters = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        *(secrets.choice(PRESCREENER_UID_ALPHABET) for _ in range(13)),
+    ]
+    secrets.SystemRandom().shuffle(characters)
+    compact = "".join(characters)
+    return "-".join(compact[index:index + 4] for index in range(0, 16, 4))
+
+
+def ensure_attempt_prescreener_uid(attempt: SurveyAttempt) -> str:
+    """Allocate one stable vault UID for an attempt, including legacy attempts."""
+    if attempt.prescreener_uid:
+        return attempt.prescreener_uid
+    for _ in range(10):
+        candidate = generate_prescreener_uid()
+        try:
+            updated = SurveyAttempt.objects.filter(
+                pk=attempt.pk, prescreener_uid__isnull=True
+            ).update(prescreener_uid=candidate)
+        except IntegrityError:
+            continue
+        if updated:
+            attempt.prescreener_uid = candidate
+            return candidate
+        attempt.refresh_from_db(fields=["prescreener_uid"])
+        if attempt.prescreener_uid:
+            return attempt.prescreener_uid
+    raise RuntimeError("Could not allocate a unique prescreener UID")
 
 
 def normalize_client_ip(value) -> str | None:
@@ -154,6 +189,7 @@ def create_attempt(survey: Survey, platform_user, ip_address: str | None, client
             with transaction.atomic():
                 return SurveyAttempt.objects.create(
                     rid=generate_rid(),
+                    prescreener_uid=generate_prescreener_uid(),
                     survey=survey,
                     platform_user=platform_user,
                     user_id=str(platform_user.pk),

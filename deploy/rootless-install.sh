@@ -15,6 +15,12 @@ test -f "$ENV_FILE" || { echo "Missing $ENV_FILE" >&2; exit 1; }
 grep -Eq '^DB_ENGINE=mysql$' "$ENV_FILE" || { echo "DB_ENGINE must be mysql" >&2; exit 1; }
 grep -Eq '^DB_PASSWORD=.+$' "$ENV_FILE" || { echo "DB_PASSWORD is empty" >&2; exit 1; }
 grep -Eq '^DJANGO_DEBUG=false$' "$ENV_FILE" || { echo "DJANGO_DEBUG must be false" >&2; exit 1; }
+if grep -Eqi '^PRESCREENER_VAULT_ENABLED=(true|1|yes|on)$' "$ENV_FILE"; then
+  grep -Eq '^PRESCREENER_DB_ENGINE=mysql$' "$ENV_FILE" || { echo "PRESCREENER_DB_ENGINE must be mysql" >&2; exit 1; }
+  grep -Eq '^PRESCREENER_DB_NAME=.+$' "$ENV_FILE" || { echo "PRESCREENER_DB_NAME is empty" >&2; exit 1; }
+  grep -Eq '^PRESCREENER_DB_USER=.+$' "$ENV_FILE" || { echo "PRESCREENER_DB_USER is empty" >&2; exit 1; }
+  grep -Eq '^PRESCREENER_DB_PASSWORD=.+$' "$ENV_FILE" || { echo "PRESCREENER_DB_PASSWORD is empty" >&2; exit 1; }
+fi
 
 # The installer may be invoked while this application's venv is active. Remove
 # it from PATH before the fallback deletes/recreates .venv, otherwise python3
@@ -46,6 +52,9 @@ fi
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python manage.py migrate --noinput
+if grep -Eqi '^PRESCREENER_VAULT_ENABLED=(true|1|yes|on)$' "$ENV_FILE"; then
+  .venv/bin/python manage.py migrate --database=prescreener_vault --noinput
+fi
 .venv/bin/python manage.py collectstatic --noinput
 .venv/bin/python manage.py check --deploy
 
