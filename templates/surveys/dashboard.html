@@ -1,0 +1,108 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Dashboard - Survey Workspace{% endblock %}
+{% block content %}
+<section class="page-intro dashboard-intro">
+  <div>
+    <p class="eyebrow">Operations command center</p>
+    <h1>Performance dashboard</h1>
+    <p>Live workspace intelligence across clients, teams and respondent journeys.</p>
+  </div>
+  <span class="dashboard-live"><i></i>Live analytics <small id="dashboardUpdatedAt">Connecting...</small></span>
+</section>
+
+{% if dashboard_filters.client or dashboard_filters.country or dashboard_filters.branch or dashboard_filters.sub_branch or dashboard_filters.shift or dashboard_filters.user or dashboard_filters.date %}
+<section class="filter-panel dashboard-filters" aria-label="Dashboard filters">
+  {% if dashboard_filters.client %}<div class="field multi-field">
+    <label id="dashboardClientLabel">Client</label>
+    <div class="multi-select" data-dashboard-filter="client">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardClientLabel" aria-expanded="false"><span>All clients</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search client..." aria-label="Search clients" autocomplete="off"></div><div class="multi-options">{% for client in dashboard_clients %}<label><input type="checkbox" value="{{ client.value }}"><span>{{ client.name }}</span></label>{% empty %}<span class="filter-empty">No clients available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching client</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.country %}<div class="field multi-field">
+    <label id="dashboardCountryLabel">Country</label>
+    <div class="multi-select" data-dashboard-filter="country">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardCountryLabel" aria-expanded="false"><span>All countries</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search country..." aria-label="Search countries" autocomplete="off"></div><div class="multi-options">{% for country in dashboard_countries %}<label><input type="checkbox" value="{{ country.country_code }}"><span>{{ country.country|default:country.country_code }} · {{ country.country_code }}</span></label>{% empty %}<span class="filter-empty">No countries available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching country</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.branch %}<div class="field multi-field">
+    <label id="dashboardBranchLabel">Branch</label>
+    <div class="multi-select" data-dashboard-filter="branch">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardBranchLabel" aria-expanded="false"><span>All branches</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search branch..." aria-label="Search branches" autocomplete="off"></div><div class="multi-options">{% for branch in dashboard_branches %}<label><input type="checkbox" value="{{ branch.value }}"><span>{{ branch.name }}</span></label>{% empty %}<span class="filter-empty">No branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching branch</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.sub_branch %}<div class="field multi-field">
+    <label id="dashboardSubBranchLabel">Sub-branch</label>
+    <div class="multi-select" data-dashboard-filter="sub_branch">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardSubBranchLabel" aria-expanded="false"><span>All sub-branches</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search sub-branch..." aria-label="Search sub-branches" autocomplete="off"></div><div class="multi-options">{% for unit in dashboard_sub_branches %}<label data-branch-value="{{ unit.branch_value }}"><input type="checkbox" value="{{ unit.value }}"><span>{{ unit.name }}</span></label>{% empty %}<span class="filter-empty">No sub-branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching sub-branch</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.shift %}<div class="field multi-field">
+    <label id="dashboardShiftLabel">Shift</label>
+    <div class="multi-select" data-dashboard-filter="shift">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardShiftLabel" aria-expanded="false"><span>All shifts</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search shift..." aria-label="Search shifts" autocomplete="off"></div><div class="multi-options">{% for shift in dashboard_shifts %}<label data-branch-value="{{ shift.branch_value }}" data-sub-branch-value="{{ shift.sub_branch_value }}"><input type="checkbox" value="{{ shift.value }}"><span>{{ shift.name }}</span></label>{% empty %}<span class="filter-empty">No shifts available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching shift</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.user %}<div class="field multi-field">
+    <label id="dashboardUserLabel">User</label>
+    <div class="multi-select" data-dashboard-filter="user">
+      <button class="multi-trigger" type="button" aria-labelledby="dashboardUserLabel" aria-expanded="false"><span>All users</span><i aria-hidden="true">⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search user..." aria-label="Search users" autocomplete="off"></div><div class="multi-options">{% for person in dashboard_users %}<label data-branch-value="{{ person.branch_value }}" data-sub-branch-value="{{ person.sub_branch_value }}" data-shift-value="{{ person.shift_value }}"><input type="checkbox" value="{{ person.user_id }}"><span>{{ person.user_name }}</span></label>{% empty %}<span class="filter-empty">No users available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching user</p></div>
+    </div>
+  </div>{% endif %}
+  {% if dashboard_filters.date %}<div class="field datetime-field"><label for="dashboardFrom">From date &amp; time</label><div class="datetime-control"><input id="dashboardFrom" type="datetime-local" step="60" aria-label="Dashboard from date and time in IST"></div></div>
+  <div class="field datetime-field"><label for="dashboardTo">To date &amp; time</label><div class="datetime-control"><input id="dashboardTo" type="datetime-local" step="60" aria-label="Dashboard to date and time in IST"></div></div>{% endif %}
+  {% if dashboard_filters.clear %}<button class="clear-button" id="clearDashboardFilters" type="button">Clear filters</button>{% endif %}
+</section>
+{% endif %}
+
+{% if dashboard_cards %}<section class="dashboard-kpis" aria-label="Dashboard summary">
+  {% if 'hits' in dashboard_cards %}<article class="dashboard-kpi kpi-hits" data-dashboard-card="hits"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/></svg></span><div><small>Total hits</small><strong id="dashboardHits">—</strong><em>Respondent journeys</em></div><i class="kpi-glow"></i></article>{% endif %}
+  {% if 'completes' in dashboard_cards %}<article class="dashboard-kpi kpi-completes" data-dashboard-card="completes"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><div><small>Completes</small><strong id="dashboardCompletes">—</strong><em>Successful outcomes</em></div><i class="kpi-glow"></i></article>{% endif %}
+  {% if 'conversion_rate' in dashboard_cards %}<article class="dashboard-kpi kpi-conversion" data-dashboard-card="conversion"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M7 17 17 7M7 8h.01M17 16h.01"/></svg></span><div><small>Conversion</small><strong id="dashboardConversion">—</strong><em>Completes per hit</em></div><i class="kpi-glow"></i></article>{% endif %}
+  {% if 'active_users' in dashboard_cards %}<article class="dashboard-kpi kpi-users" data-dashboard-card="users"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5M16 6a3 3 0 0 1 0 6m1 2c2.4.4 4 2.2 4 5"/></svg></span><div><small>Active users</small><strong id="dashboardActiveUsers">—</strong><em>Matching team members</em></div><i class="kpi-glow"></i></article>{% endif %}
+  {% if 'average_loi_seconds' in dashboard_cards %}<article class="dashboard-kpi kpi-loi" data-dashboard-card="loi"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg></span><div><small>Average LOI</small><strong id="dashboardAverageLoi">—</strong><em>Recorded duration</em></div><i class="kpi-glow"></i></article>{% endif %}
+  {% if 'revenue' in dashboard_cards %}<article class="dashboard-kpi kpi-revenue" data-dashboard-card="revenue"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M5 7h10a4 4 0 0 1 0 8H5M9 4v16m7-13 3-3m0 0v5m0-5h-5"/></svg></span><div><small>Total revenue</small><strong id="dashboardRevenue">—</strong><em>Hit-time CPI snapshots</em></div><span class="revenue-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><i class="kpi-glow"></i></article>{% endif %}
+</section>{% endif %}
+
+{% if dashboard_charts %}<section class="dashboard-grid">
+  {% if 'performance' in dashboard_charts %}<article class="dashboard-widget performance-widget">
+    <header><div><span class="widget-kicker">Performance pulse</span><h2>Hits vs completes</h2><p>Last five days or six-month view</p></div><div class="chart-toggle" role="group" aria-label="Performance period"><button type="button" class="active" data-dashboard-period="daily">5 days</button><button type="button" data-dashboard-period="monthly">Monthly</button></div></header>
+    <div class="performance-legend"><span><i class="hits"></i>Hits</span><span><i class="completes"></i>Completes</span></div>
+    <div class="dashboard-chart-stage" id="performanceChart"><div class="dashboard-skeleton chart-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'client_share' in dashboard_charts %}<article class="dashboard-widget client-share-widget">
+    <header><div><span class="widget-kicker">Client portfolio</span><h2>Complete contribution</h2><p>Share of overall completes</p></div></header>
+    <div class="client-share-body" id="clientShareChart"><div class="dashboard-skeleton donut-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'status' in dashboard_charts %}<article class="dashboard-widget compact-widget status-widget">
+    <header><div><span class="widget-kicker">Journey outcomes</span><h2>Status mix</h2><p>Current filtered result split</p></div></header>
+    <div class="horizontal-metrics" id="statusBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'device' in dashboard_charts %}<article class="dashboard-widget compact-widget device-widget">
+    <header><div><span class="widget-kicker">Audience devices</span><h2>Completed devices</h2><p>Where completes happened</p></div></header>
+    <div class="device-dashboard-grid" id="deviceBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'top_users' in dashboard_charts %}<article class="dashboard-widget compact-widget performers-widget">
+    <header><div><span class="widget-kicker">Team leaderboard</span><h2>Top performers</h2><p>Ranked by filtered completes</p></div></header>
+    <div class="performer-list" id="dashboardTopUsers"><div class="dashboard-skeleton list-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'recent' in dashboard_charts %}<article class="dashboard-widget activity-widget">
+    <header><div><span class="widget-kicker">Live workspace</span><h2>Recent activity</h2><p>Latest permitted respondent journeys</p></div><span class="activity-pulse"><i></i>Live</span></header>
+    <div class="dashboard-activity-list" id="dashboardRecentActivity"><div class="dashboard-skeleton feed-skeleton"></div></div>
+  </article>{% endif %}
+</section>{% endif %}
+
+{% if not dashboard_cards and not dashboard_charts %}<section class="dashboard-no-access"><span>◎</span><h2>No dashboard widgets assigned</h2><p>An administrator can enable individual cards and charts from Access Control.</p></section>{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=1" defer></script>{% endblock %}

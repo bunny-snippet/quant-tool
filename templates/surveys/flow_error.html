@@ -1,0 +1,15 @@
+{% extends 'surveys/flow_base.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block body_class %}status-page status-danger{% endblock %}
+{% block content %}
+<main class="status-shell">
+  <section class="status-card">
+    <div class="status-visual" aria-hidden="true"><span></span><i>!</i></div>
+    <p class="flow-eyebrow">Unable to continue</p>
+    <h1>{{ title }}</h1>
+    <p class="status-message">{{ message }}</p>
+    <p class="status-note">Please return to the survey list or contact support.</p>
+  </section>
+</main>
+{% endblock %}
+

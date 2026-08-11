@@ -1,0 +1,38 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Exchange Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'accounts/auth.css' %}?v=1">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-story">
+      <a class="auth-brand" href="{% url 'login' %}"><span>SH</span><strong>Exchange Hub</strong></a>
+      <div><p class="auth-eyebrow">Internal workspace</p><h1>Survey operations,<br>under control.</h1><p>Access projects, respondent activity and operational tools according to your assigned functions.</p></div>
+      <small>Secure role and function-based access</small>
+    </section>
+    <section class="auth-panel">
+      <form method="post" class="auth-card">
+        {% csrf_token %}
+        <p class="auth-eyebrow">Welcome back</p>
+        <h2>Sign in to your account</h2>
+        <p class="auth-subtitle">Use the credentials provided by your workspace administrator.</p>
+        {% if form.non_field_errors %}<div class="auth-error">Username or password is incorrect.</div>{% endif %}
+        <label><span>Username</span>{{ form.username }}{% for error in form.username.errors %}<small>{{ error }}</small>{% endfor %}</label>
+        <label><span>Password</span>{{ form.password }}{% for error in form.password.errors %}<small>{{ error }}</small>{% endfor %}</label>
+        <label class="remember">{{ form.remember_me }}<span>Keep me signed in</span></label>
+        {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+        <button type="submit">Sign in <span>→</span></button>
+        <p class="setup-note">New workspace? <a href="{% url 'first-admin-setup' %}">Create the first administrator</a></p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+

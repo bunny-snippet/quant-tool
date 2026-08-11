@@ -1,0 +1,120 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Organization · Survey Workspace{% endblock %}
+{% block header_title %}Organization{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/organization.css' %}?v=3">{% endblock %}
+{% block content %}
+<div class="csrf-source" hidden>{% csrf_token %}</div>
+{{ organization_unit_columns|json_script:"organizationUnitColumnAccess" }}
+{{ organization_access_columns|json_script:"organizationClientColumnAccess" }}
+<section class="page-intro organization-intro">
+  <div><p class="eyebrow">People & client routing</p><h1>Organization hierarchy</h1><p>Build Branch → Sub-branch → Shift workspaces, place Team Leads and employees into shifts, and control which clients flow into every team.</p></div>
+  {% if can_create_units %}<button class="primary-button" type="button" data-create-unit>Create unit <span>+</span></button>{% endif %}
+</section>
+
+{% if organization_cards %}<section class="organization-overview" aria-label="Organization totals">
+  {% if 'branches' in organization_cards %}<article><span class="metric-icon branch">B</span><div><small>Branches</small><strong id="branchCount">—</strong><em>Workspace roots</em></div></article>{% endif %}
+  {% if 'shifts' in organization_cards %}<article><span class="metric-icon shift">S</span><div><small>Shifts</small><strong id="shiftCount">—</strong><em>Team workspaces</em></div></article>{% endif %}
+  {% if 'members' in organization_cards %}<article><span class="metric-icon people">T</span><div><small>Members</small><strong id="memberCount">—</strong><em>Assigned users</em></div></article>{% endif %}
+  {% if 'client_grants' in organization_cards %}<article><span class="metric-icon clients">C</span><div><small>Client grants</small><strong id="unitClientCount">—</strong><em>Inherited visibility rules</em></div></article>{% endif %}
+</section>{% endif %}
+
+<section class="organization-workspace"
+  data-manage-units="{{ can_manage_units|yesno:'true,false' }}"
+  data-create-units="{{ can_create_units|yesno:'true,false' }}"
+  data-edit-units="{{ can_edit_units|yesno:'true,false' }}"
+  data-delete-units="{{ can_delete_units|yesno:'true,false' }}"
+  data-manage-unit-clients="{{ can_manage_unit_clients|yesno:'true,false' }}"
+  data-remove-unit-clients="{{ can_remove_unit_clients|yesno:'true,false' }}"
+  data-view-clients="{{ can_view_clients|yesno:'true,false' }}"
+  data-manage-clients="{{ can_manage_clients|yesno:'true,false' }}"
+  data-view-integrations="{{ can_view_integrations|yesno:'true,false' }}"
+  data-manage-integrations="{{ can_manage_integrations|yesno:'true,false' }}"
+  data-test-integrations="{{ can_test_integrations|yesno:'true,false' }}"
+  data-preview-integrations="{{ can_preview_integrations|yesno:'true,false' }}"
+  data-sync-integrations="{{ can_sync_integrations|yesno:'true,false' }}">
+  <nav class="organization-tabs" role="tablist">
+    {% if can_view_structure %}<button class="{% if first_organization_tab == 'structure' %}active{% endif %}" type="button" data-organization-tab="structure">Structure</button>{% endif %}
+    {% if can_view_client_access %}<button class="{% if first_organization_tab == 'client-access' %}active{% endif %}" type="button" data-organization-tab="client-access">Client access</button>{% endif %}
+    {% if can_view_clients %}<button class="{% if first_organization_tab == 'clients' %}active{% endif %}" type="button" data-organization-tab="clients">Client catalog</button>{% endif %}
+  </nav>
+
+  {% if can_view_structure %}<section class="organization-panel {% if first_organization_tab == 'structure' %}active{% endif %}" data-organization-panel="structure" {% if first_organization_tab != 'structure' %}hidden{% endif %}>
+    <header class="organization-panel-head"><div><h2>Branch structure</h2><p>Member and client totals roll up from Shift to Sub-branch and Branch, while each Shift keeps its own client access boundary.</p></div>{% if can_create_units %}<button class="primary-button compact" type="button" data-create-unit>Add unit <span>+</span></button>{% endif %}</header>
+    <div class="organization-tree" id="organizationTree"><div class="organization-loading"><i></i>Loading hierarchy…</div></div>
+  </section>{% endif %}
+
+  {% if can_view_client_access %}<section class="organization-panel {% if first_organization_tab == 'client-access' %}active{% endif %}" data-organization-panel="client-access" {% if first_organization_tab != 'client-access' %}hidden{% endif %}>
+    <header class="organization-panel-head"><div><h2>Client visibility</h2><p>The nearest configured level wins: Shift grants override Sub-branch and Branch grants. A blank level inherits from its closest configured parent.</p></div>{% if can_manage_unit_clients %}<button class="primary-button compact" type="button" data-create-client-access>Assign client <span>+</span></button>{% endif %}</header>
+    <div class="access-grid" id="organizationClientRows"><div class="organization-loading"><i></i>Loading client grants…</div></div>
+  </section>{% endif %}
+
+  {% if can_view_clients %}<section class="organization-panel {% if first_organization_tab == 'clients' %}active{% endif %}" data-organization-panel="clients" {% if first_organization_tab != 'clients' %}hidden{% endif %}>
+    <header class="organization-panel-head"><div><h2>Client catalog</h2><p>Create client identities here, then allocate them to vendors and organization units.</p></div><button class="primary-button compact" type="button" data-create-client>Add client <span>+</span></button></header>
+    <div class="client-catalog" id="organizationClients"><div class="organization-loading"><i></i>Loading clients…</div></div>
+  </section>{% endif %}
+</section>
+
+<div class="organization-backdrop" data-organization-backdrop hidden></div>
+
+<section class="organization-modal" id="unitModal" role="dialog" aria-modal="true" aria-labelledby="unitModalTitle" hidden>
+  <form id="unitForm">
+    <header><div><p class="eyebrow">Organization structure</p><h2 id="unitModalTitle">Create unit</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
+    <div class="organization-modal-body"><div class="organization-form-grid">
+      <label><span>Workspace owner</span><select name="workspace_owner" required></select></label>
+      <label><span>Unit type</span><select name="unit_type" required><option value="branch">Branch</option><option value="sub_branch">Sub-branch</option><option value="shift">Shift</option></select></label>
+      <label class="wide" data-parent-field><span>Parent unit</span><select name="parent"></select><small>Sub-branches belong to a Branch; Shifts belong to a Sub-branch.</small></label>
+      <label><span>Name</span><input name="name" maxlength="120" required placeholder="e.g. Gurgaon Morning"></label>
+      <label><span>Code</span><input name="code" maxlength="80" required pattern="[a-z0-9-]+" placeholder="gurgaon-morning"></label>
+      <label class="wide"><span>Description</span><input name="description" maxlength="240" placeholder="Optional internal note"></label>
+    </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active unit</span><small>Inactive units remain auditable but cannot receive new assignments.</small></label><div class="organization-error" data-unit-error hidden></div></div>
+    <footer>{% if can_delete_units %}<button class="organization-danger" type="button" data-delete-current-unit hidden>Delete unit</button>{% endif %}<span class="organization-footer-spacer"></span><button class="organization-secondary" type="button" data-close-organization-modal>Cancel</button><button class="primary-button" type="submit"><span data-unit-submit>Create unit</span></button></footer>
+  </form>
+</section>
+
+<section class="organization-modal" id="clientAccessModal" role="dialog" aria-modal="true" aria-labelledby="clientAccessModalTitle" hidden>
+  <form id="clientAccessForm">
+    <header><div><p class="eyebrow">Inherited project visibility</p><h2 id="clientAccessModalTitle">Assign client</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
+    <div class="organization-modal-body"><div class="organization-form-grid">
+      <label class="wide"><span>Organization unit</span><select name="organization_unit" required></select></label>
+      <label class="wide"><span>Client</span><select name="client" required></select><small>Internal vendors can only route clients already allocated to their vendor account.</small></label>
+    </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active visibility grant</span><small>Child units inherit every active ancestor grant.</small></label><div class="organization-error" data-client-access-error hidden></div></div>
+    <footer>{% if can_remove_unit_clients %}<button class="organization-danger" type="button" data-remove-current-client-access hidden>Remove access</button>{% endif %}<span class="organization-footer-spacer"></span><button class="organization-secondary" type="button" data-close-organization-modal>Cancel</button><button class="primary-button" type="submit"><span data-client-access-submit>Assign client</span></button></footer>
+  </form>
+</section>
+
+{% if can_manage_clients %}<section class="organization-modal" id="clientModal" role="dialog" aria-modal="true" aria-labelledby="clientModalTitle" hidden>
+  <form id="clientForm">
+    <header><div><p class="eyebrow">Source account</p><h2 id="clientModalTitle">Add client</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
+    <div class="organization-modal-body"><div class="organization-form-grid">
+      <label><span>Client name</span><input name="name" maxlength="160" required></label>
+      <label><span>Client code</span><input name="code" maxlength="80" required pattern="[a-z0-9-]+"></label>
+      <label><span>Provider code</span><input name="provider_code" maxlength="80" value="innovatemr" required></label>
+      <label><span>Survey company match</span><input name="company_name_match" maxlength="160" placeholder="Upstream company label"></label>
+    </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active client</span><small>Inactive clients are hidden from every project workspace.</small></label><div class="organization-error" data-client-error hidden></div></div>
+    <footer><button class="organization-secondary" type="button" data-close-organization-modal>Cancel</button><button class="primary-button" type="submit"><span data-client-submit>Create client</span></button></footer>
+  </form>
+</section>{% endif %}
+
+{% if can_view_integrations %}<section class="organization-modal integration-modal" id="integrationModal" role="dialog" aria-modal="true" aria-labelledby="integrationModalTitle" hidden>
+  <form id="integrationForm">
+    <header><div><p class="eyebrow">Secure upstream connection</p><h2 id="integrationModalTitle">Add integration</h2></div><button type="button" data-close-organization-modal aria-label="Close">×</button></header>
+    <div class="organization-modal-body">
+      <div class="integration-client-banner"><span>Client</span><strong data-integration-client>—</strong><em data-integration-status>Draft</em></div>
+      <div class="organization-form-grid">
+        <label><span>Connection name</span><input name="name" maxlength="120" placeholder="RFG Live Alert" required></label><label><span>Provider</span><select name="provider_code" required></select></label>
+        <label class="wide"><span>API base URL</span><input name="base_url" type="url" maxlength="500" required></label>
+        <label><span>APID environment variable</span><input name="apid_env" maxlength="120" placeholder="RFG_APID" pattern="[A-Za-z_][A-Za-z0-9_]*" required><small>Name only—never paste the APID here.</small></label>
+        <label><span>Secret environment variable</span><input name="secret_env" maxlength="120" placeholder="RFG_SECRET" pattern="[A-Za-z_][A-Za-z0-9_]*" required><small>Name only—secret stays on the server.</small></label>
+        <label><span>Sync interval (seconds)</span><input name="sync_interval_seconds" type="number" min="60" step="30" value="60" required></label><label><span>Country (optional)</span><input name="country" maxlength="2" placeholder="US"></label>
+      </div>
+      <div class="integration-toggles"><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active integration</span><small>Disabling stops all provider activity.</small></label><label class="organization-toggle"><input name="scheduled_sync_enabled" type="checkbox"><span>Automatic sync</span><small>Enabled automatically after a successful connection test.</small></label><label class="organization-toggle"><input name="enforce_local_targeting" type="checkbox" checked><span>Strict local targeting</span><small>Turn off to let RFG make the final eligibility decision.</small></label></div>
+      <div class="integration-actions" data-integration-actions hidden><button type="button" data-test-integration>Test connection</button><button type="button" data-preview-integration>Preview inventory</button><button type="button" data-sync-integration>Sync now</button></div>
+      <div class="integration-preview" data-integration-preview hidden></div><div class="organization-error" data-integration-error hidden></div>
+    </div>
+    <footer><button class="organization-secondary" type="button" data-close-organization-modal>{% if can_manage_integrations %}Cancel{% else %}Close{% endif %}</button>{% if can_manage_integrations %}<button class="primary-button" type="submit"><span data-integration-submit>Save integration</span></button>{% endif %}</footer>
+  </form>
+</section>{% endif %}
+<div class="organization-toast" data-organization-toast aria-live="polite"></div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=7" defer></script>{% endblock %}

@@ -1,0 +1,100 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Access control · Survey Workspace{% endblock %}
+{% block header_title %}Access control{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'accounts/access.css' %}?v=3"><link rel="stylesheet" href="{% static 'accounts/access-responsive.css' %}?v=2">{% endblock %}
+{% block content %}
+<div class="csrf-source" hidden>{% csrf_token %}</div>
+{{ external_vendor_forbidden_codes|json_script:"externalVendorForbiddenCodes" }}
+<section class="access-intro">
+  <div><p class="eyebrow">People, roles & permissions</p><h1>Access control</h1><p>Create internal or external vendors, build role defaults and add individual permission overrides without leaving this page.</p></div>
+  <div class="access-actions">
+    {% if can_create_roles %}<button class="secondary-action" type="button" data-open-role>Create role</button>{% endif %}
+    {% if can_create_users %}<button class="primary-button" type="button" data-open-user>{{ create_user_label }} <span>+</span></button>{% endif %}
+  </div>
+</section>
+
+<section class="access-stats">
+  <article><span>Available roles</span><strong>{{ roles|length }}</strong><small>Default permission sets</small></article>
+  <article><span>Managed users</span><strong>{{ employees|length }}</strong><small>Your visible hierarchy</small></article>
+  <article><span>Grantable functions</span><strong>{{ functions|length }}</strong><small>Limited to your own access</small></article>
+</section>
+
+<section class="access-panel">
+  <div class="access-panel-head"><div><h2>Role defaults</h2><p>These permissions become the user's baseline; individual allow/deny rules can override them.</p></div></div>
+  <div class="access-filter-grid role-filters"><label><span>Search roles</span><input id="roleSearchFilter" type="search" placeholder="Role, function or description…"></label><button type="button" id="clearRoleFilters">Clear</button></div>
+  <div class="role-grid">
+    {% for role in roles %}
+    <article class="role-card" data-role-card="{{ role.slug }}" data-role-name="{{ role.name|lower }}">
+      <header><div><span>{% if role.is_system %}Base role{% else %}Custom role{% endif %} · Level {{ role.rank }}</span><h3>{{ role.name }}</h3></div><b>{{ role.employee_count }} users</b></header>
+      <p>{{ role.description|default:"Custom workspace role" }}</p>
+      <details class="role-permission-summary"><summary><span>{{ role.function_assignments.all|length }} assigned functions</span><i>View</i></summary><div class="permission-chips">{% for assignment in role.function_assignments.all %}{% if assignment.allowed %}<span>{{ assignment.function.name }}</span>{% endif %}{% empty %}<em>No functions assigned</em>{% endfor %}</div></details>
+      {% if request.user.is_superuser or role.created_by == request.user %}{% if 'roles.update' in access_codes or 'roles.delete' in access_codes %}<footer>{% if 'roles.update' in access_codes %}<button type="button" data-edit-role="{{ role.slug }}">Edit role</button>{% endif %}{% if 'roles.delete' in access_codes and not role.is_system %}<button class="danger-link" type="button" data-delete-role="{{ role.slug }}" data-label="{{ role.name }}">Delete</button>{% endif %}</footer>{% endif %}{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="access-panel employee-panel">
+  <div class="access-panel-head"><div><h2>Users & vendors</h2><p>Internal vendors may own respondent employees. External vendors are terminal accounts and cannot create subordinates.</p></div>{% if can_create_users %}<button type="button" class="text-action" data-open-user>{{ create_user_label }}</button>{% endif %}</div>
+  <div class="access-filter-grid user-filters">
+    <label><span>Search users</span><input id="userSearchFilter" type="search" placeholder="Name, email or company…"></label>
+    <label><span>Role</span><select id="userRoleFilter"><option value="">All roles</option>{% for role in roles %}<option value="{{ role.slug }}">{{ role.name }}</option>{% endfor %}</select></label>
+    <label><span>Account type</span><select id="userTypeFilter"><option value="">All types</option><option value="employee">Employee</option><option value="internal_vendor">Internal vendor</option><option value="external_vendor">External vendor</option></select></label>
+    <label><span>Status</span><select id="userStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+    <button type="button" id="clearUserFilters">Clear</button>
+  </div>
+  <div class="employee-table-wrap"><table class="employee-table"><thead><tr><th>User</th><th>Type</th><th>Role</th><th>Overrides</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for employee in employees %}
+    <tr data-user-row data-role="{{ employee.employee_profile.role.slug|default:'' }}" data-account-type="{{ employee.employee_profile.account_type }}" data-status="{% if employee.is_active %}active{% else %}inactive{% endif %}">
+      <td><strong>{{ employee.get_full_name|default:employee.username }}</strong><small>{{ employee.email|default:employee.username }}{% if employee.employee_profile.created_by %} · by {{ employee.employee_profile.created_by.username }}{% endif %}</small></td>
+      <td><span class="vendor-pill {{ employee.employee_profile.account_type }}">{{ employee.employee_profile.get_account_type_display }}</span>{% if employee.employee_profile.organization_unit %}<small>{{ employee.employee_profile.organization_unit.path_label }}</small>{% elif employee.employee_profile.company_name %}<small>{{ employee.employee_profile.company_name }}{% if employee.employee_profile.department %} / {{ employee.employee_profile.department }}{% endif %}</small>{% endif %}</td>
+      <td><span class="role-pill">{{ employee.employee_profile.role.name|default:"Unassigned" }}</span></td>
+      <td><div class="override-summary">{% for override in employee.function_overrides.all %}<span class="{{ override.effect }}">{{ override.get_effect_display }} · {{ override.function.name }}</span>{% empty %}<em>Role defaults only</em>{% endfor %}</div></td>
+      <td><span class="account-status {% if not employee.is_active %}inactive{% endif %}"><i></i>{% if employee.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+      <td><div class="row-actions">{% if 'users.update' in access_codes %}<button type="button" data-edit-user="{{ employee.id }}">Edit</button>{% endif %}{% if 'users.delete' in access_codes and employee != request.user and not employee.is_superuser %}<button type="button" class="danger-link" data-delete-user="{{ employee.id }}" data-label="{{ employee.get_full_name|default:employee.username }}">Delete</button>{% endif %}</div></td>
+    </tr>
+    {% empty %}<tr><td colspan="6" class="no-users">No subordinate users yet. Create your first vendor or employee.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<div class="modal-backdrop" data-modal-backdrop hidden></div>
+<section class="access-modal" id="userModal" data-creator-internal="{{ is_internal_vendor|yesno:'true,false' }}" role="dialog" aria-modal="true" aria-labelledby="userModalTitle" hidden>
+  <header><div><p class="eyebrow">Account access</p><h2 id="userModalTitle">Add user</h2></div><button type="button" class="modal-close" data-close-modal aria-label="Close">×</button></header>
+  <form id="userForm">
+    <div class="modal-body">
+      <div class="form-grid">
+        <label><span>First name</span><input name="first_name" required autocomplete="given-name"></label>
+        <label><span>Last name</span><input name="last_name" autocomplete="family-name"></label>
+        <label class="wide"><span>Email / login</span><input name="email" type="email" required autocomplete="email"></label>
+        <label class="wide"><span>Password</span><input name="password" type="password" minlength="8" autocomplete="new-password"><small data-password-note>Required for a new user, minimum 8 characters.</small></label>
+        <label><span>Account type</span><select name="account_type"><option value="employee">Employee / respondent</option>{% if not is_internal_vendor and can_create_vendor_accounts %}<option value="internal_vendor">Internal vendor</option><option value="external_vendor">External vendor</option>{% endif %}</select></label>
+        <label data-role-field><span>Default role</span><select name="role" required>{% for role in roles %}<option value="{{ role.slug }}">{{ role.name }}</option>{% endfor %}</select><small data-role-note>Role default can be customized.</small></label>
+        <label class="wide" data-organization-field><span>Branch / Sub-branch / Shift</span><select name="organization_unit"><option value="">Unassigned legacy user</option>{% for unit in organization_units %}<option value="{{ unit.id }}" data-unit-type="{{ unit.unit_type }}">{{ unit.workspace_owner.get_full_name|default:unit.workspace_owner.username }} · {{ unit.path_label }} ({{ unit.get_unit_type_display }})</option>{% endfor %}</select><small>Employees and Team Leads should be assigned to a Shift.</small></label>
+        <label class="toggle-row wide"><input name="is_active" type="checkbox" checked><span>Account is active</span></label>
+      </div>
+      <section class="permission-editor"><div><h3>Individual permission overrides</h3><p>Use role defaults normally. Select Allow for extra access or Deny to remove a role permission.</p></div>
+        <div class="permission-list">{% regroup functions by module as function_groups %}{% for group in function_groups %}<div class="permission-group"><strong>{{ group.grouper }}</strong>{% for function in group.list %}<label data-function="{{ function.code }}"><span><b>{{ function.name }}</b><small>{{ function.code }}</small></span><select><option value="role">Role default</option><option value="allow">Allow</option><option value="deny">Deny</option></select></label>{% endfor %}</div>{% endfor %}</div>
+      </section>
+      <div class="modal-error" data-user-error hidden></div>
+    </div>
+    <footer><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="submit" class="primary-button"><span data-user-submit>Create user</span></button></footer>
+  </form>
+</section>
+
+<section class="access-modal" id="roleModal" role="dialog" aria-modal="true" aria-labelledby="roleModalTitle" hidden>
+  <header><div><p class="eyebrow">Default access set</p><h2 id="roleModalTitle">Create role</h2></div><button type="button" class="modal-close" data-close-modal aria-label="Close">×</button></header>
+  <form id="roleForm">
+    <div class="modal-body">
+      <div class="form-grid"><label><span>Role name</span><input name="name" required></label><label><span>Level / rank</span><input name="rank" type="number" min="1" max="999" value="10" required></label><label><span>Visible CPI percentage</span><input name="cpi_visibility_percent" type="number" min="0" max="100" step="0.01" value="100" required><small>Employee accounts on this role see this percentage of source CPI. Example: 70 shows CPI after a 30% reduction.</small></label><label class="wide"><span>Role code</span><input name="slug" required pattern="[a-z0-9-]+" placeholder="example-vendor"></label><label class="wide"><span>Description</span><textarea name="description" rows="3"></textarea></label><label class="toggle-row wide"><input name="is_active" type="checkbox" checked><span>Role is active</span></label></div>
+      <section class="permission-editor"><div><h3>Default functions</h3><p>Select a complete page group in one click, then uncheck only the functions this role should not receive.</p></div><div class="role-permission-grid">{% regroup functions by module as role_function_groups %}{% for group in role_function_groups %}<fieldset><legend>{{ group.grouper }}</legend><label class="permission-group-select"><input type="checkbox" data-permission-group-toggle><span><b>Select entire group</b><small>Toggle every function below</small></span></label>{% for function in group.list %}<label><input type="checkbox" name="permission_codes" value="{{ function.code }}"><span><b>{{ function.name }}</b><small>{{ function.code }}</small></span></label>{% endfor %}</fieldset>{% endfor %}</div></section>
+      <div class="modal-error" data-role-error hidden></div>
+    </div>
+    <footer><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="submit" class="primary-button"><span data-role-submit>Create role</span></button></footer>
+  </form>
+</section>
+
+<section class="confirm-modal" id="confirmModal" role="alertdialog" aria-modal="true" hidden><div class="confirm-icon">!</div><h2>Delete <span data-delete-type>item</span>?</h2><p><strong data-delete-label></strong> will be permanently removed.</p><div><button type="button" class="cancel-button" data-close-modal>Cancel</button><button type="button" class="danger-button" data-confirm-delete>Delete</button></div></section>
+<div class="access-toast" data-access-toast aria-live="polite"></div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'accounts/access.js' %}?v=6" defer></script>{% endblock %}

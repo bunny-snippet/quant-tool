@@ -1,0 +1,144 @@
+{% extends "surveys/base.html" %}
+{% load static %}
+{% block title %}Vendor Management · Exchange Hub{% endblock %}
+{% block header_title %}Vendor Management{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=2">{% endblock %}
+{% block content %}
+{{ vendor_columns|json_script:"vendorColumnAccess" }}
+{{ client_columns|json_script:"clientAllocationColumnAccess" }}
+{{ vendor_project_columns|json_script:"projectAllocationColumnAccess" }}
+{{ api_columns|json_script:"apiKeyColumnAccess" }}
+<section class="page-intro vendor-intro">
+  <div><p class="eyebrow">Commercial access & capacity</p><h1>Vendor operations</h1><p>Control client visibility, CPI policy and quantity without changing the source inventory.</p></div>
+  {% if can_create_vendor %}<a class="primary-button" href="{% url 'access-control' %}?open=user">Create vendor <span>+</span></a>{% endif %}
+</section>
+
+{% if vendor_cards %}<section class="vendor-overview" aria-label="Vendor overview">
+  {% if 'vendors' in vendor_cards %}<article><span class="vendor-metric-icon vendors">V</span><div><small>Vendors</small><strong id="vendorCount">—</strong><em>Internal and external</em></div></article>{% endif %}
+  {% if 'client_grants' in vendor_cards %}<article><span class="vendor-metric-icon clients">C</span><div><small>Client grants</small><strong id="allocationCount">—</strong><em>Active assignments</em></div></article>{% endif %}
+  {% if 'quantity' in vendor_cards %}<article><span class="vendor-metric-icon capacity">Q</span><div><small>Available quantity</small><strong id="remainingQuantity">—</strong><em>Across visible clients</em></div></article>{% endif %}
+  {% if 'projects' in vendor_cards %}<article><span class="vendor-metric-icon rules">P</span><div><small>Allocated projects</small><strong id="surveyRuleCount">—</strong><em>Visible project caps</em></div></article>{% endif %}
+</section>{% endif %}
+
+<section class="vendor-workspace" id="vendorWorkspace"
+  data-view-vendors="{{ can_view_vendors|yesno:'true,false' }}"
+  data-view-client-allocations="{{ can_view_client_allocations|yesno:'true,false' }}"
+  data-view-project-allocations="{{ can_view_project_allocations|yesno:'true,false' }}"
+  data-view-api-keys="{{ can_view_api_keys|yesno:'true,false' }}"
+  data-edit-policy="{{ can_edit_vendor_policy|yesno:'true,false' }}"
+  data-allocate-client="{{ can_allocate_client|yesno:'true,false' }}"
+  data-allocate-project="{{ can_allocate_project|yesno:'true,false' }}"
+  data-create-api-key="{{ can_create_api_key|yesno:'true,false' }}"
+  data-revoke-api-key="{{ can_revoke_api_key|yesno:'true,false' }}">
+  <div class="vendor-tabs" role="tablist" aria-label="Vendor management sections">
+    {% if can_view_vendors %}<button type="button" {% if first_vendor_tab == 'vendors' %}class="active"{% endif %} data-vendor-tab="vendors" role="tab">Vendors</button>{% endif %}
+    {% if can_view_client_allocations %}<button type="button" {% if first_vendor_tab == 'clients' %}class="active"{% endif %} data-vendor-tab="clients" role="tab">Client allocations</button>{% endif %}
+    {% if can_view_project_allocations %}<button type="button" {% if first_vendor_tab == 'surveys' %}class="active"{% endif %} data-vendor-tab="surveys" role="tab">Project allocations</button>{% endif %}
+    {% if can_view_api_keys %}<button type="button" {% if first_vendor_tab == 'api-keys' %}class="active"{% endif %} data-vendor-tab="api-keys" role="tab">API keys</button>{% endif %}
+  </div>
+
+  {% if can_view_vendors %}<section class="vendor-tab-panel {% if first_vendor_tab == 'vendors' %}active{% endif %}" data-vendor-panel="vendors" {% if first_vendor_tab != 'vendors' %}hidden{% endif %}>
+    <header class="vendor-panel-head"><div><h2>Commercial policies</h2><p>Internal vendors always retain source CPI. External vendors use the configured cut.</p></div></header>
+    <div class="vendor-table-wrap"><table class="vendor-table"><thead><tr>{% if 'name' in vendor_columns %}<th>Vendor</th>{% endif %}{% if 'type' in vendor_columns %}<th>Type</th>{% endif %}{% if 'cpi' in vendor_columns %}<th>Default CPI</th>{% endif %}{% if 'clients' in vendor_columns %}<th>Clients</th>{% endif %}{% if 'status' in vendor_columns %}<th>Status</th>{% endif %}{% if 'actions' in vendor_columns %}<th><span class="sr-only">Actions</span></th>{% endif %}</tr></thead><tbody id="vendorRows"><tr><td colspan="{{ vendor_column_count }}"><div class="vendor-loading"><i></i>Loading vendors…</div></td></tr></tbody></table></div>
+    <div class="vendor-cards" id="vendorCards"></div>
+  </section>{% endif %}
+
+  {% if can_view_client_allocations %}<section class="vendor-tab-panel {% if first_vendor_tab == 'clients' %}active{% endif %}" data-vendor-panel="clients" {% if first_vendor_tab != 'clients' %}hidden{% endif %}>
+    <header class="vendor-panel-head"><div><h2>Client allocations</h2><p>A client grant controls visibility, total capacity and the optional client-level CPI cut.</p></div>{% if can_allocate_client %}<button class="primary-button compact" type="button" data-create-allocation="client">Allocate client <span>+</span></button>{% endif %}</header>
+    <div class="vendor-table-wrap"><table class="vendor-table"><thead><tr>{% if 'vendor' in client_columns %}<th>Vendor</th>{% endif %}{% if 'client' in client_columns %}<th>Client</th>{% endif %}{% if 'quantity' in client_columns %}<th>Quantity</th>{% endif %}{% if 'cpi' in client_columns %}<th>CPI cut</th>{% endif %}{% if 'window' in client_columns %}<th>Active window</th>{% endif %}{% if 'actions' in client_columns %}<th><span class="sr-only">Actions</span></th>{% endif %}</tr></thead><tbody id="clientAllocationRows"></tbody></table></div>
+    <div class="vendor-cards" id="clientAllocationCards"></div>
+  </section>{% endif %}
+
+  {% if can_view_project_allocations %}<section class="vendor-tab-panel {% if first_vendor_tab == 'surveys' %}active{% endif %}" data-vendor-panel="surveys" {% if first_vendor_tab != 'surveys' %}hidden{% endif %}>
+    <header class="vendor-panel-head"><div><h2>Project allocations</h2><p>Only projects allocated here appear in the vendor panel/API; every project has its own complete cap.</p></div>{% if can_allocate_project %}<button class="primary-button compact" type="button" data-create-allocation="survey">Allocate project <span>+</span></button>{% endif %}</header>
+    <div class="vendor-table-wrap"><table class="vendor-table"><thead><tr>{% if 'vendor' in vendor_project_columns %}<th>Vendor</th>{% endif %}{% if 'survey' in vendor_project_columns %}<th>Survey</th>{% endif %}{% if 'client' in vendor_project_columns %}<th>Client</th>{% endif %}{% if 'quantity' in vendor_project_columns %}<th>Quantity</th>{% endif %}{% if 'cpi' in vendor_project_columns %}<th>CPI cut</th>{% endif %}{% if 'actions' in vendor_project_columns %}<th><span class="sr-only">Actions</span></th>{% endif %}</tr></thead><tbody id="surveyAllocationRows"></tbody></table></div>
+    <div class="vendor-cards" id="surveyAllocationCards"></div>
+  </section>{% endif %}
+
+  {% if can_view_api_keys %}<section class="vendor-tab-panel {% if first_vendor_tab == 'api-keys' %}active{% endif %}" data-vendor-panel="api-keys" {% if first_vendor_tab != 'api-keys' %}hidden{% endif %}>
+    <header class="vendor-panel-head"><div><h2>External vendor API keys</h2><p>Keys inherit the vendor's exact permissions, client grants, survey rules and CPI cuts.</p></div>{% if can_create_api_key %}<button class="primary-button compact" type="button" data-create-api-key>Generate key <span>+</span></button>{% endif %}</header>
+    <div class="vendor-table-wrap"><table class="vendor-table"><thead><tr>{% if 'vendor' in api_columns %}<th>Vendor</th>{% endif %}{% if 'key' in api_columns %}<th>Key</th>{% endif %}{% if 'created' in api_columns %}<th>Created</th>{% endif %}{% if 'last_used' in api_columns %}<th>Last used</th>{% endif %}{% if 'expires' in api_columns %}<th>Expires</th>{% endif %}{% if 'actions' in api_columns %}<th><span class="sr-only">Actions</span></th>{% endif %}</tr></thead><tbody id="apiKeyRows"></tbody></table></div>
+    <div class="vendor-cards" id="apiKeyCards"></div>
+  </section>{% endif %}
+</section>
+
+<div class="vendor-modal-backdrop" id="vendorModalBackdrop" hidden></div>
+<section class="vendor-modal" id="vendorPolicyModal" role="dialog" aria-modal="true" aria-labelledby="vendorPolicyModalTitle" hidden>
+  <form id="vendorPolicyForm" data-vendor-form="policy">
+    <header><div><p class="eyebrow" data-modal-eyebrow>Vendor policy</p><h2 id="vendorPolicyModalTitle" data-modal-title>Edit commercial policy</h2></div><button type="button" class="vendor-modal-close" data-close-vendor-modal aria-label="Close">×</button></header>
+    <div class="vendor-modal-body">
+      <input type="hidden" name="record_id">
+      <div class="vendor-form-grid">
+        <label class="wide"><span>Vendor</span><select name="policy_vendor" required></select></label>
+        <label><span>Default CPI cut (%)</span><input name="default_cpi_cut_percent" type="number" min="0" max="100" step="0.01" required></label>
+        <label><span>Currency</span><select name="currency"><option value="USD">USD</option><option value="INR">INR</option><option value="EUR">EUR</option><option value="GBP">GBP</option></select></label>
+        <label class="wide"><span>Delivery access</span><select name="delivery_mode"><option value="panel">Panel only</option><option value="api">API only</option><option value="both">Panel + API</option></select></label>
+        <p class="vendor-form-note wide" id="policyRuleNote">External vendor payable CPI = source CPI minus this percentage.</p>
+      </div>
+      <label class="vendor-active-toggle"><input name="is_active" type="checkbox" checked><span>Active</span><small>Inactive policies stop panel and API delivery.</small></label>
+      <div class="vendor-form-error" data-vendor-form-error hidden></div>
+    </div>
+    <footer><button type="button" class="vendor-secondary" data-close-vendor-modal>Cancel</button><button class="primary-button" type="submit" data-vendor-submit>Save policy</button></footer>
+  </form>
+</section>
+
+<section class="vendor-modal" id="clientAllocationModal" role="dialog" aria-modal="true" aria-labelledby="clientAllocationModalTitle" hidden>
+  <form id="clientAllocationForm" data-vendor-form="client">
+    <header><div><p class="eyebrow">Client visibility &amp; capacity</p><h2 id="clientAllocationModalTitle" data-modal-title>Allocate a client</h2></div><button type="button" class="vendor-modal-close" data-close-vendor-modal aria-label="Close">×</button></header>
+    <div class="vendor-modal-body">
+      <input type="hidden" name="record_id">
+      <div class="vendor-form-grid">
+        <label><span>Vendor</span><select name="client_vendor" required></select></label>
+        <label><span>Client</span><select name="client" required></select></label>
+        <label><span>Total complete limit</span><input name="client_quantity_limit" type="number" min="0" step="1" required></label>
+        <label><span>CPI cut override (%)</span><input name="client_cpi_cut" type="number" min="0" max="100" step="0.01" placeholder="Use vendor default"></label>
+        <label><span>Starts at</span><input name="client_starts_at" type="datetime-local"></label>
+        <label><span>Ends at</span><input name="client_ends_at" type="datetime-local"></label>
+        <p class="vendor-form-note wide">This is the total complete ceiling across explicitly allocated projects. Projects are added separately in Survey allocations.</p>
+      </div>
+      <label class="vendor-active-toggle"><input name="is_active" type="checkbox" checked><span>Active</span><small>Inactive client grants hide every allocated project.</small></label>
+      <div class="vendor-form-error" data-vendor-form-error hidden></div>
+    </div>
+    <footer><button type="button" class="vendor-secondary" data-close-vendor-modal>Cancel</button><button class="primary-button" type="submit" data-vendor-submit>Save allocation</button></footer>
+  </form>
+</section>
+
+<section class="vendor-modal" id="surveyAllocationModal" role="dialog" aria-modal="true" aria-labelledby="surveyAllocationModalTitle" hidden>
+  <form id="surveyAllocationForm" data-vendor-form="survey">
+    <header><div><p class="eyebrow">Project access &amp; cap</p><h2 id="surveyAllocationModalTitle" data-modal-title>Allocate a project</h2></div><button type="button" class="vendor-modal-close" data-close-vendor-modal aria-label="Close">×</button></header>
+    <div class="vendor-modal-body">
+      <input type="hidden" name="record_id"><input type="hidden" name="survey">
+      <div class="vendor-form-grid">
+        <label class="wide"><span>Parent client allocation</span><select name="client_allocation" required></select></label>
+        <label class="wide survey-search-field"><span>Survey</span><input name="survey_search" autocomplete="off" placeholder="Search project ID, survey ID or name" required><div class="survey-search-results" id="surveySearchResults" hidden></div></label>
+        <label><span>Project complete cap</span><input name="survey_quantity_limit" type="number" min="0" step="1" required></label>
+        <label><span>CPI cut override (%)</span><input name="survey_cpi_cut" type="number" min="0" max="100" step="0.01" placeholder="Use client policy"></label>
+        <label><span>Starts at</span><input name="survey_starts_at" type="datetime-local"></label>
+        <label><span>Ends at</span><input name="survey_ends_at" type="datetime-local"></label>
+      </div>
+      <label class="vendor-active-toggle"><input name="is_active" type="checkbox" checked><span>Active</span><small>Only active allocated projects appear in the vendor Projects page and API.</small></label>
+      <div class="vendor-form-error" data-vendor-form-error hidden></div>
+    </div>
+    <footer><button type="button" class="vendor-secondary" data-close-vendor-modal>Cancel</button><button class="primary-button" type="submit" data-vendor-submit>Save project allocation</button></footer>
+  </form>
+</section>
+
+<section class="vendor-modal" id="vendorApiKeyModal" role="dialog" aria-modal="true" aria-labelledby="vendorApiKeyModalTitle" hidden>
+  <form id="vendorApiKeyForm" data-vendor-form="api_key">
+    <header><div><p class="eyebrow">External integration</p><h2 id="vendorApiKeyModalTitle">Generate API key</h2></div><button type="button" class="vendor-modal-close" data-close-vendor-modal aria-label="Close">×</button></header>
+    <div class="vendor-modal-body">
+      <input type="hidden" name="record_id">
+      <div class="vendor-form-grid">
+        <label class="wide"><span>External vendor</span><select name="api_vendor" required></select></label>
+        <label><span>Key label</span><input name="api_key_name" maxlength="120" placeholder="e.g. Production integration" required></label>
+        <label><span>Expires at (optional)</span><input name="api_key_expires_at" type="datetime-local"></label>
+        <p class="vendor-form-note wide">The plaintext key is displayed once. Its permissions and visible data always follow this vendor's live configuration.</p>
+      </div>
+      <section class="issued-key-panel" id="issuedKeyPanel" hidden><span>Copy this key now</span><div><input id="issuedKeyValue" readonly><button type="button" id="copyIssuedKey">Copy</button></div><small>It cannot be recovered after this modal is closed.</small></section>
+      <div class="vendor-form-error" data-vendor-form-error hidden></div>
+    </div>
+    <footer><button type="button" class="vendor-secondary" data-close-vendor-modal>Close</button><button class="primary-button" type="submit" data-vendor-submit>Generate secure key</button></footer>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=5" defer></script>{% endblock %}

@@ -1,0 +1,170 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Studies · Survey Workspace{% endblock %}
+{% block header_title %}Studies{% endblock %}
+{% block content %}
+{{ study_columns|json_script:"studyColumnAccess" }}
+<section class="page-intro studies-intro">
+  <div>
+    <p class="eyebrow">Respondent tracking</p>
+    <h1>Studies</h1>
+    <p>Follow every survey journey from entry through its final callback.</p>
+  </div>
+  {% if can_export %}<button class="primary-button export-button" id="exportStudies" type="button"><span aria-hidden="true">↓</span> Export full CSV</button>{% endif %}
+</section>
+
+{% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
+  {% if 'revenue' in study_cards %}<article class="revenue"><span>↗</span><div><small>Total revenue</small><strong id="studyMetricRevenue">—</strong><em>All completed · historical CPI recovered</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
+  {% if 'total' in study_cards or 'completed' in study_cards or 'conversion' in study_cards %}<article class="study-summary-card traffic-summary"><header><span>H</span><div><small>Traffic</small><em>Filtered journeys</em></div></header><div class="summary-metrics">
+    {% if 'total' in study_cards %}<span><small>Total hits</small><strong id="studyMetricTotal">—</strong></span>{% endif %}
+    {% if 'completed' in study_cards %}<span><small>Completes</small><strong id="studyMetricCompleted">—</strong></span>{% endif %}
+    {% if 'conversion' in study_cards %}<span><small>Conversion</small><strong id="studyMetricConversion">—</strong></span>{% endif %}
+  </div></article>{% endif %}
+  {% if 'initiated' in study_cards or 'terminated' in study_cards or 'quota' in study_cards or 'security' in study_cards %}<article class="study-summary-card status-summary"><header><span>◎</span><div><small>Outcomes</small><em>Current final status</em></div></header><div class="summary-metrics status-metrics">
+    {% if 'initiated' in study_cards %}<span class="initiated"><small><i></i>Initiated</small><strong id="studyMetricInitiated">—</strong></span>{% endif %}
+    {% if 'terminated' in study_cards %}<span class="terminated"><small><i></i>Terminate</small><strong id="studyMetricTerminated">—</strong></span>{% endif %}
+    {% if 'quota' in study_cards %}<span class="quota"><small><i></i>Quota</small><strong id="studyMetricQuota">—</strong></span>{% endif %}
+    {% if 'security' in study_cards %}<span class="security"><small><i></i>Security</small><strong id="studyMetricSecurity">—</strong></span>{% endif %}
+  </div></article>{% endif %}
+  {% if 'desktop' in study_cards or 'mobile' in study_cards or 'tablet' in study_cards %}<article class="study-summary-card device-summary"><header><span>▣</span><div><small>Completed devices</small><em>Desktop · Mobile · Tablet</em></div></header><div class="summary-metrics device-metrics">
+    {% if 'desktop' in study_cards %}<span><small><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>D</small><strong id="studyMetricDesktop">—</strong></span>{% endif %}
+    {% if 'mobile' in study_cards %}<span><small><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>M</small><strong id="studyMetricMobile">—</strong></span>{% endif %}
+    {% if 'tablet' in study_cards %}<span><small><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".7"/></svg>T</small><strong id="studyMetricTablet">—</strong></span>{% endif %}
+  </div></article>{% endif %}
+</section>{% endif %}
+
+{% if request.GET.internal_id and study_filters.project %}<div class="active-project-scope" id="studyProjectScope"><span>Project filter</span><strong>{{ request.GET.internal_id }}</strong><button type="button" id="clearProjectScope">×</button></div>{% endif %}
+
+<section class="filter-panel studies-filters" aria-label="Study filters">
+  {% if study_filters.search %}<div class="field search-field">
+    <label for="studySearch">Search</label>
+    <div class="field-control"><span aria-hidden="true">⌕</span><input id="studySearch" type="search" placeholder="RID, survey, user, IP, browser…" autocomplete="off"></div>
+  </div>{% endif %}
+  {% if study_filters.branch %}<div class="field multi-field">
+    <label id="studyBranchLabel">Branch</label>
+    <div class="multi-select" data-multi-filter="branch">
+      <button class="multi-trigger" type="button" aria-labelledby="studyBranchLabel" aria-expanded="false"><span>All branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>
+        <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search branch…" aria-label="Search branches" autocomplete="off"></div>
+        <div class="multi-options">{% for branch in study_branches %}<label><input type="checkbox" value="{{ branch.value }}"><span>{{ branch.name }}</span></label>{% empty %}<span class="filter-empty">No branches available</span>{% endfor %}</div>
+        <p class="multi-no-results" hidden>No matching branch</p>
+      </div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.sub_branch %}<div class="field multi-field">
+    <label id="studySubBranchLabel">Sub-branch</label>
+    <div class="multi-select" data-multi-filter="sub_branch">
+      <button class="multi-trigger" type="button" aria-labelledby="studySubBranchLabel" aria-expanded="false"><span>All sub-branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>
+        <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search sub-branch…" aria-label="Search sub-branches" autocomplete="off"></div>
+        <div class="multi-options">{% for sub_branch in study_sub_branches %}<label data-branch-value="{{ sub_branch.branch_value }}"><input type="checkbox" value="{{ sub_branch.value }}"><span>{{ sub_branch.name }}</span></label>{% empty %}<span class="filter-empty">No sub-branches available</span>{% endfor %}</div>
+        <p class="multi-no-results" hidden>No matching sub-branch</p>
+      </div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.shift %}<div class="field multi-field">
+    <label id="studyShiftLabel">Shift</label>
+    <div class="multi-select" data-multi-filter="shift">
+      <button class="multi-trigger" type="button" aria-labelledby="studyShiftLabel" aria-expanded="false"><span>All shifts</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>
+        <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search shift…" aria-label="Search shifts" autocomplete="off"></div>
+        <div class="multi-options">{% for shift in study_shifts %}<label data-branch-value="{{ shift.branch_value }}" data-sub-branch-value="{{ shift.sub_branch_value }}"><input type="checkbox" value="{{ shift.value }}"><span>{{ shift.name }}</span></label>{% empty %}<span class="filter-empty">No shifts available</span>{% endfor %}</div>
+        <p class="multi-no-results" hidden>No matching shift</p>
+      </div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.user %}<div class="field multi-field">
+    <label id="studyUserLabel">User</label>
+    <div class="multi-select" data-multi-filter="user">
+      <button class="multi-trigger" type="button" aria-labelledby="studyUserLabel" aria-expanded="false"><span>All users</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>
+        <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search user…" aria-label="Search users" autocomplete="off"></div>
+        <div class="multi-options">{% for tracked_user in tracked_users %}<label data-branch-value="{{ tracked_user.branch_value }}" data-sub-branch-value="{{ tracked_user.sub_branch_value }}" data-shift-value="{{ tracked_user.shift_value }}"><input type="checkbox" value="{{ tracked_user.user_id }}"><span>{{ tracked_user.user_name }}</span></label>{% empty %}<span class="filter-empty">No authorized users available</span>{% endfor %}</div>
+        <p class="multi-no-results" hidden>No matching user</p>
+      </div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.status %}<div class="field multi-field">
+    <label id="attemptStatusLabel">Status</label>
+    <div class="multi-select" data-multi-filter="status">
+      <button class="multi-trigger" type="button" aria-labelledby="attemptStatusLabel" aria-expanded="false"><span>All statuses</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>{% for value, label in attempt_statuses %}<label><input type="checkbox" value="{{ value }}"><span>{{ label }}</span></label>{% endfor %}</div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.country %}<div class="field multi-field">
+    <label id="studyCountryLabel">Country</label>
+    <div class="multi-select" data-multi-filter="country">
+      <button class="multi-trigger" type="button" aria-labelledby="studyCountryLabel" aria-expanded="false"><span>All countries</span><i>⌄</i></button>
+      <div class="multi-menu" hidden>
+        <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search country…" aria-label="Search countries" autocomplete="off"></div>
+        <div class="multi-options">{% for country in study_countries %}<label><input type="checkbox" value="{{ country.country_code }}"><span>{{ country.country|default:country.country_code }} · {{ country.country_code }}</span></label>{% empty %}<span class="filter-empty">No countries available</span>{% endfor %}</div>
+        <p class="multi-no-results" hidden>No matching country</p>
+      </div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.client %}<div class="field multi-field">
+    <label id="studyClientLabel">Client</label>
+    <div class="multi-select" data-multi-filter="client">
+      <button class="multi-trigger" type="button" aria-labelledby="studyClientLabel" aria-expanded="false"><span>All clients</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-options">{% for client in study_clients %}<label><input type="checkbox" value="{{ client.survey__client_id }}"><span>{{ client.survey__client__name }}</span></label>{% empty %}<span class="filter-empty">No clients yet</span>{% endfor %}</div></div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.buyer %}<div class="field multi-field">
+    <label id="studyBuyerLabel">Sub-client / Buyer ID</label>
+    <div class="multi-select" data-multi-filter="buyer_id">
+      <button class="multi-trigger" type="button" aria-labelledby="studyBuyerLabel" aria-expanded="false"><span>All buyer IDs</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-options">{% for buyer in study_buyers %}<label data-client-id="{{ buyer.survey__client_id|default:'' }}"><input type="checkbox" value="{{ buyer.survey__buyer_id }}"><span>{{ buyer.survey__buyer_id }}</span></label>{% empty %}<span class="filter-empty">No buyer IDs yet</span>{% endfor %}</div></div>
+    </div>
+  </div>{% endif %}
+  {% if study_filters.date %}<div class="field">
+    <label for="studyDateField">Date column</label>
+    <select id="studyDateField"><option value="initiated">Entry date</option><option value="callback">Exit date</option></select>
+  </div>
+  <div class="field datetime-field">
+    <label for="studyFromDateTime">From date &amp; time</label>
+    <div class="datetime-control"><input id="studyFromDateTime" type="datetime-local" step="60" aria-label="From date and time in IST"></div>
+  </div>
+  <div class="field datetime-field">
+    <label for="studyToDateTime">To date &amp; time</label>
+    <div class="datetime-control"><input id="studyToDateTime" type="datetime-local" step="60" aria-label="To date and time in IST"></div>
+  </div>{% endif %}
+  {% if study_filters.clear %}<button class="clear-button" id="clearStudyFilters" type="button">Clear filters</button>{% endif %}
+</section>
+
+<section class="survey-panel studies-panel">
+  <div class="panel-head">
+    <div><h2>Respondent activity</h2><p id="studySummary">Loading tracked attempts…</p></div>
+    <div class="panel-tools">{% if can_change_study_page_size %}<label class="compact-select">Rows<select id="studyPageSize"><option selected>10</option><option>20</option><option>50</option><option>100</option></select></label>{% endif %}</div>
+  </div>
+  <div class="table-wrap studies-table-wrap">
+    <table class="survey-table studies-table">
+      <thead><tr>
+        {% if 'project_id' in study_columns %}<th class="study-col-project">Project ID</th>{% endif %}
+        {% if 'survey_id' in study_columns %}<th class="study-col-survey">Survey ID</th>{% endif %}
+        {% if 'country' in study_columns %}<th class="study-col-country">Country</th>{% endif %}
+        {% if 'cpi' in study_columns %}<th class="study-col-cpi">CPI</th>{% endif %}
+        {% if 'respondent_id' in study_columns %}<th class="study-col-rid">Respondent ID</th>{% endif %}
+        {% if 'user' in study_columns %}<th class="study-col-user">Name</th>{% endif %}
+        {% if 'device' in study_columns %}<th class="study-col-device">Device</th>{% endif %}
+        {% if 'ip' in study_columns %}<th class="study-col-ip">IP address</th>{% endif %}
+        {% if 'loi' in study_columns %}<th class="study-col-loi">LOI</th>{% endif %}
+        {% if 'status' in study_columns %}<th class="study-col-status">Status</th>{% endif %}
+        {% if 'start' in study_columns %}<th class="study-col-start">Start</th>{% endif %}
+        {% if 'end' in study_columns %}<th class="study-col-end">End</th>{% endif %}
+      </tr></thead>
+      <tbody id="studyRows"><tr><td colspan="{{ study_column_count }}"><div class="table-loader"><i></i><span>Fetching respondent activity…</span></div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="mobile-cards studies-cards" id="studyCards"></div>
+  <div class="panel-foot">
+    <span id="studyPageStatus">Page 1</span>
+    {% if can_paginate_studies %}<nav class="pagination" aria-label="Study pages">
+      <button id="studyFirstPage" type="button" aria-label="First page">«</button><button id="studyPrevPage" type="button" aria-label="Previous page">‹</button>
+      <label><span class="sr-only">Current page</span><input id="studyPageInput" type="number" min="1" value="1"></label>
+      <span id="studyTotalPages">of 1</span>
+      <button id="studyNextPage" type="button" aria-label="Next page">›</button><button id="studyLastPage" type="button" aria-label="Last page">»</button>
+    </nav>{% endif %}
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=14" defer></script>{% endblock %}

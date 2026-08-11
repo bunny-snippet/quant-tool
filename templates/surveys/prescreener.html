@@ -1,0 +1,76 @@
+{% extends 'surveys/flow_base.html' %}
+{% block title %}A few questions before you begin{% endblock %}
+{% block body_class %}prescreener-page{% endblock %}
+{% block content %}
+<header class="flow-header">
+  <a href="/projects/" class="flow-brand"><span class="flow-brand-mark">S</span><span>Exchange Hub</span></a>
+  <span class="rid-pill">RID <strong>{{ attempt.rid }}</strong></span>
+</header>
+
+<main class="prescreener-shell">
+  <section class="prescreener-intro">
+    <p class="flow-eyebrow">Before you continue</p>
+    <h1>A few quick questions</h1>
+    <p>Your answers help route you to the right survey experience.</p>
+    <div class="survey-context"><span>{{ survey.company_name }}</span><i></i><span>{{ survey.country_code }} {{ survey.language_code }}</span><i></i><span>About {{ survey.loi|default:"—" }} min</span></div>
+  </section>
+
+  {% if warning %}<div class="flow-alert warning">{{ warning }}</div>{% endif %}
+  {% if errors %}<div class="flow-alert error"><strong>Please review your answers</strong>{% for error in errors %}<span>{{ error }}</span>{% endfor %}</div>{% endif %}
+
+  <form method="post" class="prescreener-form" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="rid" value="{{ attempt.rid }}">
+    {% if is_rfg %}<input type="hidden" id="rfgFingerprint" name="rfg_fingerprint" value="0">{% endif %}
+    {% for question in questions %}
+      <fieldset class="screen-question">
+        <legend><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><span><small>{{ question.model.category|default:"Profile" }} · {{ question.model.question_type|default:"Question" }}</small><strong>{{ question.display_text }}</strong></span></legend>
+
+        {% if question.input_kind == "radio" %}
+          <div class="choice-grid">
+            {% for option in question.options %}<label class="choice-card"><input type="radio" name="{{ question.field_name }}" value="{{ option.value }}" {% if option.selected %}checked{% endif %} required><span>{{ option.label }}</span></label>{% endfor %}
+          </div>
+        {% elif question.input_kind == "checkbox" %}
+          <div class="choice-grid">
+            {% for option in question.options %}<label class="choice-card"><input type="checkbox" name="{{ question.field_name }}" value="{{ option.value }}" {% if option.selected %}checked{% endif %}><span>{{ option.label }}</span></label>{% endfor %}
+          </div>
+        {% elif question.input_kind == "number" %}
+          <label class="open-answer"><span>Your answer</span><input type="number" inputmode="numeric" name="{{ question.field_name }}" value="{{ question.current_value }}" {% if question.min_value != None %}min="{{ question.min_value }}"{% endif %} {% if question.max_value != None %}max="{{ question.max_value }}"{% endif %} placeholder="Enter a number" required></label>
+          {% if question.min_value != None %}<small class="answer-hint">Accepted range: {{ question.min_value }}–{{ question.max_value }}</small>{% endif %}
+        {% elif question.input_kind == "date" %}
+          <label class="open-answer"><span>Your answer</span><input type="date" name="{{ question.field_name }}" value="{{ question.current_value }}" required></label>
+        {% else %}
+          <label class="open-answer"><span>Your answer</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="Type your answer" required></label>
+        {% endif %}
+      </fieldset>
+    {% empty %}
+      <section class="no-screening-card">
+        <div class="no-data-animation" aria-hidden="true"><span></span><span></span><span></span><i>✓</i></div>
+        <h2>No additional questions</h2>
+        <p>This survey does not require any pre-screening answers right now.</p>
+      </section>
+    {% endfor %}
+
+    <div class="form-actions"><p>By continuing, your survey attempt and duration will be recorded against this RID.</p><button type="submit">Continue to survey <span>→</span></button></div>
+  </form>
+</main>
+{% endblock %}
+{% block scripts %}
+{% if is_rfg %}
+<script src="https://hosting.researchforgood.com/js/df-fp.js"></script>
+<script>
+(() => {
+  const field = document.getElementById('rfgFingerprint');
+  if (!field || typeof window.getDataForceFingerprint !== 'function') return;
+  try {
+    window.getDataForceFingerprint((fingerprint) => {
+      const value = String(fingerprint || '').trim();
+      if (/^[0-9a-f]{32,128}$/i.test(value)) field.value = value;
+    });
+  } catch (error) {
+    field.value = '0';
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

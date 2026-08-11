@@ -1,0 +1,19 @@
+[Unit]
+Description=Quest Tool Django web service
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=questtool
+Group=www-data
+WorkingDirectory=/opt/quest-tool
+Environment=PYTHONUNBUFFERED=1
+Environment=GUNICORN_BIND=127.0.0.1:8091
+EnvironmentFile=/etc/quest-tool/quest-tool.env
+ExecStart=/opt/quest-tool/.venv/bin/gunicorn config.wsgi:application --bind ${GUNICORN_BIND} --workers 3 --timeout 120 --access-logfile - --error-logfile -
+Restart=always
+RestartSec=5
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,85 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Survey inventory workspace">
+  <title>{% block title %}Survey Workspace{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=30">
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="page-{{ active_page|default:'workspace' }}">
+  <div class="app-shell" data-sidebar="open">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="{% url 'home' %}" aria-label="Survey Workspace home">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span class="brand-copy"><strong>Exchange Hub</strong><small>Inventory workspace</small></span>
+      </a>
+
+      <nav class="nav-list">
+        {% if 'dashboard.view' in access_codes %}<a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+          <span class="nav-icon">⌁</span><span>Dashboard</span>
+        </a>{% endif %}
+        {% if 'projects.view' in access_codes %}<a class="nav-item {% if active_page == 'projects' %}active{% endif %}" href="{% url 'projects' %}">
+          <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret">⌃</span>
+        </a>
+        {% if active_page == 'projects' %}<span class="nav-child"><i></i>All surveys</span>{% endif %}{% endif %}
+        {% if 'attempts.view' in access_codes %}<a class="nav-item {% if active_page == 'studies' %}active{% endif %}" href="{% url 'studies' %}">
+          <span class="nav-icon">◎</span><span>Studies</span>
+        </a>{% endif %}
+        {% if 'termination_reasons.view' in access_codes %}<a class="nav-item {% if active_page == 'termination-reasons' %}active{% endif %}" href="{% url 'termination-reasons' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg></span><span>Term Reasons</span><span class="nav-caret">⌃</span>
+        </a>
+        {% if active_page == 'termination-reasons' %}<div class="nav-submenu" aria-label="Termination reasons by client">
+          <a class="nav-child-link {% if not client_filter %}active{% endif %}" href="{% url 'termination-reasons' %}"><i></i>All terms</a>
+          {% if reason_filters.client %}{% for client in term_reason_clients %}<a class="nav-child-link {% if client_filter == client.survey__client_id|stringformat:'s' %}active{% endif %}" href="{% url 'termination-reasons' %}?client={{ client.survey__client_id }}"><i></i>{{ client.survey__client__name }}</a>{% endfor %}{% endif %}
+        </div>{% endif %}{% endif %}
+        {% if 'user_hits.view' in access_codes %}<a class="nav-item {% if active_page == 'user-hits' %}active{% endif %}" href="{% url 'user-hits' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>User Hits</span>
+        </a>{% endif %}
+        {% if 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}
+        <a class="nav-item {% if active_page == 'vendors' %}active{% endif %}" href="{% url 'vendor-management' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20v-9l8-5 8 5v9"/><path d="M8 20v-5h8v5M9 11h6"/></svg></span><span>Vendors</span>
+        </a>
+        {% endif %}
+        {% if 'clients.integration.view' in access_codes %}<a class="nav-item {% if active_page == 'client-integrations' %}active{% endif %}" href="{% url 'client-integrations' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 12h8m-4-4v8M5 5h14v14H5z"/></svg></span><span>Client APIs</span>
+        </a>{% endif %}
+        {% if 'organization.view' in access_codes %}<a class="nav-item {% if active_page == 'organization' %}active{% endif %}" href="{% url 'organization-management' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v5m-6 4v7m12-7v7M6 13h12M3 9h6v4H3zm12 0h6v4h-6zM9 3h6v4H9z"/></svg></span><span>Organization</span>
+        </a>{% endif %}
+        {% if 'access.manage' in access_codes or 'users.view' in access_codes or 'users.create' in access_codes or 'roles.view' in access_codes or 'roles.create' in access_codes or 'respondents.create' in access_codes %}
+        <a class="nav-item {% if active_page == 'access-control' %}active{% endif %}" href="{% url 'access-control' %}">
+          <span class="nav-icon">âš™</span><span>Access control</span>
+        </a>
+        {% endif %}
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="workspace-card">
+          <span>{{ request.user.username|first|upper }}</span>
+          <div><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{% if current_employee_profile.role %}{{ current_employee_profile.role.name }}{% else %}Employee{% endif %}</small></div>
+          <div class="workspace-actions">
+            {% if 'api_docs.view' in access_codes %}<a class="sidebar-docs" href="{% url 'swagger-ui' %}" aria-label="API documentation" title="API docs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z"/><path d="M8 20a3 3 0 0 1 0-6h11M9 8h6"/></svg></a>{% endif %}
+            <form method="post" action="{% url 'logout' %}" class="sidebar-logout">{% csrf_token %}<button type="submit" aria-label="Logout" title="Logout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg></button></form>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <button class="scrim" id="scrim" aria-label="Close navigation"></button>
+    <button class="mobile-navigation-button" id="menuButton" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button>
+
+    <main class="main-area">
+      <div class="content">{% block content %}{% endblock %}</div>
+    </main>
+  </div>
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  <script src="{% static 'surveys/app.js' %}?v=6" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

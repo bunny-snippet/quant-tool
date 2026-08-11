@@ -1,0 +1,93 @@
+{% extends 'surveys/base.html' %}
+{% block title %}Termination Reasons · Survey Workspace{% endblock %}
+{% block content %}
+<section class="page-intro reason-page-intro">
+  <div>
+    <p class="eyebrow">Provider outcome audit</p>
+    <h1>Termination Reasons</h1>
+    <p>Review every terminated, quota-full and quality/security outcome across connected clients.</p>
+  </div>
+</section>
+
+{% if reason_cards %}<section class="reason-overview" aria-label="Filtered outcome totals">
+  {% if 'total' in reason_cards %}<article class="total"><span>Σ</span><div><small>Unsuccessful</small><strong>{{ summary.total }}</strong><em>Filtered outcomes</em></div></article>{% endif %}
+  {% if 'terminated' in reason_cards %}<article class="terminated"><span>×</span><div><small>Terminated</small><strong>{{ summary.terminated }}</strong><em>Provider or client term</em></div></article>{% endif %}
+  {% if 'quota' in reason_cards %}<article class="quota"><span>Q</span><div><small>Quota full</small><strong>{{ summary.quota }}</strong><em>Quota outcomes</em></div></article>{% endif %}
+  {% if 'quality' in reason_cards %}<article class="quality"><span>!</span><div><small>Quality / security</small><strong>{{ summary.quality }}</strong><em>Quality outcomes</em></div></article>{% endif %}
+</section>{% endif %}
+
+<section class="filter-panel reason-list-filters" aria-label="Outcome filters">
+  {% if reason_filters.rid %}<div class="field search-field">
+    <label for="reasonSearch">RID</label>
+    <div class="field-control"><span aria-hidden="true">⌕</span><input id="reasonSearch" name="search" form="reasonFilters" type="search" value="{{ search_query }}" maxlength="10" placeholder="Search respondent RID…" autocomplete="off"></div>
+  </div>{% endif %}
+  {% if reason_filters.status %}<div class="field"><label for="reasonStatus">Status</label><select id="reasonStatus" name="status" form="reasonFilters"><option value="">All unsuccessful</option>{% for value, label in attempt_statuses %}<option value="{{ value }}"{% if status_filter == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
+  {% if reason_filters.client %}<div class="field"><label for="reasonClient">Client</label><select id="reasonClient" name="client" form="reasonFilters"><option value="">All clients</option>{% for client in client_options %}<option value="{{ client.survey__client_id }}"{% if client_filter == client.survey__client_id|stringformat:"s" %} selected{% endif %}>{{ client.survey__client__name }}</option>{% endfor %}</select></div>{% endif %}
+  <form id="reasonFilters" method="get" action="{% url 'termination-reasons' %}"><button class="primary-button reason-filter-button" type="submit">Apply filters</button></form>
+  {% if reason_filters.clear %}<a class="clear-button reason-clear-link" href="{% url 'termination-reasons' %}">Clear filters</a>{% endif %}
+</section>
+
+{% if lookup_error and not detail_attempt %}<div class="reason-alert"><strong>Outcome not found</strong><span>{{ lookup_error }}</span></div>{% endif %}
+
+<section class="survey-panel reason-list-panel">
+  <div class="panel-head"><div><h2>Final unsuccessful outcomes</h2><p>Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} records</p></div></div>
+  <div class="table-wrap reason-table-wrap">
+    <table class="survey-table reason-table">
+      <thead><tr>
+        {% if 'rid' in reason_columns %}<th>RID</th>{% endif %}
+        {% if 'survey' in reason_columns %}<th>Project / Survey</th>{% endif %}
+        {% if 'client' in reason_columns %}<th>Client</th>{% endif %}
+        {% if 'respondent' in reason_columns %}<th>Respondent</th>{% endif %}
+        {% if 'status' in reason_columns %}<th>Status</th>{% endif %}
+        {% if 'ended' in reason_columns %}<th>Ended</th>{% endif %}
+        {% if 'actions' in reason_columns %}<th>Action</th>{% endif %}
+      </tr></thead>
+      <tbody>{% for row in page_obj %}<tr>
+        {% if 'rid' in reason_columns %}<td><strong class="reason-rid">{{ row.rid }}</strong></td>{% endif %}
+        {% if 'survey' in reason_columns %}<td><strong>{{ row.survey.local_id }}</strong><span class="sub-id">Survey {{ row.survey.source_key }}</span></td>{% endif %}
+        {% if 'client' in reason_columns %}<td><strong>{% if row.survey.client %}{{ row.survey.client.name }}{% else %}{{ row.survey.company_name|default:"Unknown client" }}{% endif %}</strong><span class="sub-id">{% if row.survey.integration %}{{ row.survey.integration.provider_code }}{% else %}innovatemr{% endif %}</span></td>{% endif %}
+        {% if 'respondent' in reason_columns %}<td><strong>{% if row.platform_user %}{{ row.platform_user.get_full_name|default:row.platform_user.username }}{% else %}Unavailable{% endif %}</strong><span class="sub-id">{{ row.callback_ip|default:row.initiation_ip|default:"No IP" }}</span></td>{% endif %}
+        {% if 'status' in reason_columns %}<td><span class="reason-state reason-state-{{ row.status }}">{{ row.reason_status_label }}</span>{% if row.reason_outcome.status %}<span class="sub-id">{{ row.reason_outcome.status }}</span>{% endif %}</td>{% endif %}
+        {% if 'ended' in reason_columns %}<td><time>{{ row.callback_at|default:row.last_callback_at|default:row.initiated_at|date:"d M Y" }}<span>{{ row.callback_at|default:row.last_callback_at|default:row.initiated_at|date:"h:i:s A T" }}</span></time></td>{% endif %}
+        {% if 'actions' in reason_columns %}<td>{% if can_view_reason_details %}<a class="reason-detail-button" href="?{% if detail_query %}{{ detail_query }}&amp;{% endif %}detail={{ row.rid }}">Details <span>→</span></a>{% endif %}</td>{% endif %}
+      </tr>{% empty %}<tr><td colspan="{{ reason_column_count }}"><div class="empty-state"><span>?</span><strong>No unsuccessful outcomes found</strong><small>Change the current filters or wait for a final provider status.</small></div></td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+
+  <div class="mobile-cards reason-mobile-cards">{% for row in page_obj %}<article class="survey-card reason-mobile-card">
+    <div class="card-top"><strong class="reason-rid">{{ row.rid }}</strong><span class="reason-state reason-state-{{ row.status }}">{{ row.reason_status_label }}</span></div>
+    <h3>{% if row.survey.client %}{{ row.survey.client.name }}{% else %}{{ row.survey.company_name|default:"Unknown client" }}{% endif %}</h3>
+    <p>Project {{ row.survey.local_id }} · Survey {{ row.survey.source_key }}</p>
+    <div class="card-grid"><span><small>Respondent</small><b>{% if row.platform_user %}{{ row.platform_user.get_full_name|default:row.platform_user.username }}{% else %}Unavailable{% endif %}</b></span><span><small>Ended</small><b>{{ row.callback_at|default:row.last_callback_at|default:row.initiated_at|date:"d M, h:i A" }}</b></span></div>
+    {% if can_view_reason_details %}<a class="reason-detail-button" href="?{% if detail_query %}{{ detail_query }}&amp;{% endif %}detail={{ row.rid }}">View details <span>→</span></a>{% endif %}
+  </article>{% empty %}<div class="empty-state"><span>?</span><strong>No unsuccessful outcomes found</strong></div>{% endfor %}</div>
+
+  <div class="panel-foot"><span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% if can_paginate_reasons and page_obj.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Outcome pages">
+    {% if page_obj.has_previous %}<a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1" aria-label="First page">«</a><a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" aria-label="Previous page">‹</a>{% endif %}
+    <span class="reason-page-number">{{ page_obj.number }}</span>
+    {% if page_obj.has_next %}<a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" aria-label="Next page">›</a><a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.paginator.num_pages }}" aria-label="Last page">»</a>{% endif %}
+  </nav>{% endif %}</div>
+</section>
+
+{% if detail_attempt %}<div class="reason-modal-shell">
+  <a class="reason-modal-dismiss" href="{% url 'termination-reasons' %}{% if detail_query %}?{{ detail_query }}{% endif %}" aria-label="Close outcome details"></a>
+  <section class="reason-modal" role="dialog" aria-modal="true" aria-labelledby="reasonModalTitle">
+    <header class="reason-result-head status-{{ detail_attempt.status }}">
+      <div class="reason-status-icon" aria-hidden="true">{% if detail_attempt.status == '3' %}Q{% elif detail_attempt.status == '4' %}!{% else %}×{% endif %}</div>
+      <div><p>Individual provider outcome</p><h2 id="reasonModalTitle">{{ detail_outcome.status|default:detail_attempt.get_status_display }}</h2><span>RID {{ detail_attempt.rid }}</span></div>
+      <a class="reason-modal-close" href="{% url 'termination-reasons' %}{% if detail_query %}?{{ detail_query }}{% endif %}" aria-label="Close">×</a>
+    </header>
+    <div class="reason-modal-body">
+      {% if lookup_error %}<div class="reason-alert warning"><strong>Provider detail pending</strong><span>{{ lookup_error }}</span></div>{% endif %}
+      {% if reason_fields.reason %}<article class="reason-highlight"><span>Exact term reason</span><strong>{{ detail_outcome.reason|default:"Provider has not returned a specific reason yet." }}</strong>{% if detail_outcome.category %}<small>Category: {{ detail_outcome.category }}</small>{% endif %}</article>{% endif %}
+      <div class="reason-detail-grid">
+        {% if reason_fields.status %}<article><h3>Status details</h3><dl><div><dt>Platform status</dt><dd>{{ detail_attempt.reason_status_label }}</dd></div><div><dt>Provider status</dt><dd>{{ detail_outcome.status|default:"Pending provider lookup" }}</dd></div></dl></article>{% endif %}
+        {% if reason_fields.respondent %}<article><h3>Respondent</h3><dl><div><dt>RID</dt><dd>{{ detail_attempt.rid }}</dd></div><div><dt>User</dt><dd>{% if detail_attempt.platform_user %}{{ detail_attempt.platform_user.get_full_name|default:detail_attempt.platform_user.username }}{% else %}Unavailable{% endif %}</dd></div><div><dt>IP address</dt><dd>{{ detail_attempt.callback_ip|default:detail_attempt.initiation_ip|default:"Unavailable" }}</dd></div></dl></article>{% endif %}
+        {% if reason_fields.survey %}<article><h3>Survey</h3><dl><div><dt>Project ID</dt><dd>{{ detail_attempt.survey.local_id }}</dd></div><div><dt>Survey ID</dt><dd>{{ detail_attempt.survey.source_key }}</dd></div><div><dt>Client</dt><dd>{% if detail_attempt.survey.client %}{{ detail_attempt.survey.client.name }}{% else %}{{ detail_attempt.survey.company_name|default:"Unavailable" }}{% endif %}</dd></div><div><dt>Provider</dt><dd>{% if detail_attempt.survey.integration %}{{ detail_attempt.survey.integration.provider_code }}{% else %}innovatemr{% endif %}</dd></div></dl></article>{% endif %}
+        {% if reason_fields.timing %}<article><h3>Timing</h3><dl><div><dt>Started</dt><dd>{{ detail_attempt.initiated_at|date:"d M Y, h:i:s A T" }}</dd></div><div><dt>Ended</dt><dd>{{ detail_attempt.callback_at|date:"d M Y, h:i:s A T"|default:"Pending" }}</dd></div><div><dt>LOI</dt><dd>{% if detail_attempt.loi_seconds != None %}{{ detail_attempt.loi_seconds }} seconds{% else %}Unavailable{% endif %}</dd></div></dl></article>{% endif %}
+        {% if reason_fields.audit %}<article><h3>Audit</h3><dl><div><dt>Status source</dt><dd>{{ detail_attempt.status_source|default:"Unavailable" }}</dd></div><div><dt>Provider checked</dt><dd>{{ detail_attempt.upstream_checked_at|date:"d M Y, h:i:s A T"|default:"Not checked" }}</dd></div><div><dt>Verified callback</dt><dd>{% if detail_attempt.is_verified %}Yes{% else %}No{% endif %}</dd></div><div><dt>Callback count</dt><dd>{{ detail_attempt.callback_count }}</dd></div></dl></article>{% endif %}
+      </div>
+    </div>
+  </section>
+</div>{% endif %}
+{% endblock %}

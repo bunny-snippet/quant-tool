@@ -1,0 +1,20 @@
+[Unit]
+Description=Quest Tool Celery worker
+After=network.target redis-server.service mysql.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=questtool
+Group=questtool
+WorkingDirectory=/opt/quest-tool
+EnvironmentFile=/etc/quest-tool/quest-tool.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/quest-tool/.venv/bin/celery -A config worker --loglevel=INFO --concurrency=2 --max-tasks-per-child=500
+Restart=always
+RestartSec=5
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

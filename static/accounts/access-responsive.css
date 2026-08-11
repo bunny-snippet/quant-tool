@@ -1,0 +1,68 @@
+.role-permission-summary {
+  margin-top: 12px;
+  border: 1px solid #e7ebf2;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.role-permission-summary summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  color: #53617a;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.role-permission-summary summary::-webkit-details-marker { display: none; }
+.role-permission-summary summary i { color: #0898bb; font-size: 9px; font-style: normal; }
+.role-permission-summary[open] summary { border-bottom: 1px solid #edf0f5; }
+.role-permission-summary .permission-chips { max-height: 150px; margin: 0; padding: 10px; overflow: auto; }
+.role-grid { grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); }
+.role-card { padding: 14px; }
+.role-card > p { min-height: 0; margin: 7px 0; font-size: 9px; }
+.permission-group-select {
+  margin: 1px 0 7px;
+  padding: 8px !important;
+  border: 1px solid #cfe6ee !important;
+  border-radius: 9px;
+  background: #effafd;
+}
+.permission-group-select b { color: #087f99 !important; }
+.permission-group-select input { width: 16px; height: 16px; }
+
+@media (max-width: 760px) {
+  .role-grid { grid-template-columns: 1fr; }
+  .role-permission-summary .permission-chips { max-height: 120px; }
+}
+
+.access-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  margin: -4px 0 16px;
+  padding: 12px;
+  border: 1px solid #e7ecf2;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+.access-filter-grid.role-filters { grid-template-columns: minmax(220px, 420px) auto; justify-content: start; }
+.access-filter-grid label { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.access-filter-grid label > span { color: #66758d; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .45px; }
+.access-filter-grid input, .access-filter-grid select { width: 100%; height: 39px; border: 1px solid #dbe2eb; border-radius: 10px; background: #fff; color: #263650; padding: 0 11px; outline: 0; }
+.access-filter-grid input:focus, .access-filter-grid select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-soft); }
+.access-filter-grid button { height: 39px; border: 0; border-radius: 10px; background: #eaf0f5; color: #65738a; padding: 0 14px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.role-card[hidden], .employee-table tr[hidden] { display: none !important; }
+@media (max-width: 980px) {
+  .access-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .access-filter-grid button { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .access-filter-grid, .access-filter-grid.role-filters { grid-template-columns: 1fr; }
+  .access-filter-grid button { grid-column: auto; }
+}

@@ -1,0 +1,13 @@
+Django==5.2.5
+djangorestframework==3.16.1
+drf-spectacular==0.28.0
+django-filter==25.1
+celery[redis]==5.5.3
+requests==2.32.4
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
+whitenoise==6.9.0
+gunicorn==23.0.0
+PyMySQL[rsa]==1.2.0
+cryptography>=46,<51
+supervisor==4.3.0

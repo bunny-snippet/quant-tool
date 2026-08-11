@@ -1,0 +1,32 @@
+{% extends 'surveys/flow_base.html' %}
+{% block title %}{{ outcome.title }}{% endblock %}
+{% block body_class %}status-page rfg-result-page{% endblock %}
+{% block content %}
+<main class="status-shell">
+  <section class="status-card rfg-outcome {{ outcome.tone }}">
+    <div class="status-icon" aria-hidden="true">
+      {% if outcome.tone == 'success' %}✓{% elif outcome.tone == 'danger' %}!{% elif outcome.tone == 'warning' %}i{% else %}…{% endif %}
+    </div>
+    <p class="flow-eyebrow">Research For Good result</p>
+    <h1>{{ outcome.title }}</h1>
+    <p class="status-message">{{ outcome.reason }}</p>
+
+    {% if verification_pending %}
+      <div class="flow-alert warning verification-note">
+        Provider result received. Secure server confirmation is still pending; this page does not mark an unverified completion as payable.
+      </div>
+    {% elif verified %}
+      <div class="verified-result"><span>✓</span> Result recorded</div>
+    {% endif %}
+
+    <dl class="status-facts rfg-result-facts">
+      <div><dt>RID</dt><dd>{{ attempt.rid }}</dd></div>
+      <div><dt>Project ID</dt><dd>{{ attempt.survey.local_id }}</dd></div>
+      <div><dt>Survey ID</dt><dd>{{ attempt.survey.source_identifier }}</dd></div>
+      <div><dt>Result code</dt><dd>{{ outcome.code|default:'Pending' }}</dd></div>
+      <div><dt>LOI</dt><dd>{% if attempt.loi_seconds != None %}{{ attempt.loi_seconds }} seconds{% else %}Pending{% endif %}</dd></div>
+      {% if outcome.sesskey %}<div><dt>RFG session</dt><dd>{{ outcome.sesskey }}</dd></div>{% endif %}
+    </dl>
+  </section>
+</main>
+{% endblock %}

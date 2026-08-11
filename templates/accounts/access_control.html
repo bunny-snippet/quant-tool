@@ -1,0 +1,40 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Access control · Survey Workspace{% endblock %}
+{% block header_title %}Access control{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'accounts/access.css' %}?v=1">{% endblock %}
+{% block content %}
+<section class="access-intro">
+  <div><p class="eyebrow">Roles & permissions</p><h1>Function-level access control</h1><p>Role permissions establish the baseline. Individual allow or deny overrides take precedence for a specific employee.</p></div>
+  <a class="primary-button" href="{% url 'swagger-ui' %}#tag/Access-control">Manage through API <span>→</span></a>
+</section>
+
+<section class="access-stats">
+  <article><span>Roles</span><strong>{{ roles|length }}</strong><small>Reusable access profiles</small></article>
+  <article><span>Employees</span><strong>{{ employees|length }}</strong><small>Active and inactive accounts</small></article>
+  <article><span>Functions</span><strong>{{ functions|length }}</strong><small>Independently assignable actions</small></article>
+</section>
+
+<section class="access-panel">
+  <div class="access-panel-head"><div><h2>Role permission matrix</h2><p>Nothing is inherited by rank; each checked function is explicitly assigned.</p></div></div>
+  <div class="role-grid">
+    {% for role in roles %}
+    <article class="role-card">
+      <header><div><span>Level {{ role.rank }}</span><h3>{{ role.name }}</h3></div><b>{{ role.employee_count }} users</b></header>
+      <p>{{ role.description|default:"Custom workspace role" }}</p>
+      <div class="permission-chips">
+        {% for assignment in role.function_assignments.all %}{% if assignment.allowed %}<span>{{ assignment.function.name }}</span>{% endif %}{% empty %}<em>No functions assigned</em>{% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="access-panel employee-panel">
+  <div class="access-panel-head"><div><h2>Employee access</h2><p>Effective access combines the selected role with this user's allow and deny overrides.</p></div><a href="/api/v1/access/users/">Open user CRUD</a></div>
+  <div class="employee-table-wrap"><table class="employee-table"><thead><tr><th>Employee</th><th>Role</th><th>Overrides</th><th>Status</th></tr></thead><tbody>
+    {% for employee in employees %}<tr><td><strong>{{ employee.get_full_name|default:employee.username }}</strong><small>{{ employee.email|default:employee.username }}</small></td><td><span class="role-pill">{{ employee.employee_profile.role.name|default:"Unassigned" }}</span></td><td><div class="override-summary">{% for override in employee.function_overrides.all %}<span class="{{ override.effect }}">{{ override.get_effect_display }} · {{ override.function.name }}</span>{% empty %}<em>Role defaults only</em>{% endfor %}</div></td><td><span class="account-status {% if not employee.is_active %}inactive{% endif %}"><i></i>{% if employee.is_active %}Active{% else %}Inactive{% endif %}</span></td></tr>{% empty %}<tr><td colspan="4">No employee accounts yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
+

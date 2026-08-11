@@ -1,0 +1,32 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace setup · Exchange Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'accounts/auth.css' %}?v=1">
+</head>
+<body class="auth-page">
+  <main class="setup-shell">
+    <section class="setup-card">
+      <div class="setup-icon">SH</div><p class="auth-eyebrow">One-time setup</p>
+      <h1>Create the workspace owner</h1>
+      <p>This first account receives Super Admin access and can create employees, roles and permission overrides.</p>
+      <form method="post" class="setup-form">
+        {% csrf_token %}
+        <div class="form-grid">
+          {% for field in form %}<label class="{% if field.name == 'email' or field.name == 'username' %}wide{% endif %}"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small>{{ error }}</small>{% endfor %}</label>{% endfor %}
+        </div>
+        {% if form.non_field_errors %}<div class="auth-error">{{ form.non_field_errors }}</div>{% endif %}
+        <button type="submit">Create owner account <span>→</span></button>
+      </form>
+      <a class="back-login" href="{% url 'login' %}">Back to sign in</a>
+    </section>
+  </main>
+</body>
+</html>
+
