@@ -165,9 +165,6 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
     attempt.submitted_at = submitted_at
     snapshots, dimensions, age, age_group, gender, ethnicity, postal_code = _question_snapshots(attempt, answers)
     survey = attempt.survey
-    integration = survey.integration if survey.integration_id else None
-    client = attempt.client if attempt.client_id else (survey.client if survey.client_id else None)
-    platform_user = attempt.platform_user if attempt.platform_user_id else None
     raw_answers = copy.deepcopy(answers)
 
     try:
@@ -186,16 +183,6 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
             submission = PrescreenerSubmission.objects.using(DATABASE_ALIAS).create(
                 uid=uid,
                 rid=attempt.rid,
-                source_attempt_id=attempt.pk,
-                platform_user_id=str(attempt.platform_user_id or attempt.user_id or ""),
-                platform_user_email=(platform_user.email if platform_user else ""),
-                platform_user_name=(platform_user.get_full_name() if platform_user else ""),
-                provider_code=(integration.provider_code if integration else ""),
-                client_id=(client.pk if client else None),
-                client_name=(client.name if client else survey.company_name),
-                survey_local_id=survey.local_id,
-                survey_source_key=str(survey.source_key or survey.source_id or ""),
-                survey_name=survey.name,
                 country=survey.country,
                 country_code=survey.country_code.upper(),
                 language=survey.language,

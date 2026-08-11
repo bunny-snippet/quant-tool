@@ -7,9 +7,9 @@ stable 10-character RID and one independently generated UID in the form
 
 ## Stored snapshot
 
-Each submission stores its UID/RID, operational attempt ID, respondent account
-snapshot, client/provider/survey identifiers, country and language at the time
-of the hit, submission time, raw answers, and recognized profile dimensions.
+Each submission stores only its UID/RID, country and language at the time of the
+hit, submission time, raw answers, and recognized profile dimensions. It does
+not copy client, provider, survey/project, or user identity into the vault.
 Every question is also normalized into its own row with the exact question
 text/key/type/category, raw answer values, display labels, and upstream values.
 Individual values are indexed by country and canonical attribute for future

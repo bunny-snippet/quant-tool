@@ -6,16 +6,6 @@ class PrescreenerSubmission(models.Model):
 
     uid = models.CharField(max_length=19, primary_key=True)
     rid = models.CharField(max_length=10, unique=True)
-    source_attempt_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
-    platform_user_id = models.CharField(max_length=160, blank=True, db_index=True)
-    platform_user_email = models.EmailField(max_length=254, blank=True)
-    platform_user_name = models.CharField(max_length=300, blank=True)
-    provider_code = models.CharField(max_length=80, blank=True, db_index=True)
-    client_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
-    client_name = models.CharField(max_length=160, blank=True, db_index=True)
-    survey_local_id = models.CharField(max_length=14, blank=True, db_index=True)
-    survey_source_key = models.CharField(max_length=160, blank=True, db_index=True)
-    survey_name = models.CharField(max_length=500, blank=True)
     country = models.CharField(max_length=120, blank=True)
     country_code = models.CharField(max_length=8, blank=True, db_index=True)
     language = models.CharField(max_length=80, blank=True)
@@ -35,7 +25,6 @@ class PrescreenerSubmission(models.Model):
         ordering = ["-submitted_at"]
         indexes = [
             models.Index(fields=["country_code", "respondent_age_group", "respondent_gender"], name="vault_country_profile_idx"),
-            models.Index(fields=["client_id", "survey_source_key", "-submitted_at"], name="vault_client_survey_idx"),
         ]
 
 
