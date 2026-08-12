@@ -1478,6 +1478,10 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(page, "Performance intelligence")
         self.assertContains(page, 'id="volumeChart"')
         self.assertContains(page, 'id="financeChart"')
+        self.assertContains(page, 'id="trafficGraphClient"')
+        self.assertContains(page, 'id="financeGraphClient"')
+        self.assertContains(page, 'aria-label="Traffic graph time range"')
+        self.assertContains(page, 'aria-label="Finance graph time range"')
         self.assertContains(page, 'id="clientShareChart"')
         self.assertContains(page, 'data-dashboard-range="24h"')
         self.assertContains(page, 'data-dashboard-range="48h"')
@@ -1509,8 +1513,13 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["device_breakdown"]["desktop"], 1)
         self.assertEqual(response.data["client_distribution"][0]["name"], "Client Alpha")
         self.assertEqual(response.data["client_distribution"][0]["share_percent"], 100.0)
-        self.assertEqual(len(response.data["performance"]), 12)
-        self.assertEqual(sum(point["hits"] for point in response.data["performance"]), 2)
+        self.assertEqual(len(response.data["traffic_chart"]["points"]), 12)
+        self.assertEqual(sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2)
+        self.assertEqual(len(response.data["finance_chart"]["points"]), 12)
+        self.assertEqual(
+            {item["name"] for item in response.data["graph_clients"]},
+            {"Client Alpha", "Client Beta"},
+        )
         self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
         self.assertNotIn("recent_activity", response.data)
 
@@ -1529,8 +1538,13 @@ class DashboardAnalyticsTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.data["range"]["key"], range_key)
                 self.assertEqual(response.data["range"]["bucket_label"], bucket_label)
-                self.assertEqual(len(response.data["performance"]), point_count)
-                self.assertEqual(sum(point["hits"] for point in response.data["performance"]), 2)
+                self.assertEqual(len(response.data["traffic_chart"]["points"]), point_count)
+                self.assertEqual(
+                    response.data["traffic_chart"]["range"]["bucket_label"], bucket_label
+                )
+                self.assertEqual(
+                    sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2
+                )
 
         invalid = self.api.get(reverse("dashboard-api"), {"range": "forever"})
         self.assertEqual(invalid.status_code, 400)
@@ -1552,6 +1566,29 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(quarterly.data["summary"]["completes"], 2)
         self.assertEqual(str(quarterly.data["summary"]["revenue"]), "14.00")
 
+    def test_graph_filters_change_only_their_graph_not_dashboard_cards(self):
+        response = self.api.get(reverse("dashboard-api"), {
+            "range": "24h",
+            "traffic_range": "48h",
+            "traffic_client": self.client_b.pk,
+            "finance_range": "6m",
+            "finance_client": self.client_a.pk,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["range"]["key"], "24h")
+        self.assertEqual(response.data["summary"]["hits"], 2)
+        self.assertEqual(response.data["traffic_chart"]["range"]["key"], "48h")
+        self.assertEqual(response.data["traffic_chart"]["client_id"], self.client_b.pk)
+        self.assertEqual(
+            sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 1
+        )
+        self.assertEqual(response.data["finance_chart"]["range"]["key"], "6m")
+        self.assertEqual(response.data["finance_chart"]["client_id"], self.client_a.pk)
+        self.assertEqual(
+            sum(point["completes"] for point in response.data["finance_chart"]["points"]), 1
+        )
+
     def test_dashboard_is_unfiltered_and_employee_visibility_is_enforced(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})
         self.assertEqual(filtered.status_code, 200)
@@ -1567,12 +1604,27 @@ class DashboardAnalyticsTests(TestCase):
         self.assertIsNone(own.data["summary"]["revenue"])
         self.assertIsNone(own.data["summary"]["average_cpi"])
         self.assertIsNone(own.data["summary"]["rpc"])
-        self.assertTrue(all(point["revenue"] is None for point in own.data["performance"]))
-        self.assertTrue(all(point["average_cpi"] is None for point in own.data["performance"]))
-        self.assertTrue(all(point["rpc"] is None for point in own.data["performance"]))
+        self.assertTrue(all(
+            point["revenue"] is None for point in own.data["traffic_chart"]["points"]
+        ))
+        self.assertTrue(all(
+            point["average_cpi"] is None for point in own.data["traffic_chart"]["points"]
+        ))
+        self.assertTrue(all(
+            point["rpc"] is None for point in own.data["traffic_chart"]["points"]
+        ))
+        self.assertIsNone(own.data["finance_chart"])
         self.assertIsNone(own.data["top_users"])
         self.assertNotIn("recent_activity", own.data)
         self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 200)
+        self.assertEqual(
+            scoped.get(reverse("dashboard-api"), {"traffic_range": "48h"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            scoped.get(reverse("dashboard-api"), {"finance_range": "48h"}).status_code,
+            403,
+        )
 
     def test_individual_card_permission_hides_only_that_metric(self):
         UserFunctionOverride.objects.create(

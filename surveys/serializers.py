@@ -399,6 +399,17 @@ class DashboardTopUserSerializer(serializers.Serializer):
     conversion_rate = serializers.FloatField(min_value=0)
 
 
+class DashboardGraphClientSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class DashboardGraphSeriesSerializer(serializers.Serializer):
+    range = DashboardRangeSerializer()
+    client_id = serializers.IntegerField(allow_null=True)
+    points = DashboardPerformancePointSerializer(many=True)
+
+
 class DashboardRecentActivitySerializer(serializers.Serializer):
     rid = serializers.CharField()
     user_name = serializers.CharField()
@@ -412,7 +423,9 @@ class DashboardRecentActivitySerializer(serializers.Serializer):
 class DashboardResponseSerializer(serializers.Serializer):
     range = DashboardRangeSerializer()
     summary = DashboardSummarySerializer()
-    performance = DashboardPerformancePointSerializer(many=True, allow_null=True)
+    traffic_chart = DashboardGraphSeriesSerializer(allow_null=True)
+    finance_chart = DashboardGraphSeriesSerializer(allow_null=True)
+    graph_clients = DashboardGraphClientSerializer(many=True)
     client_distribution = DashboardClientShareSerializer(many=True, allow_null=True)
     status_breakdown = DashboardStatusBreakdownSerializer(allow_null=True)
     device_breakdown = DashboardDeviceBreakdownSerializer(allow_null=True)

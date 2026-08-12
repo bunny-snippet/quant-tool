@@ -1,9 +1,16 @@
 (() => {
   const byId = (id) => document.getElementById(id);
   const ranges = new Set(['24h', '48h', '72h', '3m', '6m', '1y']);
+  const initialQuery = new URLSearchParams(location.search);
+  const initialMainRange = ranges.has(initialQuery.get('range')) ? initialQuery.get('range') : '24h';
   const state = {
-    range: ranges.has(new URLSearchParams(location.search).get('range'))
-      ? new URLSearchParams(location.search).get('range') : '24h',
+    range: initialMainRange,
+    trafficRange: ranges.has(initialQuery.get('traffic_range'))
+      ? initialQuery.get('traffic_range') : initialMainRange,
+    financeRange: ranges.has(initialQuery.get('finance_range'))
+      ? initialQuery.get('finance_range') : initialMainRange,
+    trafficClient: initialQuery.get('traffic_client') || '',
+    financeClient: initialQuery.get('finance_client') || '',
     controller: null,
     data: null,
     resizeTimer: null,
@@ -100,7 +107,7 @@
     });
   }
 
-  function renderVolume(rows) {
+  function renderVolume(rows, rangeLabel = '') {
     const host = byId('volumeChart'); if (!host) return;
     if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No traffic data is available for this range.</div>'; return; }
     const width = 860; const height = 300; const left = 52; const right = 48; const top = 24; const bottom = 42;
@@ -120,11 +127,11 @@
     const labels = rows.map((row, index) => index % stride === 0 || index === rows.length - 1
       ? `<text class="bi-x-label" x="${x(index)}" y="${height - 15}" text-anchor="middle">${escapeHtml(row.short_label)}</text>` : '').join('');
     const rightAxis = [0, 50, 100].map((value) => `<text class="bi-right-axis" x="${width - right + 9}" y="${rateY(value) + 4}">${value}%</text>`).join('');
-    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Entrants, completes and conversion over ${escapeHtml(state.data.range.label)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum })}</g>${rightAxis}${bars}<path class="bi-chart-line bi-conversion-line" d="${svgLine(ratePoints)}"/>${rateDots}${labels}</svg>`;
+    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Entrants, completes and conversion over ${escapeHtml(rangeLabel)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum })}</g>${rightAxis}${bars}<path class="bi-chart-line bi-conversion-line" d="${svgLine(ratePoints)}"/>${rateDots}${labels}</svg>`;
     animateChart(host);
   }
 
-  function renderFinance(rows, currency) {
+  function renderFinance(rows, currency, rangeLabel = '') {
     const host = byId('financeChart'); if (!host) return;
     if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No financial data is available for this range.</div>'; return; }
     const hasRevenue = rows.some((row) => row.revenue != null);
@@ -161,7 +168,7 @@
       : '';
     const line = hasLine ? `<path class="bi-chart-line bi-rpc-line" d="${svgLine(linePoints)}"/>${dots}` : '';
     const accessibleLabel = hasLine ? `Revenue and ${lineLabel}` : 'Revenue';
-    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${accessibleLabel} over ${escapeHtml(state.data.range.label)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum: maxRevenue, formatter: (value) => formatCurrency(value, currency, true) })}</g>${rightAxis}${bars}${line}${labels}</svg>`;
+    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${accessibleLabel} over ${escapeHtml(rangeLabel)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum: maxRevenue, formatter: (value) => formatCurrency(value, currency, true) })}</g>${rightAxis}${bars}${line}${labels}</svg>`;
     animateChart(host);
   }
 
@@ -212,13 +219,31 @@
     host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b><small>${number(row.hits)} hits · ${Number(row.conversion_rate || 0).toFixed(1)}% conversion</small><span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
   }
 
+  function updateGraphControls(data) {
+    const clients = data.graph_clients || [];
+    [['traffic', 'trafficGraphClient'], ['finance', 'financeGraphClient']].forEach(([graph, id]) => {
+      const select = byId(id); if (!select) return;
+      const selected = String(state[`${graph}Client`] || '');
+      select.innerHTML = `<option value="">All clients</option>${clients.map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}</option>`).join('')}`;
+      select.value = selected;
+    });
+    document.querySelectorAll('[data-graph-range]').forEach((button) => {
+      const graph = button.dataset.graph;
+      const active = button.dataset.graphRange === state[`${graph}Range`];
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
   function render(data) {
     state.data = data;
     updateSummary(data.summary || {});
-    document.querySelectorAll('[data-dashboard-bucket-label]').forEach((node) => { node.textContent = data.range.bucket_label; });
     const caption = byId('dashboardRangeCaption'); if (caption) caption.textContent = data.range.label;
-    renderVolume(data.performance);
-    renderFinance(data.performance, data.summary?.revenue_currency || 'USD');
+    if (byId('trafficBucketLabel') && data.traffic_chart) byId('trafficBucketLabel').textContent = data.traffic_chart.range.bucket_label;
+    if (byId('financeBucketLabel') && data.finance_chart) byId('financeBucketLabel').textContent = data.finance_chart.range.bucket_label;
+    updateGraphControls(data);
+    renderVolume(data.traffic_chart?.points, data.traffic_chart?.range?.label || data.range.label);
+    renderFinance(data.finance_chart?.points, data.summary?.revenue_currency || 'USD', data.finance_chart?.range?.label || data.range.label);
     renderClients(data.client_distribution);
     renderStatus(data.status_breakdown);
     renderDevices(data.device_breakdown);
@@ -239,7 +264,16 @@
     document.body.classList.add('dashboard-refreshing');
     document.querySelectorAll('[data-dashboard-range]').forEach((button) => { button.disabled = true; });
     try {
-      const response = await fetch(`/api/v1/dashboard/?range=${encodeURIComponent(state.range)}`, {
+      const query = new URLSearchParams({ range: state.range });
+      if (document.querySelector('[data-graph-toolbar="traffic"]')) {
+        query.set('traffic_range', state.trafficRange);
+        if (state.trafficClient) query.set('traffic_client', state.trafficClient);
+      }
+      if (document.querySelector('[data-graph-toolbar="finance"]')) {
+        query.set('finance_range', state.financeRange);
+        if (state.financeClient) query.set('finance_client', state.financeClient);
+      }
+      const response = await fetch(`/api/v1/dashboard/?${query.toString()}`, {
         signal: state.controller.signal, credentials: 'same-origin',
       });
       const data = await response.json();
@@ -268,12 +302,46 @@
     });
   });
 
+  document.querySelectorAll('[data-graph-range]').forEach((button) => {
+    const graph = button.dataset.graph;
+    const selected = button.dataset.graphRange === state[`${graph}Range`];
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    button.addEventListener('click', () => {
+      const nextRange = button.dataset.graphRange;
+      if (nextRange === state[`${graph}Range`]) return;
+      state[`${graph}Range`] = nextRange;
+      const url = new URL(location.href);
+      url.searchParams.set(`${graph}_range`, nextRange);
+      history.replaceState({}, '', url);
+      loadDashboard();
+    });
+  });
+
+  [['traffic', 'trafficGraphClient'], ['finance', 'financeGraphClient']].forEach(([graph, id]) => {
+    byId(id)?.addEventListener('change', (event) => {
+      state[`${graph}Client`] = event.target.value;
+      const url = new URL(location.href);
+      if (event.target.value) url.searchParams.set(`${graph}_client`, event.target.value);
+      else url.searchParams.delete(`${graph}_client`);
+      history.replaceState({}, '', url);
+      loadDashboard();
+    });
+  });
+
   const resizeObserver = new ResizeObserver(() => {
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
       if (!state.data) return;
-      renderVolume(state.data.performance);
-      renderFinance(state.data.performance, state.data.summary?.revenue_currency || 'USD');
+      renderVolume(
+        state.data.traffic_chart?.points,
+        state.data.traffic_chart?.range?.label || state.data.range.label
+      );
+      renderFinance(
+        state.data.finance_chart?.points,
+        state.data.summary?.revenue_currency || 'USD',
+        state.data.finance_chart?.range?.label || state.data.range.label
+      );
     }, 120);
   });
   document.querySelectorAll('.bi-chart-stage').forEach((host) => resizeObserver.observe(host));

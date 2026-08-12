@@ -42,7 +42,12 @@ from vendors.services import (
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 
 from .filters import SurveyAttemptFilter, SurveyFilter
-from .dashboard import build_dashboard_payload, dashboard_attempts, dashboard_range_window
+from .dashboard import (
+    build_dashboard_payload,
+    dashboard_attempts,
+    dashboard_client_options,
+    dashboard_range_window,
+)
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncRun
@@ -144,6 +149,11 @@ DASHBOARD_CHART_PERMISSIONS = {
     "performance": "dashboard.chart.performance", "client_share": "dashboard.chart.client_share",
     "status": "dashboard.chart.status", "device": "dashboard.chart.device",
     "top_users": "dashboard.chart.top_users",
+}
+
+DASHBOARD_GRAPH_FILTER_PERMISSIONS = {
+    "traffic": "dashboard.graph.traffic_filters",
+    "finance": "dashboard.graph.finance_filters",
 }
 
 STUDY_CARD_PERMISSIONS = {
@@ -264,6 +274,9 @@ def dashboard_page(request):
         "active_page": "dashboard",
         "dashboard_cards": _permitted_columns(codes, DASHBOARD_CARD_PERMISSIONS),
         "dashboard_charts": _permitted_columns(codes, DASHBOARD_CHART_PERMISSIONS),
+        "dashboard_graph_filters": _permitted_columns(
+            codes, DASHBOARD_GRAPH_FILTER_PERMISSIONS
+        ),
     })
 
 
@@ -713,13 +726,32 @@ def workspace_home(request):
     raise PermissionDenied("No workspace page is assigned to this account.")
 
 
-def _prescreener_questions(survey, submitted_data=None):
+def _rfg_qualifying_option_values(question):
+    raw = question.raw_data or {}
+    if "targeting_choices" not in raw:
+        return None
+    allowed = {str(value) for value in raw.get("targeting_choices") or []}
+    if not allowed:
+        return None
+    if question.key == "RFG_GENDER":
+        return {
+            "M" if value == "1" else "F" if value == "2" else value
+            for value in allowed
+        }
+    return allowed
+
+
+def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_only=True):
     prepared = []
+    is_rfg = bool(
+        survey.integration_id and survey.integration.provider_code == "rfg"
+    )
     for question in survey.targeting_questions.all():
         display_text = clean_rfg_display_text(question.text or question.key)
         lowered_type = question.question_type.lower()
         options = []
         age_ranges = []
+        allowed_values = _rfg_qualifying_option_values(question) if is_rfg else None
         for option in question.options:
             option_id = option.get("OptionId")
             if option.get("ageStart") is not None:
@@ -729,7 +761,10 @@ def _prescreener_questions(survey, submitted_data=None):
                 label = clean_rfg_display_text(
                     option.get("OptionText") or str(option_id or "Option")
                 )
-            options.append({"value": str(option_id or label), "label": label})
+            value = str(option_id if option_id is not None else label)
+            if qualifying_options_only and allowed_values and value not in allowed_values:
+                continue
+            options.append({"value": value, "label": label})
         if "date" in lowered_type:
             input_kind = "date"
         elif "multi" in lowered_type:
@@ -753,6 +788,13 @@ def _prescreener_questions(survey, submitted_data=None):
             "current_value": selected_values[0] if selected_values else "",
             "min_value": min((int(item["ageStart"]) for item in age_ranges), default=None),
             "max_value": max((int(item["ageEnd"]) for item in age_ranges), default=None),
+            "qualifying_options_only": bool(
+                qualifying_options_only and allowed_values
+            ),
+            "targeting_note": (
+                "Only answers accepted by this survey are shown."
+                if qualifying_options_only and allowed_values else ""
+            ),
         })
     return prepared
 
@@ -760,7 +802,9 @@ def _prescreener_questions(survey, submitted_data=None):
 def _collect_prescreener_answers(request, survey):
     answers = {}
     errors = []
-    for prepared in _prescreener_questions(survey):
+    for prepared in _prescreener_questions(
+        survey, qualifying_options_only=False
+    ):
         question = prepared["model"]
         values = [value.strip() for value in request.POST.getlist(prepared["field_name"]) if value.strip()]
         if not values:
@@ -1619,22 +1663,88 @@ class DashboardAPIView(APIView):
                 description="Global analytics window: 24h, 48h, 72h, 3m, 6m or 1y. Defaults to 24h.",
                 enum=["24h", "48h", "72h", "3m", "6m", "1y"],
             ),
+            OpenApiParameter(
+                "traffic_range", OpenApiTypes.STR,
+                description="Independent Traffic graph window; does not change dashboard cards.",
+                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+            ),
+            OpenApiParameter(
+                "traffic_client", OpenApiTypes.INT,
+                description="Visible internal client ID for the Traffic graph only.",
+            ),
+            OpenApiParameter(
+                "finance_range", OpenApiTypes.STR,
+                description="Independent Revenue/RPC graph window; does not change dashboard cards.",
+                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+            ),
+            OpenApiParameter(
+                "finance_client", OpenApiTypes.INT,
+                description="Visible internal client ID for the Revenue/RPC graph only.",
+            ),
         ],
         responses={200: DashboardResponseSerializer},
     )
     def get(self, request):
+        codes = effective_permission_codes(request.user)
+        if any(request.query_params.get(key) not in {None, ""} for key in (
+            "traffic_range", "traffic_client"
+        )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["traffic"] not in codes:
+            raise PermissionDenied("Your account cannot filter the Traffic dashboard graph.")
+        if any(request.query_params.get(key) not in {None, ""} for key in (
+            "finance_range", "finance_client"
+        )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["finance"] not in codes:
+            raise PermissionDenied("Your account cannot filter the Finance dashboard graph.")
         try:
             range_window = dashboard_range_window(request.query_params.get("range", "24h"))
-            queryset = dashboard_attempts(request.user, {}, range_window)
+            traffic_window = dashboard_range_window(
+                request.query_params.get("traffic_range") or range_window["key"]
+            )
+            finance_window = dashboard_range_window(
+                request.query_params.get("finance_range") or range_window["key"]
+            )
+            visible_queryset = dashboard_attempts(request.user, {})
+            client_options = dashboard_client_options(visible_queryset)
+            visible_client_ids = {item["id"] for item in client_options}
+
+            def selected_client(parameter):
+                raw_value = str(request.query_params.get(parameter) or "").strip()
+                if not raw_value:
+                    return None
+                try:
+                    client_id = int(raw_value)
+                except ValueError as exc:
+                    raise ValueError("Graph client must be a numeric client ID.") from exc
+                if client_id not in visible_client_ids:
+                    raise ValueError("The selected graph client is not visible to this account.")
+                return client_id
+
+            traffic_client_id = selected_client("traffic_client")
+            finance_client_id = selected_client("finance_client")
+
+            def graph_queryset(window, client_id=None):
+                scoped = visible_queryset.filter(
+                    initiated_at__gte=window["start"], initiated_at__lte=window["end"]
+                )
+                return scoped.filter(survey__client_id=client_id) if client_id else scoped
+
+            queryset = graph_queryset(range_window)
+            traffic_queryset = graph_queryset(traffic_window, traffic_client_id)
+            finance_queryset = graph_queryset(finance_window, finance_client_id)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        codes = effective_permission_codes(request.user)
         return Response(build_dashboard_payload(
             queryset,
             request.user,
             _component_access(codes, DASHBOARD_CARD_PERMISSIONS),
             _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
             range_window,
+            traffic_queryset=traffic_queryset,
+            traffic_range_window=traffic_window,
+            traffic_client_id=traffic_client_id,
+            finance_queryset=finance_queryset,
+            finance_range_window=finance_window,
+            finance_client_id=finance_client_id,
+            client_options=client_options,
         ))
 
 

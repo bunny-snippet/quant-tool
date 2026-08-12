@@ -536,6 +536,24 @@ paths:
       summary: Get permission-scoped dashboard analytics
       parameters:
       - in: query
+        name: finance_client
+        schema:
+          type: integer
+        description: Visible internal client ID for the Revenue/RPC graph only.
+      - in: query
+        name: finance_range
+        schema:
+          type: string
+          enum:
+          - 1y
+          - 24h
+          - 3m
+          - 48h
+          - 6m
+          - 72h
+        description: Independent Revenue/RPC graph window; does not change dashboard
+          cards.
+      - in: query
         name: range
         schema:
           type: string
@@ -548,6 +566,23 @@ paths:
           - 72h
         description: 'Global analytics window: 24h, 48h, 72h, 3m, 6m or 1y. Defaults
           to 24h.'
+      - in: query
+        name: traffic_client
+        schema:
+          type: integer
+        description: Visible internal client ID for the Traffic graph only.
+      - in: query
+        name: traffic_range
+        schema:
+          type: string
+          enum:
+          - 1y
+          - 24h
+          - 3m
+          - 48h
+          - 6m
+          - 72h
+        description: Independent Traffic graph window; does not change dashboard cards.
       tags:
       - Dashboard
       security:
@@ -4068,6 +4103,32 @@ components:
       - mobile
       - tablet
       - unclassified
+    DashboardGraphClient:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required:
+      - id
+      - name
+    DashboardGraphSeries:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/DashboardRange'
+        client_id:
+          type: integer
+          nullable: true
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardPerformancePoint'
+      required:
+      - client_id
+      - points
+      - range
     DashboardPerformancePoint:
       type: object
       properties:
@@ -4145,11 +4206,18 @@ components:
           $ref: '#/components/schemas/DashboardRange'
         summary:
           $ref: '#/components/schemas/DashboardSummary'
-        performance:
+        traffic_chart:
+          allOf:
+          - $ref: '#/components/schemas/DashboardGraphSeries'
+          nullable: true
+        finance_chart:
+          allOf:
+          - $ref: '#/components/schemas/DashboardGraphSeries'
+          nullable: true
+        graph_clients:
           type: array
           items:
-            $ref: '#/components/schemas/DashboardPerformancePoint'
-          nullable: true
+            $ref: '#/components/schemas/DashboardGraphClient'
         client_distribution:
           type: array
           items:
@@ -4174,12 +4242,14 @@ components:
       required:
       - client_distribution
       - device_breakdown
+      - finance_chart
       - generated_at
-      - performance
+      - graph_clients
       - range
       - status_breakdown
       - summary
       - top_users
+      - traffic_chart
     DashboardStatusBreakdown:
       type: object
       properties:

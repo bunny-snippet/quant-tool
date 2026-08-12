@@ -46,6 +46,18 @@ def dashboard_attempts(user, params, range_window=None):
     return queryset
 
 
+def dashboard_client_options(queryset):
+    """Return only clients present inside the viewer's hierarchy-scoped traffic."""
+
+    rows = queryset.filter(survey__client_id__isnull=False).values(
+        "survey__client_id", "survey__client__name"
+    ).distinct().order_by("survey__client__name", "survey__client_id")
+    return [
+        {"id": row["survey__client_id"], "name": row["survey__client__name"] or "Unnamed client"}
+        for row in rows
+    ]
+
+
 def _visible_revenue(user, value):
     value = value or Decimal("0.00")
     profile = getattr(user, "employee_profile", None)
@@ -242,7 +254,49 @@ def _recent_activity(queryset):
     return result
 
 
-def build_dashboard_payload(queryset, user, card_access, chart_access, range_window=None):
+def _range_payload(range_window):
+    return {
+        "key": range_window["key"],
+        "label": range_window["label"],
+        "bucket_label": range_window["bucket_label"],
+        "start": range_window["start"],
+        "end": range_window["end"],
+    }
+
+
+def _permission_scoped_performance(queryset, range_window, user, card_access):
+    points = _performance_series(queryset, range_window)
+    for point in points:
+        point_revenue = _visible_revenue(user, point["revenue"])
+        point["revenue"] = point_revenue if card_access.get("revenue") else None
+        point["average_cpi"] = (
+            (point_revenue / point["completes"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ) if point["completes"] else Decimal("0.00")
+        ) if card_access.get("average_cpi") else None
+        point["rpc"] = (
+            (point_revenue / point["hits"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ) if point["hits"] else Decimal("0.00")
+        ) if card_access.get("rpc") else None
+    return points
+
+
+def build_dashboard_payload(
+    queryset,
+    user,
+    card_access,
+    chart_access,
+    range_window=None,
+    *,
+    traffic_queryset=None,
+    traffic_range_window=None,
+    traffic_client_id=None,
+    finance_queryset=None,
+    finance_range_window=None,
+    finance_client_id=None,
+    client_options=None,
+):
     range_window = range_window or dashboard_range_window("24h")
     completed_filter = Q(status=COMPLETED)
     survey_termination_filter = Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
@@ -294,29 +348,34 @@ def build_dashboard_payload(queryset, user, card_access, chart_access, range_win
         else None
     )
     completed_classified = totals["desktop"] + totals["mobile"] + totals["tablet"]
-    performance = _performance_series(queryset, range_window) if chart_access.get("performance") else None
-    if performance is not None:
-        for point in performance:
-            point_revenue = _visible_revenue(user, point["revenue"])
-            point["revenue"] = point_revenue if card_access.get("revenue") else None
-            point["average_cpi"] = (
-                (point_revenue / point["completes"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                if point["completes"] else Decimal("0.00")
-            ) if card_access.get("average_cpi") else None
-            point["rpc"] = (
-                (point_revenue / point["hits"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                if point["hits"] else Decimal("0.00")
-            ) if card_access.get("rpc") else None
+    traffic_range_window = traffic_range_window or range_window
+    finance_range_window = finance_range_window or range_window
+    traffic_queryset = traffic_queryset if traffic_queryset is not None else queryset
+    finance_queryset = finance_queryset if finance_queryset is not None else queryset
+    traffic_chart = None
+    finance_chart = None
+    if chart_access.get("performance"):
+        traffic_chart = {
+            "range": _range_payload(traffic_range_window),
+            "client_id": traffic_client_id,
+            "points": _permission_scoped_performance(
+                traffic_queryset, traffic_range_window, user, card_access
+            ),
+        }
+        if any(card_access.get(key) for key in ("revenue", "average_cpi", "rpc")):
+            finance_chart = {
+                "range": _range_payload(finance_range_window),
+                "client_id": finance_client_id,
+                "points": _permission_scoped_performance(
+                    finance_queryset, finance_range_window, user, card_access
+                ),
+            }
     return {
-        "range": {
-            "key": range_window["key"],
-            "label": range_window["label"],
-            "bucket_label": range_window["bucket_label"],
-            "start": range_window["start"],
-            "end": range_window["end"],
-        },
+        "range": _range_payload(range_window),
         "summary": summary,
-        "performance": performance,
+        "traffic_chart": traffic_chart,
+        "finance_chart": finance_chart,
+        "graph_clients": client_options or [],
         "client_distribution": _client_distribution(queryset) if chart_access.get("client_share") else None,
         "status_breakdown": {
             "initiated": totals["initiated"], "completed": totals["completes"],

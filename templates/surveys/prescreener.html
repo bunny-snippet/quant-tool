@@ -13,6 +13,7 @@
     <h1>A few quick questions</h1>
     <p>Your answers help route you to the right survey experience.</p>
     <div class="survey-context"><span>{{ survey.company_name }}</span><i></i><span>{{ survey.country_code }} {{ survey.language_code }}</span><i></i><span>About {{ survey.loi|default:"—" }} min</span></div>
+    {% if questions %}<div class="question-progress"><span>{{ questions|length }} question{{ questions|length|pluralize }}</span><b>Usually under a minute</b></div>{% endif %}
   </section>
 
   {% if warning %}<div class="flow-alert warning">{{ warning }}</div>{% endif %}
@@ -23,11 +24,12 @@
     <input type="hidden" name="rid" value="{{ attempt.rid }}">
     {% if is_rfg %}<input type="hidden" id="rfgFingerprint" name="rfg_fingerprint" value="0">{% endif %}
     {% for question in questions %}
-      <fieldset class="screen-question">
-        <legend><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><span><small>{{ question.model.category|default:"Profile" }} · {{ question.model.question_type|default:"Question" }}</small><strong>{{ question.display_text }}</strong></span></legend>
+      <section class="screen-question" aria-labelledby="question-title-{{ question.model.pk }}">
+        <header class="screen-question-header"><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><div><small>{{ question.model.category|default:"Profile" }} · {{ question.model.question_type|default:"Question" }}</small><h2 id="question-title-{{ question.model.pk }}">{{ question.display_text }}</h2></div></header>
+        {% if question.targeting_note %}<p class="answer-guidance"><span>✓</span>{{ question.targeting_note }}</p>{% endif %}
 
         {% if question.input_kind == "radio" %}
-          <div class="choice-grid">
+          <div class="choice-grid" role="radiogroup" aria-labelledby="question-title-{{ question.model.pk }}">
             {% for option in question.options %}<label class="choice-card"><input type="radio" name="{{ question.field_name }}" value="{{ option.value }}" {% if option.selected %}checked{% endif %} required><span>{{ option.label }}</span></label>{% endfor %}
           </div>
         {% elif question.input_kind == "checkbox" %}
@@ -42,7 +44,7 @@
         {% else %}
           <label class="open-answer"><span>Your answer</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="Type your answer" required></label>
         {% endif %}
-      </fieldset>
+      </section>
     {% empty %}
       <section class="no-screening-card">
         <div class="no-data-animation" aria-hidden="true"><span></span><span></span><span></span><i>✓</i></div>

@@ -482,6 +482,13 @@ class ResearchForGoodIntegrationTests(TestCase):
         attempt = SurveyAttempt.objects.create(
             rid="Jkl012MnO5", survey=survey, platform_user=user, user_id=str(user.pk)
         )
+        prescreener = self.client.get("/survey/start", {"rid": attempt.rid})
+        self.assertEqual(prescreener.status_code, 200)
+        self.assertContains(prescreener, "Matching")
+        self.assertNotContains(prescreener, "Non-matching")
+        self.assertContains(prescreener, "Male")
+        self.assertNotContains(prescreener, "Female")
+        self.assertContains(prescreener, "Only answers accepted by this survey are shown.")
         response = self.client.post("/survey/start", {
             "rid": attempt.rid,
             f"question_{birthday.pk}": "2000-01-01",

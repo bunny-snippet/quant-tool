@@ -35,12 +35,24 @@
 
 {% if dashboard_charts %}<section class="bi-analytics-grid">
   {% if 'performance' in dashboard_charts %}<article class="bi-visual bi-volume-panel">
-    <header><div><span class="bi-visual-kicker">Traffic &amp; efficiency</span><h2>Entrants, completes and conversion</h2><p data-dashboard-bucket-label>2-hour intervals</p></div><div class="bi-legend"><span><i class="legend-hits"></i>Entrants</span><span><i class="legend-completes"></i>Completes</span><span><i class="legend-rate"></i>Conversion</span></div></header>
+    <header><div><span class="bi-visual-kicker">Traffic &amp; efficiency</span><h2>Entrants, completes and conversion</h2><p id="trafficBucketLabel">2-hour intervals</p></div><div class="bi-legend"><span><i class="legend-hits"></i>Entrants</span><span><i class="legend-completes"></i>Completes</span><span><i class="legend-rate"></i>Conversion</span></div></header>
+    {% if 'traffic' in dashboard_graph_filters %}<div class="bi-graph-toolbar" data-graph-toolbar="traffic">
+      <label><span>Client</span><select id="trafficGraphClient" aria-label="Traffic graph client"><option value="">All clients</option></select></label>
+      <div class="bi-graph-ranges" role="group" aria-label="Traffic graph time range">
+        <button type="button" data-graph="traffic" data-graph-range="24h">24h</button><button type="button" data-graph="traffic" data-graph-range="48h">48h</button><button type="button" data-graph="traffic" data-graph-range="72h">72h</button><button type="button" data-graph="traffic" data-graph-range="3m">3m</button><button type="button" data-graph="traffic" data-graph-range="6m">6m</button><button type="button" data-graph="traffic" data-graph-range="1y">1y</button>
+      </div>
+    </div>{% endif %}
     <div class="bi-chart-stage" id="volumeChart"><div class="dashboard-skeleton chart-skeleton"></div></div>
   </article>{% endif %}
 
   {% if 'performance' in dashboard_charts %}{% if 'revenue' in dashboard_cards or 'average_cpi' in dashboard_cards or 'rpc' in dashboard_cards %}<article class="bi-visual bi-finance-panel">
-    <header><div><span class="bi-visual-kicker">Commercial intelligence</span><h2>Revenue and RPC movement</h2><p data-dashboard-bucket-label>2-hour intervals</p></div><div class="bi-legend"><span id="financeBarLegend"><i class="legend-revenue"></i>Revenue</span><span id="financeLineLegend"><i class="legend-rpc"></i>RPC</span></div></header>
+    <header><div><span class="bi-visual-kicker">Commercial intelligence</span><h2>Revenue and RPC movement</h2><p id="financeBucketLabel">2-hour intervals</p></div><div class="bi-legend"><span id="financeBarLegend"><i class="legend-revenue"></i>Revenue</span><span id="financeLineLegend"><i class="legend-rpc"></i>RPC</span></div></header>
+    {% if 'finance' in dashboard_graph_filters %}<div class="bi-graph-toolbar" data-graph-toolbar="finance">
+      <label><span>Client</span><select id="financeGraphClient" aria-label="Finance graph client"><option value="">All clients</option></select></label>
+      <div class="bi-graph-ranges" role="group" aria-label="Finance graph time range">
+        <button type="button" data-graph="finance" data-graph-range="24h">24h</button><button type="button" data-graph="finance" data-graph-range="48h">48h</button><button type="button" data-graph="finance" data-graph-range="72h">72h</button><button type="button" data-graph="finance" data-graph-range="3m">3m</button><button type="button" data-graph="finance" data-graph-range="6m">6m</button><button type="button" data-graph="finance" data-graph-range="1y">1y</button>
+      </div>
+    </div>{% endif %}
     <div class="bi-chart-stage" id="financeChart"><div class="dashboard-skeleton chart-skeleton"></div></div>
   </article>{% endif %}{% endif %}
 
@@ -52,4 +64,4 @@
 
 {% if not dashboard_cards and not dashboard_charts %}<section class="dashboard-no-access"><span>◎</span><h2>No dashboard widgets assigned</h2><p>An administrator can enable cards and charts from Access Control.</p></section>{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=3" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=4" defer></script>{% endblock %}
