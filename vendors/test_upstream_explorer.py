@@ -7,6 +7,7 @@ from django.urls import reverse
 from accounts.models import Role
 
 from .models import Client, ClientIntegration
+from .schema import filter_unconfigured_upstream_provider_endpoints, remove_unconfigured_upstream_provider_tags
 from .upstream import INNOVATE_OPERATIONS, RFG_OPERATIONS, operation_response_description
 
 
@@ -64,6 +65,26 @@ class UpstreamExplorerTests(TestCase):
                     "The provider's authenticated JSON response.",
                     f"{provider}.{code} needs a specific response explanation",
                 )
+
+    @patch("vendors.schema.configured_upstream_provider_keys", return_value={"innovatemr"})
+    def test_swagger_hides_provider_sections_without_active_client(self, _configured):
+        endpoints = [
+            ("/api/v1/vendors/upstream-explorer/{client_code}/innovatemr/inventory/", "", "GET", object()),
+            ("/api/v1/vendors/upstream-explorer/{client_code}/rfg/inventory/", "", "GET", object()),
+            ("/survey/rfg/callback", "", "GET", object()),
+            ("/api/v1/vendors/upstream-explorer/", "", "GET", object()),
+        ]
+        filtered = filter_unconfigured_upstream_provider_endpoints(endpoints)
+        self.assertEqual([item[0] for item in filtered], [endpoints[0][0], endpoints[3][0]])
+        schema = {"tags": [
+            {"name": "Client API catalog"}, {"name": "InnovateMR APIs"},
+            {"name": "RFG APIs"}, {"name": "RFG Callbacks"},
+        ]}
+        result = remove_unconfigured_upstream_provider_tags(schema, None, None, False)
+        self.assertEqual(
+            [item["name"] for item in result["tags"]],
+            ["Client API catalog", "InnovateMR APIs"],
+        )
 
     @patch.dict("os.environ", {"TEST_INNOVATE_TOKEN": "server-only-token"})
     def test_catalog_documents_urls_without_exposing_secret(self):

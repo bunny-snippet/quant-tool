@@ -35,6 +35,16 @@ EXTERNAL_VENDOR_FORBIDDEN_CODES = frozenset({
 })
 
 
+def is_super_admin_account(user) -> bool:
+    """Return whether the account may access temporarily restricted super-admin areas."""
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    if user.is_superuser:
+        return True
+    profile = EmployeeProfile.objects.select_related("role").filter(user=user).first()
+    return bool(profile and profile.role and profile.role.is_active and profile.role.slug in {"super-admin", "superadmin"})
+
+
 def effective_permission_codes(user) -> set[str]:
     if not user or not user.is_authenticated or not user.is_active:
         return set()
@@ -56,10 +66,14 @@ def effective_permission_codes(user) -> set[str]:
     if profile and profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
         codes.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
         codes = {code for code in codes if not code.startswith("organization.")}
+    if not is_super_admin_account(user):
+        codes = {code for code in codes if not code.startswith("dashboard.")}
     return codes
 
 
 def has_function_access(user, code: str) -> bool:
+    if code == "dashboard.view":
+        return is_super_admin_account(user)
     return bool(user and user.is_authenticated and user.is_active and (user.is_superuser or code in effective_permission_codes(user)))
 
 

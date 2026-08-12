@@ -1589,7 +1589,7 @@ class DashboardAnalyticsTests(TestCase):
             sum(point["completes"] for point in response.data["finance_chart"]["points"]), 1
         )
 
-    def test_dashboard_is_unfiltered_and_employee_visibility_is_enforced(self):
+    def test_dashboard_is_unfiltered_for_owner_and_rejects_employee(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})
         self.assertEqual(filtered.status_code, 200)
         self.assertEqual(filtered.data["summary"]["hits"], 2)
@@ -1598,35 +1598,12 @@ class DashboardAnalyticsTests(TestCase):
         scoped = APIClient()
         scoped.force_authenticate(self.employee)
         own = scoped.get(reverse("dashboard-api"))
-        self.assertEqual(own.status_code, 200)
-        self.assertEqual(own.data["summary"]["hits"], 1)
-        self.assertEqual(own.data["summary"]["completes"], 1)
-        self.assertIsNone(own.data["summary"]["revenue"])
-        self.assertIsNone(own.data["summary"]["average_cpi"])
-        self.assertIsNone(own.data["summary"]["rpc"])
-        self.assertTrue(all(
-            point["revenue"] is None for point in own.data["traffic_chart"]["points"]
-        ))
-        self.assertTrue(all(
-            point["average_cpi"] is None for point in own.data["traffic_chart"]["points"]
-        ))
-        self.assertTrue(all(
-            point["rpc"] is None for point in own.data["traffic_chart"]["points"]
-        ))
-        self.assertIsNone(own.data["finance_chart"])
-        self.assertIsNone(own.data["top_users"])
-        self.assertNotIn("recent_activity", own.data)
-        self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 200)
-        self.assertEqual(
-            scoped.get(reverse("dashboard-api"), {"traffic_range": "48h"}).status_code,
-            200,
-        )
-        self.assertEqual(
-            scoped.get(reverse("dashboard-api"), {"finance_range": "48h"}).status_code,
-            403,
-        )
+        self.assertEqual(own.status_code, 403)
+        self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 403)
+        self.assertEqual(scoped.get(reverse("dashboard-api"), {"traffic_range": "48h"}).status_code, 403)
+        self.assertEqual(scoped.get(reverse("dashboard-api"), {"finance_range": "48h"}).status_code, 403)
 
-    def test_individual_card_permission_hides_only_that_metric(self):
+    def test_employee_card_override_cannot_bypass_dashboard_restriction(self):
         UserFunctionOverride.objects.create(
             user=self.employee,
             function=AccessFunction.objects.get(code="dashboard.card.hits"),
@@ -1637,9 +1614,7 @@ class DashboardAnalyticsTests(TestCase):
 
         response = scoped.get(reverse("dashboard-api"))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.data["summary"]["hits"])
-        self.assertEqual(response.data["summary"]["completes"], 1)
+        self.assertEqual(response.status_code, 403)
 
     def test_local_prescreener_termination_is_excluded_from_ir(self):
         SurveyAttempt.objects.create(

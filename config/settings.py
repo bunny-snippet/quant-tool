@@ -160,7 +160,7 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Survey Workspace API",
     "DESCRIPTION": (
-        "Internal multi-provider survey API. The client-specific InnovateMR and RFG sections let authorized "
+        "Internal multi-provider survey API. Active client-provider sections let authorized "
         "administrators execute allow-listed provider operations while every credential remains "
         "server-side. Authentication requires the current Django admin session and the separate "
         "documentation password."
@@ -168,6 +168,13 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    "PREPROCESSING_HOOKS": [
+        "vendors.schema.filter_unconfigured_upstream_provider_endpoints",
+    ],
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+        "vendors.schema.remove_unconfigured_upstream_provider_tags",
+    ],
     "TAGS": [
         {"name": "Surveys", "description": "Browse locally synchronized survey inventory."},
         {"name": "Survey details", "description": "Quota and pre-screening targeting captured from InnovateMR."},

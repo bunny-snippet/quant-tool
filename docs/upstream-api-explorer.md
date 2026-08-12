@@ -45,6 +45,11 @@ aliases include `innovate`, `innovatemr`, `innovate-mr`, `rfg` and
 the API returns HTTP 409 and lists the integration names accepted by the
 `integration` query parameter.
 
+Provider sections are database-driven. If no active client integration exists
+for a provider, that provider's operations, callbacks and tag are omitted from
+the generated Swagger schema. Enabling and testing an active integration makes
+its section appear automatically; no documentation code change is required.
+
 List responses are limited to 50 rows by default and 200 rows maximum so a
 large inventory cannot freeze Swagger. The wrapper reports the original row
 count and whether the displayed payload was truncated. This does not change

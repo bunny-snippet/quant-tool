@@ -179,7 +179,25 @@ class FunctionAccessTests(TestCase):
         self.assertTrue(has_function_access(self.user, "attempts.view"))
         self.assertFalse(has_function_access(self.user, "projects.view"))
         self.assertEqual(self.client.get(reverse("projects")).status_code, 403)
-        self.assertRedirects(self.client.get(reverse("home")), reverse("dashboard"), fetch_redirect_response=False)
+        self.assertRedirects(self.client.get(reverse("home")), reverse("traffic-reports"), fetch_redirect_response=False)
+
+    def test_dashboard_is_hard_restricted_to_super_admin_accounts(self):
+        dashboard = AccessFunction.objects.get(code="dashboard.view")
+        UserFunctionOverride.objects.update_or_create(
+            user=self.user, function=dashboard, defaults={"effect": "allow"}
+        )
+        self.assertFalse(has_function_access(self.user, "dashboard.view"))
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 403)
+        api = APIClient()
+        api.force_authenticate(self.user)
+        self.assertEqual(api.get(reverse("dashboard-api")).status_code, 403)
+
+        owner = get_user_model().objects.create_user(username="role-super-admin", password="password-123")
+        owner.employee_profile.role = Role.objects.get(slug="super-admin")
+        owner.employee_profile.save(update_fields=["role", "updated_at"])
+        self.client.force_login(owner)
+        self.assertTrue(has_function_access(owner, "dashboard.view"))
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
 
     def test_denied_navigation_and_project_column_are_not_rendered(self):
         UserFunctionOverride.objects.create(

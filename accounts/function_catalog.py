@@ -12,27 +12,28 @@ from django.db import transaction
 ALL_ROLES = ("employee", "employees", "team-lead", "tl", "manager", "admin", "super-admin")
 TRACKING_ROLES = ("team-lead", "tl", "manager", "admin", "super-admin")
 ADMIN_ROLES = ("admin", "super-admin")
+SUPER_ADMIN_ROLES = ("super-admin",)
 
 
 # code, name, page-wise group, description, default system roles
 FUNCTION_CATALOG = (
-    ("dashboard.view", "View dashboard page and sidebar item", "Dashboard - Page & navigation", "Open the dashboard and display its sidebar navigation item.", ALL_ROLES),
-    ("dashboard.card.hits", "Show Total hits card", "Dashboard - Summary cards", "Display the filtered respondent journey count.", ALL_ROLES),
-    ("dashboard.card.completes", "Show Completes card", "Dashboard - Summary cards", "Display successful survey outcomes.", ALL_ROLES),
-    ("dashboard.card.conversion", "Show Conversion card", "Dashboard - Summary cards", "Display completes divided by total hits.", ALL_ROLES),
-    ("dashboard.card.active_users", "Show Active users card", "Dashboard - Summary cards", "Display users with activity matching the current filters.", ALL_ROLES),
-    ("dashboard.card.average_loi", "Show Average LOI card", "Dashboard - Summary cards", "Display average recorded survey journey duration.", ALL_ROLES),
-    ("dashboard.card.revenue", "Show Revenue card", "Dashboard - Summary cards", "Display completed revenue from immutable hit-time CPI snapshots.", ADMIN_ROLES),
-    ("dashboard.card.average_cpi", "Show Average CPI card", "Dashboard - Summary cards", "Display average immutable hit-time CPI across completed journeys.", ADMIN_ROLES),
-    ("dashboard.card.rpc", "Show Revenue per hit card", "Dashboard - Summary cards", "Display visible completed revenue divided by total respondent hits.", ADMIN_ROLES),
-    ("dashboard.card.ir", "Show IR card", "Dashboard - Summary cards", "Display completes divided by completes plus survey terminations; local pre-screen terminations, quota and security outcomes are excluded.", ALL_ROLES),
-    ("dashboard.chart.performance", "Show Performance graph", "Dashboard - Charts", "Display range-aware traffic, conversion and permitted financial trends from 24 hours through 1 year.", ALL_ROLES),
-    ("dashboard.chart.client_share", "Show Client contribution chart", "Dashboard - Charts", "Display each client's share of filtered completes.", ALL_ROLES),
-    ("dashboard.chart.status", "Show Outcome mix chart", "Dashboard - Charts", "Display initiated, complete, terminated, quota and security outcomes.", ALL_ROLES),
-    ("dashboard.chart.device", "Show Device performance chart", "Dashboard - Charts", "Display completed outcomes by Desktop, Mobile and Tablet.", ALL_ROLES),
-    ("dashboard.chart.top_users", "Show Top performers chart", "Dashboard - Charts", "Display visible users ranked by filtered completes.", TRACKING_ROLES),
-    ("dashboard.graph.traffic_filters", "Filter Traffic dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Entrants, Completes and Conversion graph.", ALL_ROLES),
-    ("dashboard.graph.finance_filters", "Filter Revenue dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Revenue and RPC graph.", ADMIN_ROLES),
+    ("dashboard.view", "View dashboard page and sidebar item", "Dashboard - Page & navigation", "Open the dashboard and display its sidebar navigation item.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.hits", "Show Total hits card", "Dashboard - Summary cards", "Display the filtered respondent journey count.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.completes", "Show Completes card", "Dashboard - Summary cards", "Display successful survey outcomes.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.conversion", "Show Conversion card", "Dashboard - Summary cards", "Display completes divided by total hits.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.active_users", "Show Active users card", "Dashboard - Summary cards", "Display users with activity matching the current filters.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.average_loi", "Show Average LOI card", "Dashboard - Summary cards", "Display average recorded survey journey duration.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.revenue", "Show Revenue card", "Dashboard - Summary cards", "Display completed revenue from immutable hit-time CPI snapshots.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.average_cpi", "Show Average CPI card", "Dashboard - Summary cards", "Display average immutable hit-time CPI across completed journeys.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.rpc", "Show Revenue per hit card", "Dashboard - Summary cards", "Display visible completed revenue divided by total respondent hits.", SUPER_ADMIN_ROLES),
+    ("dashboard.card.ir", "Show IR card", "Dashboard - Summary cards", "Display completes divided by completes plus survey terminations; local pre-screen terminations, quota and security outcomes are excluded.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.performance", "Show Performance graph", "Dashboard - Charts", "Display range-aware traffic, conversion and permitted financial trends from 24 hours through 1 year.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.client_share", "Show Client contribution chart", "Dashboard - Charts", "Display each client's share of filtered completes.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.status", "Show Outcome mix chart", "Dashboard - Charts", "Display initiated, complete, terminated, quota and security outcomes.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.device", "Show Device performance chart", "Dashboard - Charts", "Display completed outcomes by Desktop, Mobile and Tablet.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.top_users", "Show Top performers chart", "Dashboard - Charts", "Display visible users ranked by filtered completes.", SUPER_ADMIN_ROLES),
+    ("dashboard.graph.traffic_filters", "Filter Traffic dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Entrants, Completes and Conversion graph.", SUPER_ADMIN_ROLES),
+    ("dashboard.graph.finance_filters", "Filter Revenue dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Revenue and RPC graph.", SUPER_ADMIN_ROLES),
 
     ("projects.view", "View Projects page, sidebar and rows", "Projects - Page & navigation", "Open Projects, display its sidebar item and read project rows through the API.", ALL_ROLES),
     ("projects.filter.search", "Use Search filter", "Projects - Filters", "Search project identifiers and descriptive fields.", ALL_ROLES),
