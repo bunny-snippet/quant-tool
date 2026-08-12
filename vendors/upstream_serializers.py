@@ -18,10 +18,13 @@ class UpstreamOperationMetadataSerializer(serializers.Serializer):
     required_parameters = serializers.ListField(child=serializers.CharField(), required=False)
     query_parameters = serializers.ListField(child=serializers.CharField(), required=False)
     body_parameters = serializers.ListField(child=serializers.CharField(), required=False)
+    mutating = serializers.BooleanField(default=False)
+    response_description = serializers.CharField(required=False)
 
 
 class UpstreamIntegrationMetadataSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
+    client_code = serializers.SlugField()
+    lookup_aliases = serializers.ListField(child=serializers.CharField())
     client = serializers.CharField()
     integration = serializers.CharField()
     provider = serializers.CharField()
@@ -32,7 +35,7 @@ class UpstreamIntegrationMetadataSerializer(serializers.Serializer):
 
 
 class UpstreamExecutionIntegrationSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
+    client_code = serializers.SlugField()
     client = serializers.CharField()
     name = serializers.CharField()
     provider = serializers.CharField()
@@ -50,3 +53,24 @@ class UpstreamExecutionResponseSerializer(serializers.Serializer):
 
 class UpstreamErrorSerializer(serializers.Serializer):
     detail = serializers.CharField()
+
+
+class UpstreamMutationRequestSerializer(serializers.Serializer):
+    confirm_upstream_mutation = serializers.BooleanField(
+        help_text="Must be true. The request changes live data in the provider account."
+    )
+    survey_id = serializers.CharField(required=False, help_text="InnovateMR Survey ID, when required.")
+    pid = serializers.CharField(required=False, help_text="Supplier panelist PID, when required.")
+    payload = serializers.JSONField(
+        required=False,
+        help_text="Exact documented InnovateMR JSON body. Credentials are added server-side.",
+    )
+
+
+class RFGCallbackPreviewSerializer(serializers.Serializer):
+    result = serializers.CharField(help_text="RFG result code, for example 1, 2, 7, 30 or 50.")
+    ruledOutBy = serializers.CharField(required=False, allow_blank=True)
+    liveP = serializers.CharField(required=False, allow_blank=True)
+    liveS = serializers.CharField(required=False, allow_blank=True)
+    liveI = serializers.CharField(required=False, allow_blank=True)
+    quotaThrottle = serializers.CharField(required=False, allow_blank=True)

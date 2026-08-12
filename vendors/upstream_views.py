@@ -1,11 +1,22 @@
 import json
+import re
 
-from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
+from django.db.models import Q
+from django.utils.text import slugify
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException, NotFound
 from rest_framework.response import Response
 
 from config.api_docs import IsDocumentationAdmin
+from surveys.rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 
 from .models import ClientIntegration
 from .upstream import (
@@ -14,79 +25,193 @@ from .upstream import (
     UpstreamExplorerError,
     execute_operation,
     integration_metadata,
+    operation_response_description,
 )
 from .upstream_serializers import (
+    RFGCallbackPreviewSerializer,
     UpstreamErrorSerializer,
     UpstreamExecutionResponseSerializer,
     UpstreamIntegrationMetadataSerializer,
+    UpstreamMutationRequestSerializer,
 )
 
 
-TAG = "Upstream client APIs"
-COMMON_PARAMETERS = [
-    OpenApiParameter(
-        "operation", str, OpenApiParameter.PATH, required=True,
-        description=(
-            "Allow-listed provider operation. First call the integration metadata endpoint to see "
-            "which operations this provider supports and its exact upstream URL. Built-in examples: "
-            f"{', '.join(sorted(set(INNOVATE_OPERATIONS) | set(RFG_OPERATIONS)))}."
-        ),
-    ),
-    OpenApiParameter(
-        "parameters", str,
-        description=(
-            "Optional JSON object for parameters declared by a future configured read operation, "
-            'for example {"market":"US"}. Built-in parameters have dedicated fields below.'
-        ),
-    ),
-    OpenApiParameter("limit", int, description="Maximum list rows returned to Swagger (1-200; default 50)."),
-    OpenApiParameter("survey_id", str, description="InnovateMR Survey ID or RFG project/rfg_id."),
-    OpenApiParameter("pid", str, description="Supplier respondent/PID value."),
-    OpenApiParameter("external_id", str, description="Provider transaction/check ID used by InnovateMR unique PID/IP check."),
-    OpenApiParameter("rid", str, description="Platform-generated respondent RID."),
-    OpenApiParameter("ip", str, description="Respondent public IP, required only for duplicate checks."),
-    OpenApiParameter("fingerprint", str, description="Optional RFG duplicate-check fingerprint."),
-    OpenApiParameter("date_time", str, description="Provider-formatted inventory/closed-survey date-time."),
-    OpenApiParameter("device_type", str, description="Provider device value for respondent eligibility checks."),
-    OpenApiParameter("num_surveys", int, description="Requested personalized inventory size (1-100)."),
-    OpenApiParameter("metadata_fields", str, description="Comma-separated InnovateMR core metadata fields."),
-    OpenApiParameter("startDate", str, description="InnovateMR start date/time filter."),
-    OpenApiParameter("endDate", str, description="InnovateMR end date/time filter."),
-    OpenApiParameter("verifiedStartDate", str, description="InnovateMR verified start date/time filter."),
-    OpenApiParameter("verifiedEndDate", str, description="InnovateMR verified end date/time filter."),
-    OpenApiParameter("status", str, description="Optional InnovateMR transaction status."),
-    OpenApiParameter("page_size", int, description="Upstream page size for paged inventory."),
-    OpenApiParameter("cursor", str, description="Upstream next cursor for paged inventory."),
-    OpenApiParameter("country", str, description="Two-letter market code where supported."),
-    OpenApiParameter("language", str, description="Provider language name/code where supported."),
-    OpenApiParameter("countryCode", str, description="InnovateMR high-priority country code."),
-    OpenApiParameter("languageCode", str, description="InnovateMR high-priority language code."),
-    OpenApiParameter("category", str, description="Question category key or RFG B2B/B2C category."),
-    OpenApiParameter("category_key", str, description="InnovateMR question category key."),
-    OpenApiParameter("question_key", str, description="InnovateMR question key for answer lookup."),
-    OpenApiParameter("term_code", str, description="InnovateMR termination category code."),
-    OpenApiParameter("datapoint_name", str, description="RFG datapoint property/name."),
-    OpenApiParameter("modified_since", str, description="RFG modifiedSince value."),
-    OpenApiParameter("zips_only", bool, description="Return only RFG postal targeting where supported."),
-    OpenApiParameter("allow_recontacts", bool, description="Include RFG recontacts in inventory."),
-    OpenApiParameter("inventory_type", int, description="RFG inventory type (normally 1 for LiveAlert)."),
-]
+CATALOG_TAG = "Client API catalog"
+INNOVATE_TAG = "InnovateMR APIs"
+RFG_TAG = "RFG APIs"
+RFG_CALLBACK_TAG = "RFG Callbacks"
+PROVIDER_ALIASES = {
+    "innovate": "innovatemr",
+    "innovate-mr": "innovatemr",
+    "innovatemr": "innovatemr",
+    "rfg": "rfg",
+    "research-for-good": "rfg",
+}
+
+PARAMETER_HELP = {
+    "survey_id": "Provider survey/project ID. InnovateMR example: 16003381; RFG example: RFG2300540746-001.",
+    "survey_ids": "RFG project IDs as a comma-separated list or JSON array (maximum 100).",
+    "pid": "Supplier respondent/PID value.",
+    "external_id": "Provider transaction/check ID for InnovateMR's unique PID/IP check.",
+    "rid": "Our platform-generated 10-character respondent RID.",
+    "ip": "Respondent public IP address.",
+    "fingerprint": "Optional RFG browser fingerprint; use 0 when unavailable.",
+    "date_time": "Provider-formatted changed-since date/time.",
+    "device_type": "Provider device value, for example desktop, mobile or tablet.",
+    "num_surveys": "Number of personalized surveys requested (1-100; default 10).",
+    "metadata_fields": "Comma-separated InnovateMR metadata fields.",
+    "startDate": "InnovateMR start date/time filter.",
+    "endDate": "InnovateMR end date/time filter.",
+    "verifiedStartDate": "InnovateMR verified-start date/time filter.",
+    "verifiedEndDate": "InnovateMR verified-end date/time filter.",
+    "status": "Optional InnovateMR transaction status.",
+    "page_size": "Upstream page size.",
+    "cursor": "Upstream next-page cursor.",
+    "country": "Two-letter country/market code, for example US.",
+    "language": "Provider language name/code, for example English.",
+    "countryCode": "InnovateMR country code.",
+    "languageCode": "InnovateMR language code.",
+    "category": "RFG B2B/B2C category.",
+    "category_key": "InnovateMR question-category key.",
+    "question_key": "InnovateMR question key.",
+    "term_code": "InnovateMR termination category code.",
+    "datapoint_name": "RFG datapoint property/name.",
+    "modified_since": "RFG modifiedSince date in yyyy-MM-dd format.",
+    "zips_only": "When true, RFG returns postal targeting only.",
+    "allow_recontacts": "Include RFG recontact projects.",
+    "inventory_type": "RFG inventory type: 0 all, 1 LiveAlert, 2 traditional.",
+    "result": "Provider result code filter.",
+    "start": "RFG log start date/time filter.",
+    "end": "RFG log end date/time filter.",
+    "zip": "Respondent postal/ZIP code.",
+    "country_code": "Two-letter RFG country code.",
+}
+
+UPSTREAM_INPUT_NOTES = {
+    "unique_ip_check": "We convert `survey_id` + `ip` to `{survNum, ip}`.",
+    "unique_pid_ip_check": "We convert `survey_id`, `pid`, `external_id` to `{survNum, pid, id}`.",
+    "respondent_precheck": "We convert the inputs to `{survNum, pid, ip, deviceType}`.",
+    "respondent_surveys": "PID is placed in the URL; the upstream JSON body is `{ip, numSurveys, deviceType}`.",
+    "duplicate_check": "We send `{rfg_id, rid, ip, fingerprint}` in RFG's signed JSON command.",
+    "duplicate_checks": "We send `{rfg_ids, rid, ip, fingerprint}` in RFG's signed JSON command.",
+    "targeting": "The local `survey_id` is sent upstream as RFG `rfg_id` for an RFG client.",
+    "quota": "For RFG this calls targeting with `rfg_id` and returns only its `quotas` array.",
+    "create_link": "The local `survey_id` is sent as RFG `rfg_id`; RFG returns a reusable link.",
+    "log": "The local `survey_id` is sent as RFG `rfg_id` with optional result/start/end filters.",
+    "stats": "For RFG the local `survey_id` is sent as `rfg_id`.",
+    "zip_to_geo": "We send the local `zip` and uppercase `country_code` as RFG `{zip, countryCode}`.",
+}
+
+MUTATION_EXAMPLES = {
+    "set_global_redirects": {
+        "confirm_upstream_mutation": True,
+        "payload": {
+            "sUrl": "https://panel.example/survey?status=1&rid=[%%pid%%]",
+            "fUrl": "https://panel.example/survey?status=2&rid=[%%pid%%]",
+            "oUrl": "https://panel.example/survey?status=3&rid=[%%pid%%]",
+            "qTUrl": "https://panel.example/survey?status=3&rid=[%%pid%%]",
+            "tUrl": "https://panel.example/survey?status=4&rid=[%%pid%%]",
+        },
+    },
+    "delete_global_redirects": {
+        "confirm_upstream_mutation": True,
+        "payload": {"oUrl": "", "qTUrl": "", "tUrl": ""},
+    },
+    "set_survey_redirects": {
+        "confirm_upstream_mutation": True,
+        "survey_id": "16003381",
+        "payload": {
+            "sUrl": "https://panel.example/survey?status=1&rid=[%%pid%%]",
+            "fUrl": "https://panel.example/survey?status=2&rid=[%%pid%%]",
+            "oUrl": "https://panel.example/survey?status=3&rid=[%%pid%%]",
+            "tUrl": "https://panel.example/survey?status=4&rid=[%%pid%%]",
+        },
+    },
+    "delete_survey_redirects": {
+        "confirm_upstream_mutation": True,
+        "survey_id": "16003381",
+        "payload": {},
+    },
+    "create_panelist_profile": {
+        "confirm_upstream_mutation": True,
+        "pid": "respondent-123",
+        "payload": {
+            "Country": "US",
+            "Language": "English",
+            "Qualifications": [{
+                "QuestiondId": 1,
+                "QuestionKey": "AGE",
+                "Options": [{"OptionId": 24, "OptionText": "24"}],
+            }],
+        },
+    },
+    "update_panelist_profile": {
+        "confirm_upstream_mutation": True,
+        "pid": "respondent-123",
+        "payload": {
+            "Country": "US",
+            "Language": "English",
+            "Qualifications": [],
+        },
+    },
+}
+
+DISPLAY_ENDPOINTS = {
+    "@inventory": "/supply/getAllocatedSurveys",
+    "@paged_inventory": "/supply/getAllocatedSurveysPaged",
+    "@quota": "/supply/getQuotaForSurvey/{survey_id}",
+    "@targeting": "/supply/getSurveyTargeting/{survey_id}",
+    "@transaction": "/supply/getSurveyTransactionsByCond/{survey_id}/{pid}",
+}
+
+
+class AmbiguousClientIntegration(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "ambiguous_client_integration"
+
+
+def _provider_key(value):
+    return re.sub(r"[-_]", "", str(value or "").lower())
+
+
+def _lookup_aliases(integration):
+    provider = _provider_key(integration.provider_code)
+    aliases = {
+        integration.client.code.lower(),
+        slugify(integration.client.name),
+        slugify(integration.name),
+    }
+    if provider == "innovatemr":
+        aliases.update({"innovate", "innovate-mr", "innovatemr"})
+    elif provider == "rfg":
+        aliases.update({"rfg", "research-for-good"})
+    return aliases
 
 
 @extend_schema_view(
     list=extend_schema(
-        tags=[TAG],
-        summary="List configured upstream integrations and every runnable API",
+        tags=[CATALOG_TAG],
+        summary="Search configured clients and their runnable provider APIs",
         description=(
-            "Shows client/provider base URLs, exact API endpoints, official documentation links and "
-            "credential environment-variable names. Credential values are never returned."
+            "Use `search=innovate` or `search=rfg` instead of finding a numeric database ID. "
+            "The response shows stable client codes, accepted aliases, exact upstream URLs, official "
+            "documentation and whether server-side credentials are configured. Secret values are never returned."
         ),
+        parameters=[OpenApiParameter("search", str, description="Client name, client code, integration name or provider.")],
         responses=UpstreamIntegrationMetadataSerializer(many=True),
     ),
     retrieve=extend_schema(
-        tags=[TAG],
-        summary="Inspect one integration's upstream API catalog",
-        responses=UpstreamIntegrationMetadataSerializer,
+        tags=[CATALOG_TAG],
+        summary="Inspect one client API catalog by name/code",
+        description=(
+            "Examples: `/upstream-explorer/innovate/` and `/upstream-explorer/rfg/`. "
+            "If one client has multiple active connections, pass `?integration=<integration-name>`."
+        ),
+        responses={
+            200: UpstreamIntegrationMetadataSerializer,
+            404: UpstreamErrorSerializer,
+            409: OpenApiResponse(UpstreamErrorSerializer, description="Alias matches multiple active integrations."),
+        },
     ),
 )
 class UpstreamExplorerViewSet(
@@ -94,7 +219,7 @@ class UpstreamExplorerViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Admin-only proxy for explicit, read-oriented provider operations."""
+    """Admin-only proxy for explicit provider operations."""
 
     queryset = ClientIntegration.objects.select_related("client").filter(
         is_active=True, client__is_active=True
@@ -102,6 +227,51 @@ class UpstreamExplorerViewSet(
     serializer_class = UpstreamIntegrationMetadataSerializer
     permission_classes = [IsDocumentationAdmin]
     pagination_class = None
+    lookup_url_kwarg = "client_code"
+    lookup_value_regex = r"[A-Za-z0-9][A-Za-z0-9_-]*"
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = str(self.request.query_params.get("search") or "").strip()
+        if search and self.action == "list":
+            queryset = queryset.filter(
+                Q(client__code__icontains=search)
+                | Q(client__name__icontains=search)
+                | Q(name__icontains=search)
+                | Q(provider_code__icontains=search)
+            )
+        return queryset
+
+    def get_object(self):
+        lookup = str(self.kwargs.get(self.lookup_url_kwarg) or "").lower()
+        queryset = self.queryset.all()
+        exact_client_matches = [item for item in queryset if item.client.code.lower() == lookup]
+        candidates = exact_client_matches or [item for item in queryset if lookup in _lookup_aliases(item)]
+        requested_provider = PROVIDER_ALIASES.get(lookup)
+        if requested_provider and not exact_client_matches:
+            provider_matches = [
+                item for item in queryset if _provider_key(item.provider_code) == _provider_key(requested_provider)
+            ]
+            if provider_matches:
+                candidates = provider_matches
+        integration_name = str(self.request.query_params.get("integration") or "").strip()
+        if integration_name:
+            normalized_name = slugify(integration_name)
+            candidates = [
+                item for item in candidates
+                if slugify(item.name) == normalized_name or str(item.pk) == integration_name
+            ]
+        if not candidates:
+            raise NotFound(
+                "No active client integration matches this name/code. Use the catalog search endpoint first."
+            )
+        if len(candidates) > 1:
+            choices = ", ".join(f"{item.client.code}:{slugify(item.name)}" for item in candidates)
+            raise AmbiguousClientIntegration(
+                f"This alias matches multiple integrations. Add ?integration=<name>. Available: {choices}."
+            )
+        self.check_object_permissions(self.request, candidates[0])
+        return candidates[0]
 
     def list(self, request, *args, **kwargs):
         return Response([integration_metadata(item) for item in self.get_queryset()])
@@ -111,6 +281,8 @@ class UpstreamExplorerViewSet(
 
     def _execute(self, integration, operation):
         parameters = self.request.query_params.dict()
+        if isinstance(self.request.data, dict):
+            parameters.update(self.request.data)
         generic_parameters = parameters.pop("parameters", "")
         if generic_parameters:
             try:
@@ -133,56 +305,200 @@ class UpstreamExplorerViewSet(
         return Response(result)
 
     @extend_schema(
-        tags=[TAG],
-        summary="Execute any allow-listed upstream client API",
+        tags=[CATALOG_TAG],
+        summary="Execute a configured future-provider read operation",
         description=(
-            "Runs the selected provider API using credentials resolved on the server. For future "
-            "providers, additional GET operations configured in integration.config.read_api_operations "
-            "are accepted here without exposing an arbitrary URL parameter. This endpoint is local GET "
-            "even when a provider such as RFG requires a signed POST upstream."
+            "Generic extension point for future clients configured in `read_api_operations`. "
+            "InnovateMR and RFG users should use their named endpoints below; live mutations are rejected here."
         ),
-        parameters=COMMON_PARAMETERS,
-        responses={
-            200: UpstreamExecutionResponseSerializer,
-            400: OpenApiResponse(UpstreamErrorSerializer, description="Unsupported operation, missing input, or safe upstream error."),
-            403: OpenApiResponse(description="Admin or super-admin session required."),
-        },
+        parameters=[
+            OpenApiParameter("operation", str, OpenApiParameter.PATH, required=True),
+            OpenApiParameter("parameters", str, description='JSON object, for example {"market":"US"}.'),
+            OpenApiParameter("limit", int, description="Maximum list rows returned (1-200)."),
+        ],
+        responses={200: UpstreamExecutionResponseSerializer, 400: UpstreamErrorSerializer},
     )
     @action(detail=True, methods=["get"], url_path=r"execute/(?P<operation>[a-z][a-z0-9_]+)")
-    def execute(self, request, pk=None, operation=None):
-        return self._execute(self.get_object(), operation)
+    def execute(self, request, client_code=None, operation=None):
+        integration = self.get_object()
+        spec = {**INNOVATE_OPERATIONS, **RFG_OPERATIONS}.get(operation)
+        if spec and spec.mutating:
+            return Response(
+                {"detail": "Use the provider-specific POST endpoint for live mutations."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._execute(integration, operation)
 
     @extend_schema(
-        tags=[TAG], summary="Run this client's inventory API",
-        parameters=[OpenApiParameter("limit", int, description="Maximum returned rows (1-200).")],
-        responses={200: UpstreamExecutionResponseSerializer, 400: UpstreamErrorSerializer},
+        tags=[RFG_CALLBACK_TAG],
+        summary="Preview how an RFG callback result will be interpreted",
+        description=(
+            "Safe, non-writing helper for administrators. Enter RFG result/live fields and receive the "
+            "human-readable platform status and reason. It does not update an RID. The real callback is "
+            "`GET /survey/rfg/callback` and remains restricted to RFG's documented server IP addresses."
+        ),
+        request=RFGCallbackPreviewSerializer,
+        responses={200: OpenApiResponse(description="Mapped platform status, title and reason."), 400: UpstreamErrorSerializer},
     )
-    @action(detail=True, methods=["get"], url_path="inventory")
-    def inventory(self, request, pk=None):
-        return self._execute(self.get_object(), "inventory")
+    @action(detail=True, methods=["post"], url_path="rfg/callback-preview")
+    def rfg_callback_preview(self, request, client_code=None):
+        integration = self.get_object()
+        if _provider_key(integration.provider_code) != "rfg":
+            return Response({"detail": "This client is not an RFG integration."}, status=400)
+        serializer = RFGCallbackPreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        outcome = describe_rfg_outcome(serializer.validated_data)
+        return Response({
+            "known_result_code": str(serializer.validated_data["result"]) in RFG_STATUS_MAP,
+            **outcome,
+        })
 
     @extend_schema(
-        tags=[TAG], summary="Run this client's survey quota API",
-        description="For RFG, quotas are returned by its targeting command and extracted here.",
-        parameters=[
-            OpenApiParameter("survey_id", str, required=True, description="Survey ID or RFG rfg_id."),
-            OpenApiParameter("limit", int, description="Maximum returned rows (1-200)."),
-        ],
-        responses={200: UpstreamExecutionResponseSerializer, 400: UpstreamErrorSerializer},
+        tags=[RFG_CALLBACK_TAG],
+        summary="Understand the three documented RFG callback methods",
+        description=(
+            "Non-writing callback setup guide. It explains RFG page redirects, browser pixels and "
+            "server callbacks; which one this platform accepts; required placeholders; and why an "
+            "ordinary Swagger request cannot impersonate an RFG production callback."
+        ),
+        responses={200: OpenApiResponse(description="Callback methods, platform URL and security requirements.")},
     )
-    @action(detail=True, methods=["get"], url_path="quota")
-    def quota(self, request, pk=None):
-        return self._execute(self.get_object(), "quota")
+    @action(detail=True, methods=["get"], url_path="rfg/callback-guide")
+    def rfg_callback_guide(self, request, client_code=None):
+        integration = self.get_object()
+        if _provider_key(integration.provider_code) != "rfg":
+            return Response({"detail": "This client is not an RFG integration."}, status=400)
+        callback_url = request.build_absolute_uri("/survey/rfg/callback")
+        return Response({
+            "configured_platform_mode": "server callback with source-IP allowlist",
+            "production_callback_url": callback_url,
+            "methods_in_official_specification": [
+                {
+                    "method": "Page redirect",
+                    "purpose": "RFG redirects the respondent browser to a configured outcome URL.",
+                    "security": "RFG HMAC-MD5 redirect verification described by RFG.",
+                    "platform_use": "Not used for the verified server-to-server status update.",
+                },
+                {
+                    "method": "Browser pixel callback",
+                    "purpose": "The result page loads a tracking pixel URL in the respondent browser.",
+                    "security": "RFG HMAC-MD5 pixel verification described by RFG.",
+                    "platform_use": "Not trusted as the final verified callback because it originates in the browser.",
+                },
+                {
+                    "method": "Server callback",
+                    "purpose": "RFG calls the platform directly with RID/result and optional outcome fields.",
+                    "security": "Only configured RFG server IP addresses are accepted.",
+                    "platform_use": "Active verified integration mode.",
+                },
+            ],
+            "required_query_fields": ["rid", "result"],
+            "optional_query_fields": [
+                "ruledOutBy", "sesskey", "liveP", "liveS", "liveI", "quotaThrottle"
+            ],
+            "important": (
+                "Use callback-preview to learn result meanings. Calling the production callback from "
+                "Swagger normally returns 403 because Swagger is not an RFG callback server."
+            ),
+            "official_documentation": (
+                "https://docs.researchforgood.com/RFGAPI/api-pub-callback-spec/apidocs/index.html"
+            ),
+        })
 
-    @extend_schema(
-        tags=[TAG], summary="Run this client's survey targeting API",
-        parameters=[
-            OpenApiParameter("survey_id", str, required=True, description="Survey ID or RFG rfg_id."),
-            OpenApiParameter("zips_only", bool, description="RFG-only postal targeting switch."),
-            OpenApiParameter("limit", int, description="Maximum returned rows (1-200)."),
-        ],
-        responses={200: UpstreamExecutionResponseSerializer, 400: UpstreamErrorSerializer},
+
+def _operation_parameters(spec):
+    names = list(dict.fromkeys((*spec.required_parameters, *spec.query_parameters)))
+    parameters = [
+        OpenApiParameter(
+            name,
+            bool if name in {"zips_only", "allow_recontacts"} else int if name in {"num_surveys", "page_size", "inventory_type"} else str,
+            required=name in spec.required_parameters,
+            description=PARAMETER_HELP.get(name, name.replace("_", " ").title()),
+        )
+        for name in names
+    ]
+    parameters.append(OpenApiParameter("limit", int, description="Maximum list rows shown in this response (1-200)."))
+    return parameters
+
+
+def _operation_description(provider, spec):
+    required = ", ".join(spec.required_parameters) or "nothing required"
+    optional = ", ".join(spec.query_parameters) or "none"
+    safety = (
+        "\n\n**Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; "
+        "without it the call is rejected before contacting InnovateMR."
+        if spec.mutating else ""
     )
-    @action(detail=True, methods=["get"], url_path="targeting")
-    def targeting(self, request, pk=None):
-        return self._execute(self.get_object(), "targeting")
+    mapping_note = UPSTREAM_INPUT_NOTES.get(spec.code)
+    mapping_text = f" {mapping_note}" if mapping_note else ""
+    displayed_endpoint = DISPLAY_ENDPOINTS.get(spec.endpoint, spec.endpoint)
+    return (
+        f"**Purpose:** {spec.description}\n\n"
+        f"**You send:** required: {required}; optional: {optional}. Credentials are never entered here."
+        f"{mapping_text}\n\n"
+        f"**Upstream request:** `{spec.upstream_method} {displayed_endpoint}` using server-side authentication.\n\n"
+        f"**You receive:** {operation_response_description(provider, spec)}\n\n"
+        f"**Official documentation:** {spec.documentation_url}{safety}"
+    )
+
+
+def _build_operation_action(provider, operation, spec):
+    local_method = "post" if spec.mutating else "get"
+    tag = INNOVATE_TAG if provider == "innovatemr" else RFG_TAG
+
+    def operation_action(self, request, client_code=None):
+        integration = self.get_object()
+        if _provider_key(integration.provider_code) != _provider_key(provider):
+            return Response(
+                {"detail": f"This endpoint requires a {provider} client integration."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._execute(integration, operation)
+
+    operation_action.__name__ = f"{provider}_{operation}"
+    operation_action.__doc__ = spec.description
+    schema_kwargs = {
+        "tags": [tag],
+        "summary": spec.label,
+        "description": _operation_description(provider, spec),
+        "responses": {
+            200: UpstreamExecutionResponseSerializer,
+            400: OpenApiResponse(UpstreamErrorSerializer, description="Missing/invalid input or safe upstream error."),
+            403: OpenApiResponse(description="Admin or super-admin session required."),
+            409: OpenApiResponse(UpstreamErrorSerializer, description="Client alias is ambiguous."),
+        },
+        "operation_id": f"{provider}_{operation}",
+    }
+    if spec.mutating:
+        schema_kwargs["request"] = UpstreamMutationRequestSerializer
+        schema_kwargs["examples"] = [OpenApiExample(
+            "Confirmed live change",
+            value=MUTATION_EXAMPLES.get(
+                operation, {"confirm_upstream_mutation": True, "payload": {}}
+            ),
+            request_only=True,
+        )]
+    else:
+        schema_kwargs["parameters"] = _operation_parameters(spec)
+    operation_action = action(
+        detail=True,
+        methods=[local_method],
+        url_path=f"{provider}/{operation.replace('_', '-')}",
+        url_name=f"{provider}-{operation.replace('_', '-')}",
+    )(operation_action)
+    return extend_schema(**schema_kwargs)(operation_action)
+
+
+for _operation, _spec in INNOVATE_OPERATIONS.items():
+    setattr(
+        UpstreamExplorerViewSet,
+        f"innovatemr_{_operation}",
+        _build_operation_action("innovatemr", _operation, _spec),
+    )
+
+for _operation, _spec in RFG_OPERATIONS.items():
+    setattr(
+        UpstreamExplorerViewSet,
+        f"rfg_{_operation}",
+        _build_operation_action("rfg", _operation, _spec),
+    )

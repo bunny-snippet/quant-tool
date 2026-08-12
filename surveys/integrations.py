@@ -146,6 +146,46 @@ class InnovateMRClient:
         """Execute one allow-listed, non-mutating provider check via POST."""
         return self._post(endpoint, body)
 
+    def write_json(self, method: str, endpoint: str, body: dict[str, Any] | None = None) -> Any:
+        """Execute an explicitly confirmed provider configuration/profile mutation.
+
+        This method is intentionally separate from the inventory helpers so a
+        caller cannot turn an arbitrary Swagger request into an upstream write.
+        The explorer allow-list and confirmation gate are enforced before this
+        method is reached.
+        """
+        method = str(method or "").upper()
+        if method not in {"POST", "PUT", "DELETE"}:
+            raise InnovateMRAPIError("Unsupported upstream write method")
+        url = self._url(endpoint)
+        try:
+            response = self.session.request(
+                method,
+                url,
+                json=body or {},
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise InnovateMRNotFound(f"{self.provider_code} returned no data for {url}") from exc
+            raise InnovateMRAPIError(f"{self.provider_code} request failed for {url}: {exc}") from exc
+        except (requests.RequestException, ValueError) as exc:
+            raise InnovateMRAPIError(f"{self.provider_code} request failed for {url}: {exc}") from exc
+        if not isinstance(payload, (dict, list)):
+            raise InnovateMRAPIError(f"{self.provider_code} returned an invalid JSON payload")
+        if (
+            isinstance(payload, dict)
+            and self.provider_key == "innovatemr"
+            and payload.get("apiStatus") not in {None, "success"}
+        ):
+            raise InnovateMRAPIError(
+                f"InnovateMR rejected the request: {payload.get('msg', 'Unexpected response')}"
+            )
+        return payload
+
     def endpoint_url(self, endpoint: str) -> str:
         """Return the non-secret effective URL used for documentation metadata."""
         return self._url(endpoint)

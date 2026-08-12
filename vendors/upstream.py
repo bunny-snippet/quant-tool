@@ -38,6 +38,8 @@ class OperationSpec:
     query_parameters: tuple[str, ...] = ()
     body_parameters: tuple[str, ...] = ()
     upstream_method: str = "GET"
+    mutating: bool = False
+    response_description: str = "The provider's authenticated JSON response."
 
 
 INNOVATE_OPERATIONS = {
@@ -113,10 +115,49 @@ INNOVATE_OPERATIONS = {
         "/supply/surveySpecificRedirects/{survey_id}", f"{INNOVATE_DOCS}/get-redirect-method-for-survey-21242393e0",
         required_parameters=("survey_id",),
     ),
+    "set_global_redirects": OperationSpec(
+        "set_global_redirects", "Set global redirects", "Creates or replaces account-level success, failure, quota, terminate, postback and verification URLs.",
+        "/supply/accountUrls", f"{INNOVATE_DOCS}/set-global-redirect-urls-and-pixels-for-suppliers-21242385e0",
+        body_parameters=("payload",), upstream_method="PUT", mutating=True,
+        response_description="Success status and InnovateMR confirmation message.",
+    ),
+    "delete_global_redirects": OperationSpec(
+        "delete_global_redirects", "Delete global redirects", "Removes selected account-level redirect URLs or pixels while leaving unspecified values unchanged.",
+        "/supply/accountUrls", f"{INNOVATE_DOCS}/delete-global-redirect-urls-and-pixels-for-suppliers-account-21242386e0",
+        body_parameters=("payload",), upstream_method="DELETE", mutating=True,
+        response_description="Success status and InnovateMR confirmation message.",
+    ),
+    "set_survey_redirects": OperationSpec(
+        "set_survey_redirects", "Set survey redirects", "Creates or replaces redirect URLs and postbacks for one survey only.",
+        "/supply/setRedirectionForSurvey/{survey_id}", f"{INNOVATE_DOCS}/set-redirect-method-for-survey-21242394e0",
+        required_parameters=("survey_id",), body_parameters=("payload",),
+        upstream_method="PUT", mutating=True,
+        response_description="Success status and InnovateMR confirmation message.",
+    ),
+    "delete_survey_redirects": OperationSpec(
+        "delete_survey_redirects", "Delete survey redirects", "Removes survey-level redirect overrides so account-level redirects can apply.",
+        "/supply/surveySpecificRedirects/{survey_id}", f"{INNOVATE_DOCS}/delete-redirect-method-for-survey-21242395e0",
+        required_parameters=("survey_id",), upstream_method="DELETE", mutating=True,
+        response_description="Success status and InnovateMR confirmation message.",
+    ),
     "panelist_profile": OperationSpec(
         "panelist_profile", "Panelist profile", "Stored InnovateMR qualifications for one PID.",
         "/respondent/getQualifications/{pid}", f"{INNOVATE_DOCS}/get-panellist-profiling-21242401e0",
         required_parameters=("pid",),
+    ),
+    "create_panelist_profile": OperationSpec(
+        "create_panelist_profile", "Create panelist profile", "Stores country, language and qualification answers against one supplier PID.",
+        "/respondent/setQualifications/{pid}", f"{INNOVATE_DOCS}/set-panellist-profiling-21242409e0",
+        required_parameters=("pid",), body_parameters=("payload",),
+        upstream_method="POST", mutating=True,
+        response_description="Created/success status and provider message.",
+    ),
+    "update_panelist_profile": OperationSpec(
+        "update_panelist_profile", "Update panelist profile", "Updates country, language and qualification answers for an existing supplier PID.",
+        "/respondent/setQualifications/{pid}", f"{INNOVATE_DOCS}/update-panellist-profiling-21242410e0",
+        required_parameters=("pid",), body_parameters=("payload",),
+        upstream_method="PUT", mutating=True,
+        response_description="Success status and provider message.",
     ),
     "question_library": OperationSpec(
         "question_library", "Question library by market", "All targeting questions for one country/language market.",
@@ -222,12 +263,83 @@ RFG_OPERATIONS = {
         "livealert/duplicateCheck/1", f"{RFG_DOCS}/commands/duplicateCheck.html",
         required_parameters=("survey_id", "rid", "ip"), query_parameters=("fingerprint",), upstream_method="POST",
     ),
+    "duplicate_checks": OperationSpec(
+        "duplicate_checks", "Bulk duplicate checks", "Checks one respondent against multiple RFG projects in one signed request.",
+        "livealert/duplicateChecks/1", f"{RFG_DOCS}/commands/duplicateChecks.html",
+        required_parameters=("survey_ids", "rid", "ip"), query_parameters=("fingerprint",), upstream_method="POST",
+        response_description="A projects array containing each RFG project ID and its duplicate decision.",
+    ),
+    "log": OperationSpec(
+        "log", "Project respondent log", "Returns RFG session/result log rows for one project and optional result/date filters.",
+        "livealert/log/1", f"{RFG_DOCS}/commands/log.html",
+        required_parameters=("survey_id",), query_parameters=("result", "start", "end"), upstream_method="POST",
+        response_description="Session keys with start, end and result fields.",
+    ),
     "stats": OperationSpec(
         "stats", "Project statistics", "Current statistics for one RFG project.",
         "livealert/stats/1", f"{RFG_DOCS}/commands/stats.html",
         required_parameters=("survey_id",), upstream_method="POST",
     ),
+    "zip_to_geo": OperationSpec(
+        "zip_to_geo", "Postal code to geography", "Converts a country/postal-code pair into RFG geographic region indexes.",
+        "livealert/zipToGeo/1", f"{RFG_DOCS}/commands/zipToGeo.html",
+        required_parameters=("zip", "country_code"), upstream_method="POST",
+        response_description="Country and geographic region indexes resolved by RFG.",
+    ),
 }
+
+
+INNOVATE_RESPONSE_DESCRIPTIONS = {
+    "inventory": "Live survey rows allocated to this supplier account, including survey ID, market, CPI, IR, LOI, status and entry-link fields supplied by InnovateMR.",
+    "paged_inventory": "One page of allocated live surveys plus the provider's next-page/cursor information.",
+    "survey": "The current metadata record for the requested InnovateMR Survey ID.",
+    "inventory_by_date": "Live survey records created or changed since the supplied provider date/time.",
+    "closed_by_date": "Allocated survey IDs closed since the supplied provider date/time.",
+    "high_priority": "High-priority live survey rows, optionally narrowed by country and language.",
+    "quota": "Quota groups/rows for the survey, including targets, completes, remaining capacity, status and targeting conditions.",
+    "targeting": "Pre-screening questions, question types and accepted answer/option IDs for the survey.",
+    "transactions_by_pid": "The respondent transaction matching the supplied Survey ID and PID, including provider status and termination fields when available.",
+    "transactions": "Respondent transactions for one survey, optionally filtered by date/status.",
+    "transactions_by_date": "Respondent transactions across allocated surveys for the requested date/status window.",
+    "survey_status": "The survey's current availability/status decision.",
+    "stats": "Traffic, completion and revenue/statistics fields for one survey.",
+    "stats_by_date": "Traffic, completion and revenue/statistics fields for the requested date window.",
+    "redirect_method": "The effective survey-level redirect URL, pixel and postback configuration.",
+    "panelist_profile": "Country, language and stored qualification answers for the supplied PID.",
+    "question_library": "Targeting-question definitions available for the requested country/language market.",
+    "core_metadata": "Requested InnovateMR mapping dictionaries such as countries, languages, statuses or survey types.",
+    "unique_ip_check": "An allow/deny decision indicating whether the IP can enter the survey.",
+    "unique_pid_ip_check": "An allow/deny decision for the supplied survey, PID, IP-associated provider ID combination.",
+    "respondent_precheck": "The provider's pre-survey eligibility/status decision and reason fields.",
+    "respondent_surveys": "Personalized survey inventory matching the supplied profiled PID, IP and device.",
+    "recontact_pids": "Included/excluded PID collections for the requested recontact survey.",
+    "question_categories": "All targeting question category keys and labels.",
+    "questions_by_category": "Question definitions belonging to the requested category.",
+    "answers_by_question": "Answer option IDs/text for the requested question and optional market.",
+    "term_reasons": "All InnovateMR termination codes, categories and descriptions.",
+    "term_reason": "The termination category/description for one provider term code.",
+}
+
+RFG_RESPONSE_DESCRIPTIONS = {
+    "test": "Authentication status and confirmation that RFG returned the signed echo marker.",
+    "inventory": "RFG project rows including rfg_id, title, country, CPI, estimated IR/LOI, desired/current completes, state, category and targeting hints.",
+    "targeting": "Targeting datapoints and quota definitions for the requested RFG project.",
+    "quota": "Only the quota array extracted from RFG's targeting response.",
+    "datapoints": "Names of RFG profiling datapoints available for the requested market/date.",
+    "datapoint": "The datapoint property, question translations, answer choices, modes/types and supported countries.",
+    "create_link": "RFG's reusable project entry link. Respondent RID, country, postal code, gender, birthday and datapoint values are added later for a live attempt.",
+    "duplicate_check": "An isDuplicate decision for one respondent/project combination.",
+    "duplicate_checks": "A projects array with an isDuplicate decision for each supplied RFG project.",
+    "log": "RFG session log rows containing sesskey, start, end and result.",
+    "stats": "Project starts, completes, terminates, quotas, CR, EPC, project/trailing CR and EPC.",
+    "zip_to_geo": "RFG country/geography region indexes resolved from the postal code.",
+}
+
+
+def operation_response_description(provider: str, spec: OperationSpec) -> str:
+    provider = re.sub(r"[-_]", "", str(provider or "").lower())
+    mapping = RFG_RESPONSE_DESCRIPTIONS if provider == "rfg" else INNOVATE_RESPONSE_DESCRIPTIONS
+    return mapping.get(spec.code, spec.response_description)
 
 
 def _provider_key(integration) -> str:
@@ -342,8 +454,15 @@ def _effective_url(integration, spec: OperationSpec) -> str:
 
 
 def integration_metadata(integration) -> dict[str, Any]:
+    provider = _provider_key(integration)
+    aliases = {integration.client.code, re.sub(r"[^a-z0-9]+", "-", integration.client.name.lower()).strip("-")}
+    if provider == "innovatemr":
+        aliases.update({"innovate", "innovatemr", "innovate-mr"})
+    elif provider == "rfg":
+        aliases.update({"rfg", "research-for-good"})
     return {
-        "id": integration.pk,
+        "client_code": integration.client.code,
+        "lookup_aliases": sorted(alias for alias in aliases if alias),
         "client": integration.client.name,
         "integration": integration.name,
         "provider": integration.provider_code,
@@ -361,6 +480,8 @@ def integration_metadata(integration) -> dict[str, Any]:
                 "required_parameters": list(spec.required_parameters),
                 "query_parameters": list(spec.query_parameters),
                 "body_parameters": list(spec.body_parameters),
+                "mutating": spec.mutating,
+                "response_description": operation_response_description(provider, spec),
             }
             for spec in operation_specs(integration).values()
         ],
@@ -465,6 +586,34 @@ def _execute_rfg(integration, spec: OperationSpec, parameters: dict[str, Any]) -
             "rfg_id": required["survey_id"], "rid": required["rid"], "ip": required["ip"],
             "fingerprint": parameters.get("fingerprint") or 0,
         }
+    elif spec.code == "duplicate_checks":
+        raw_ids = parameters.get("survey_ids")
+        if isinstance(raw_ids, list):
+            survey_ids = raw_ids
+        else:
+            text = str(raw_ids or "").strip()
+            if text.startswith("["):
+                try:
+                    survey_ids = json.loads(text)
+                except ValueError as exc:
+                    raise UpstreamExplorerError("survey_ids must be a JSON array or comma-separated IDs.") from exc
+            else:
+                survey_ids = [value.strip() for value in text.split(",") if value.strip()]
+        if not isinstance(survey_ids, list) or not survey_ids or len(survey_ids) > 100:
+            raise UpstreamExplorerError("survey_ids must contain between 1 and 100 project IDs.")
+        command = {
+            "rfg_ids": [str(value) for value in survey_ids],
+            "rid": required["rid"],
+            "ip": required["ip"],
+            "fingerprint": parameters.get("fingerprint") or 0,
+        }
+    elif spec.code == "log":
+        command = {"rfg_id": required["survey_id"]}
+        for local_name in ("result", "start", "end"):
+            if parameters.get(local_name) not in {None, ""}:
+                command[local_name] = parameters[local_name]
+    elif spec.code == "zip_to_geo":
+        command = {"zip": required["zip"], "countryCode": required["country_code"].upper()}
     result = provider.explorer_read(spec.endpoint, **command)
     if spec.code == "quota":
         return {"quotas": result.get("quotas") or [], "source": "livealert/targeting/1"}
@@ -492,6 +641,16 @@ def _execute_rest(integration, spec: OperationSpec, parameters: dict[str, Any]) 
             query["limit"] = query.pop("page_size")
         if "cursor" in query:
             query["next"] = query.pop("cursor")
+    if spec.mutating:
+        confirmed = parameters.get("confirm_upstream_mutation") is True
+        if not confirmed:
+            raise UpstreamExplorerError(
+                "This changes live provider data. Set confirm_upstream_mutation=true in the request body."
+            )
+        body = parameters.get("payload") or {}
+        if not isinstance(body, dict):
+            raise UpstreamExplorerError("payload must be a JSON object.")
+        return client.write_json(spec.upstream_method, endpoint, body)
     if spec.upstream_method == "POST":
         if spec.code == "unique_ip_check":
             body = {"ip": required["ip"], "survNum": required["survey_id"]}
@@ -543,7 +702,7 @@ def execute_operation(integration, operation: str, parameters: dict[str, Any]) -
     payload, total_count, truncated = _limit_payload(payload, limit)
     return {
         "integration": {
-            "id": integration.pk,
+            "client_code": integration.client.code,
             "client": integration.client.name,
             "name": integration.name,
             "provider": integration.provider_code,
@@ -554,6 +713,12 @@ def execute_operation(integration, operation: str, parameters: dict[str, Any]) -
             "upstream_method": spec.upstream_method,
             "api_url": _effective_url(integration, spec),
             "documentation_url": spec.documentation_url,
+            "description": spec.description,
+            "required_parameters": list(spec.required_parameters),
+            "query_parameters": list(spec.query_parameters),
+            "body_parameters": list(spec.body_parameters),
+            "mutating": spec.mutating,
+            "response_description": operation_response_description(integration.provider_code, spec),
         },
         "credential": credential_metadata(integration),
         "result": payload,

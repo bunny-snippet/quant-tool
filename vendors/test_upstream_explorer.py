@@ -7,6 +7,7 @@ from django.urls import reverse
 from accounts.models import Role
 
 from .models import Client, ClientIntegration
+from .upstream import INNOVATE_OPERATIONS, RFG_OPERATIONS, operation_response_description
 
 
 class UpstreamExplorerTests(TestCase):
@@ -45,16 +46,44 @@ class UpstreamExplorerTests(TestCase):
         response = self.client.get(reverse("upstream-explorer-list"))
         self.assertEqual(response.status_code, 403)
 
+    def test_every_documented_provider_operation_has_named_route_and_plain_language_contract(self):
+        self.assertEqual(len(INNOVATE_OPERATIONS), 34)
+        self.assertEqual(len(RFG_OPERATIONS), 12)
+        for provider, operations in (
+            ("innovatemr", INNOVATE_OPERATIONS),
+            ("rfg", RFG_OPERATIONS),
+        ):
+            for code, spec in operations.items():
+                route_name = f"upstream-explorer-{provider}-{code.replace('_', '-')}"
+                route = reverse(route_name, args=["innovate" if provider == "innovatemr" else "rfg"])
+                self.assertIn(f"/{provider}/{code.replace('_', '-')}/", route)
+                self.assertTrue(spec.description)
+                self.assertTrue(spec.documentation_url.startswith("http"))
+                self.assertNotEqual(
+                    operation_response_description(provider, spec),
+                    "The provider's authenticated JSON response.",
+                    f"{provider}.{code} needs a specific response explanation",
+                )
+
     @patch.dict("os.environ", {"TEST_INNOVATE_TOKEN": "server-only-token"})
     def test_catalog_documents_urls_without_exposing_secret(self):
         response = self.client.get(reverse("upstream-explorer-list"))
         self.assertEqual(response.status_code, 200)
-        payload = next(item for item in response.json() if item["id"] == self.integration.pk)
+        payload = next(item for item in response.json() if item["client_code"] == "innovate")
+        self.assertIn("innovate", payload["lookup_aliases"])
         self.assertEqual(payload["base_url"], "https://supplier.innovatemr.net/api/v2")
         self.assertTrue(payload["credential"]["configured"])
         self.assertEqual(payload["credential"]["environment_variables"], ["TEST_INNOVATE_TOKEN"])
         self.assertIn("quota", {item["code"] for item in payload["operations"]})
         self.assertNotIn("server-only-token", response.content.decode())
+
+    def test_catalog_can_be_searched_and_client_name_alias_needs_no_database_id(self):
+        searched = self.client.get(reverse("upstream-explorer-list"), {"search": "Innovate"})
+        self.assertEqual(searched.status_code, 200)
+        self.assertIn("innovate", [item["client_code"] for item in searched.json()])
+        detail = self.client.get(reverse("upstream-explorer-detail", args=["innovate"]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["client_code"], "innovate")
 
     @patch.dict("os.environ", {"TEST_INNOVATE_TOKEN": "server-only-token"})
     @patch("surveys.integrations.requests.Session.get")
@@ -63,7 +92,7 @@ class UpstreamExplorerTests(TestCase):
             "apiStatus": "success",
             "result": [{"surveyId": 1}, {"surveyId": 2}],
         })
-        url = reverse("upstream-explorer-inventory", args=[self.integration.pk])
+        url = reverse("upstream-explorer-innovatemr-inventory", args=["innovate"])
         response = self.client.get(url, {"limit": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["result"]["result"], [{"surveyId": 1}])
@@ -75,7 +104,7 @@ class UpstreamExplorerTests(TestCase):
     @patch("surveys.integrations.requests.Session.get")
     def test_quota_builds_documented_survey_endpoint(self, mock_get):
         mock_get.return_value = self.response({"apiStatus": "success", "result": []})
-        url = reverse("upstream-explorer-quota", args=[self.integration.pk])
+        url = reverse("upstream-explorer-innovatemr-quota", args=["innovate"])
         response = self.client.get(url, {"survey_id": "15978952"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -90,8 +119,8 @@ class UpstreamExplorerTests(TestCase):
             "apiStatus": "success", "result": {"status": "prequalified"}
         })
         url = reverse(
-            "upstream-explorer-execute",
-            kwargs={"pk": self.integration.pk, "operation": "respondent_precheck"},
+            "upstream-explorer-innovatemr-respondent-precheck",
+            kwargs={"client_code": "innovate"},
         )
         response = self.client.get(url, {
             "survey_id": "16003381", "pid": "respondent-1", "ip": "203.0.113.20",
@@ -124,7 +153,7 @@ class UpstreamExplorerTests(TestCase):
             base_url="https://api.researchforgood.com/API",
             credential_env_keys={"apid": "TEST_RFG_APID", "secret": "TEST_RFG_SECRET"},
         )
-        url = reverse("upstream-explorer-targeting", args=[integration.pk])
+        url = reverse("upstream-explorer-rfg-targeting", args=["rfg"])
         response = self.client.get(url, {"survey_id": "RFG2300540746-001"})
         self.assertEqual(response.status_code, 200)
         explorer_read.assert_called_once_with(
@@ -151,7 +180,7 @@ class UpstreamExplorerTests(TestCase):
         self.integration.save(update_fields=["provider_code", "config", "updated_at"])
         execute_url = reverse(
             "upstream-explorer-execute",
-            kwargs={"pk": self.integration.pk, "operation": "markets"},
+            kwargs={"client_code": "innovate", "operation": "markets"},
         )
         response = self.client.get(execute_url, {"country": "US"})
         self.assertEqual(response.status_code, 200)
@@ -159,9 +188,97 @@ class UpstreamExplorerTests(TestCase):
         rejected = self.client.get(
             reverse(
                 "upstream-explorer-execute",
-                kwargs={"pk": self.integration.pk, "operation": "arbitrary"},
+                kwargs={"client_code": "innovate", "operation": "arbitrary"},
             ),
             {"url": "https://attacker.example"},
         )
         self.assertEqual(rejected.status_code, 400)
         self.assertNotIn("attacker.example", mock_get.call_args.args[0])
+
+    @patch.dict("os.environ", {"TEST_INNOVATE_TOKEN": "server-only-token"})
+    @patch("surveys.integrations.requests.Session.request")
+    def test_live_redirect_mutation_requires_confirmation_and_uses_documented_endpoint(self, mock_request):
+        mock_request.return_value = self.response({"apiStatus": "success", "msg": "updated"})
+        url = reverse(
+            "upstream-explorer-innovatemr-set-survey-redirects",
+            args=["innovate"],
+        )
+        rejected = self.client.post(url, {
+            "survey_id": "16003381",
+            "payload": {"sUrl": "https://example.com/complete"},
+        }, content_type="application/json")
+        self.assertEqual(rejected.status_code, 400)
+        mock_request.assert_not_called()
+
+        response = self.client.post(url, {
+            "confirm_upstream_mutation": True,
+            "survey_id": "16003381",
+            "payload": {"sUrl": "https://example.com/complete"},
+        }, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_request.call_args.args[:2], (
+            "PUT",
+            "https://supplier.innovatemr.net/api/v2/supply/setRedirectionForSurvey/16003381",
+        ))
+        self.assertEqual(mock_request.call_args.kwargs["json"], {
+            "sUrl": "https://example.com/complete"
+        })
+
+    @patch.dict(
+        "os.environ",
+        {"TEST_RFG_APID": "apid-value", "TEST_RFG_SECRET": "0123456789abcdef0123456789abcdef"},
+    )
+    @patch("surveys.providers.rfg.ResearchForGoodProvider.explorer_read")
+    def test_rfg_bulk_duplicate_log_and_zip_commands_are_individually_runnable(self, explorer_read):
+        explorer_read.return_value = {"projects": []}
+        rfg_client = Client.objects.create(code="rfg", name="Research For Good", provider_code="rfg")
+        ClientIntegration.objects.create(
+            client=rfg_client,
+            name="RFG production",
+            provider_code="rfg",
+            base_url="https://api.researchforgood.com/API",
+            credential_env_keys={"apid": "TEST_RFG_APID", "secret": "TEST_RFG_SECRET"},
+        )
+
+        response = self.client.get(
+            reverse("upstream-explorer-rfg-duplicate-checks", args=["rfg"]),
+            {
+                "survey_ids": "RFG1,RFG2", "rid": "Ab12Cd34Ef",
+                "ip": "203.0.113.2", "fingerprint": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        explorer_read.assert_called_with(
+            "livealert/duplicateChecks/1",
+            rfg_ids=["RFG1", "RFG2"], rid="Ab12Cd34Ef", ip="203.0.113.2", fingerprint="0",
+        )
+
+        self.client.get(
+            reverse("upstream-explorer-rfg-log", args=["rfg"]),
+            {"survey_id": "RFG1", "result": "1"},
+        )
+        explorer_read.assert_called_with("livealert/log/1", rfg_id="RFG1", result="1")
+
+        self.client.get(
+            reverse("upstream-explorer-rfg-zip-to-geo", args=["rfg"]),
+            {"zip": "10001", "country_code": "us"},
+        )
+        explorer_read.assert_called_with("livealert/zipToGeo/1", zip="10001", countryCode="US")
+
+    def test_rfg_callback_preview_is_safe_and_human_readable(self):
+        rfg_client = Client.objects.create(code="rfg", name="Research For Good", provider_code="rfg")
+        ClientIntegration.objects.create(
+            client=rfg_client,
+            name="RFG production",
+            provider_code="rfg",
+            base_url="https://api.researchforgood.com/API",
+        )
+        response = self.client.post(
+            reverse("upstream-explorer-rfg-callback-preview", args=["rfg"]),
+            {"result": "30", "liveS": "2"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["known_result_code"])
+        self.assertEqual(response.json()["title"], "Fraud prevention")
+        self.assertNotIn("rfg_callback", response.json())

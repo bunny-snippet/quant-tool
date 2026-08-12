@@ -1238,11 +1238,13 @@ class RFGCallbackAPIView(APIView):
     permission_classes = [permissions.AllowAny]
 
     @extend_schema(
-        tags=["Respondent callbacks"],
+        tags=["RFG Callbacks"],
         summary="Receive a verified Research For Good result callback",
         description=(
-            "Updates the RID attempt, exit IP/time, LOI and allocation state. "
-            "Requests outside the configured RFG IP allowlist are rejected."
+            "Called by RFG after a respondent outcome. It updates the RID attempt, exit IP/time, "
+            "LOI and allocation state. This is not a normal admin test endpoint: Swagger calls will "
+            "normally receive 403 because only RFG's configured server IPs are trusted. Use the "
+            "RFG callback preview endpoint to safely understand result/live codes without writing data."
         ),
         parameters=[
             OpenApiParameter("rid", OpenApiTypes.STR, required=True, description="Platform respondent ID"),

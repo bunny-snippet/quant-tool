@@ -1,8 +1,8 @@
 # Upstream client API explorer
 
-The Swagger UI at `/api/docs/` contains an **Upstream client APIs** section for
-testing configured survey-provider connections without copying credentials into
-the browser.
+The Swagger UI at `/api/docs/` contains separate **Client API catalog**,
+**InnovateMR APIs**, **RFG APIs** and **RFG Callbacks** sections. They test
+configured provider connections without copying credentials into the browser.
 
 ## Authentication
 
@@ -31,13 +31,19 @@ Basic variables are missing, the documentation fails closed with HTTP 503.
 
 ## Workflow
 
-1. `GET /api/v1/vendors/upstream-explorer/` lists active client integrations.
-2. `GET /api/v1/vendors/upstream-explorer/{id}/` shows the provider base URL,
+1. `GET /api/v1/vendors/upstream-explorer/?search=innovate` searches active clients.
+2. `GET /api/v1/vendors/upstream-explorer/{client_code}/` shows the provider base URL,
    exact upstream endpoint/command, official documentation link, required
    parameters and optional query parameters for every supported operation.
-3. Use the dedicated inventory, quota and targeting actions, or execute any
-   listed operation through
-   `GET /api/v1/vendors/upstream-explorer/{id}/execute/{operation}/`.
+3. Use the provider-specific operation, for example
+   `GET /api/v1/vendors/upstream-explorer/innovate/innovatemr/inventory/` or
+   `GET /api/v1/vendors/upstream-explorer/rfg/rfg/targeting/?survey_id=...`.
+
+The stable client code/name replaces the database integration ID. Built-in
+aliases include `innovate`, `innovatemr`, `innovate-mr`, `rfg` and
+`research-for-good`. When one alias matches more than one active connection,
+the API returns HTTP 409 and lists the integration names accepted by the
+`integration` query parameter.
 
 List responses are limited to 50 rows by default and 200 rows maximum so a
 large inventory cannot freeze Swagger. The wrapper reports the original row
@@ -48,20 +54,27 @@ the normal scheduled synchronization flow.
 
 InnovateMR includes allocated/paged/high-priority inventory, survey-by-ID,
 inventory/closed-survey date lookups, quota, targeting, transaction lookups,
-availability, stats, redirect lookup, panelist profile, recontact PIDs,
+availability, stats, redirect lookup/configuration, panelist profile read/write, recontact PIDs,
 question categories/questions/answers, core metadata, termination categories,
 unique respondent checks, respondent pre-check and personalized inventory.
 
 RFG includes signed connection test, inventory, targeting, quota extraction,
-datapoint list/details, create-link, duplicate-check and project stats. RFG
+datapoint list/details, create-link, single/bulk duplicate checks, project log,
+project stats and postal-code geography lookup. RFG
 quota data is part of the documented `livealert/targeting/1` response, so the
 quota action calls that command and returns its `quotas` collection.
 
-Only allow-listed, read-oriented operations are exposed. Some documented
+Only explicitly allow-listed operations are exposed. Some documented
 eligibility/look-up operations use POST upstream, but they do not update provider
-configuration or profiling data. Provider endpoints
-that set/delete redirects, write profiling data or otherwise mutate upstream
-state are intentionally excluded from the interactive explorer.
+configuration or profiling data. InnovateMR redirect/profile writes have their
+own POST actions and require the literal body field
+`confirm_upstream_mutation: true`; otherwise no upstream request is sent.
+These operations should be contract-tested with mocks and invoked live only by
+an administrator who intends to modify the provider account.
+
+The real RFG callback remains source-IP protected. Use the callback guide and
+callback-preview actions to understand result fields safely; they do not mutate
+an RID or weaken production callback verification.
 
 ## Future provider read APIs
 

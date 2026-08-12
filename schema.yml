@@ -2,10 +2,10 @@ openapi: 3.0.3
 info:
   title: Survey Workspace API
   version: 1.0.0
-  description: Internal multi-provider survey API. The Upstream client APIs section
-    lets authorized administrators execute allow-listed provider operations while
-    every credential remains server-side. Authentication requires the current Django
-    admin session and the separate documentation password.
+  description: Internal multi-provider survey API. The client-specific InnovateMR
+    and RFG sections let authorized administrators execute allow-listed provider operations
+    while every credential remains server-side. Authentication requires the current
+    Django admin session and the separate documentation password.
 paths:
   /api/v1/access/functions/:
     get:
@@ -3513,12 +3513,19 @@ paths:
   /api/v1/vendors/upstream-explorer/:
     get:
       operationId: api_v1_vendors_upstream_explorer_list
-      description: Shows client/provider base URLs, exact API endpoints, official
-        documentation links and credential environment-variable names. Credential
-        values are never returned.
-      summary: List configured upstream integrations and every runnable API
+      description: Use `search=innovate` or `search=rfg` instead of finding a numeric
+        database ID. The response shows stable client codes, accepted aliases, exact
+        upstream URLs, official documentation and whether server-side credentials
+        are configured. Secret values are never returned.
+      summary: Search configured clients and their runnable provider APIs
+      parameters:
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Client name, client code, integration name or provider.
       tags:
-      - Upstream client APIs
+      - Client API catalog
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3531,20 +3538,21 @@ paths:
                 items:
                   $ref: '#/components/schemas/UpstreamIntegrationMetadata'
           description: ''
-  /api/v1/vendors/upstream-explorer/{id}/:
+  /api/v1/vendors/upstream-explorer/{client_code}/:
     get:
       operationId: api_v1_vendors_upstream_explorer_retrieve
-      description: Admin-only proxy for explicit, read-oriented provider operations.
-      summary: Inspect one integration's upstream API catalog
+      description: 'Examples: `/upstream-explorer/innovate/` and `/upstream-explorer/rfg/`.
+        If one client has multiple active connections, pass `?integration=<integration-name>`.'
+      summary: Inspect one client API catalog by name/code
       parameters:
       - in: path
-        name: id
+        name: client_code
         schema:
-          type: integer
-        description: A unique integer value identifying this client integration.
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
         required: true
       tags:
-      - Upstream client APIs
+      - Client API catalog
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3555,163 +3563,1851 @@ paths:
               schema:
                 $ref: '#/components/schemas/UpstreamIntegrationMetadata'
           description: ''
-  /api/v1/vendors/upstream-explorer/{id}/execute/{operation}/:
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Alias matches multiple active integrations.
+  /api/v1/vendors/upstream-explorer/{client_code}/execute/{operation}/:
     get:
       operationId: api_v1_vendors_upstream_explorer_execute_retrieve
-      description: Runs the selected provider API using credentials resolved on the
-        server. For future providers, additional GET operations configured in integration.config.read_api_operations
-        are accepted here without exposing an arbitrary URL parameter. This endpoint
-        is local GET even when a provider such as RFG requires a signed POST upstream.
-      summary: Execute any allow-listed upstream client API
+      description: Generic extension point for future clients configured in `read_api_operations`.
+        InnovateMR and RFG users should use their named endpoints below; live mutations
+        are rejected here.
+      summary: Execute a configured future-provider read operation
       parameters:
-      - in: query
-        name: allow_recontacts
-        schema:
-          type: boolean
-        description: Include RFG recontacts in inventory.
-      - in: query
-        name: category
+      - in: path
+        name: client_code
         schema:
           type: string
-        description: Question category key or RFG B2B/B2C category.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
-        name: category_key
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows returned (1-200).
+      - in: path
+        name: operation
         schema:
           type: string
-        description: InnovateMR question category key.
+        required: true
+      - in: query
+        name: parameters
+        schema:
+          type: string
+        description: JSON object, for example {"market":"US"}.
+      tags:
+      - Client API catalog
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/answers-by-question/:
+    get:
+      operationId: innovatemr_answers_by_question
+      description: |-
+        **Purpose:** Answer options for one question key and market.
+
+        **You send:** required: question_key; optional: country, language. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getAnswersByQuesKey/{question_key}` using server-side authentication.
+
+        **You receive:** Answer option IDs/text for the requested question and optional market.
+
+        **Official documentation:** https://developer.innovatemr.com/answer-lookup-21242405e0
+      summary: Answers by question
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
         name: country
         schema:
           type: string
-        description: Two-letter market code where supported.
+        description: Two-letter country/market code, for example US.
       - in: query
-        name: countryCode
+        name: language
         schema:
           type: string
-        description: InnovateMR high-priority country code.
+        description: Provider language name/code, for example English.
       - in: query
-        name: cursor
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: question_key
         schema:
           type: string
-        description: Upstream next cursor for paged inventory.
-      - in: query
-        name: datapoint_name
+        description: InnovateMR question key.
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/closed-by-date/:
+    get:
+      operationId: innovatemr_closed_by_date
+      description: |-
+        **Purpose:** Allocated surveys closed since a provider date/time.
+
+        **You send:** required: date_time; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getClosedSurveyListByDate/{date_time}` using server-side authentication.
+
+        **You receive:** Allocated survey IDs closed since the supplied provider date/time.
+
+        **Official documentation:** https://developer.innovatemr.com/get-closed-survey-list-allocated-to-supplier-only-21242396e0
+      summary: Closed surveys by date
+      parameters:
+      - in: path
+        name: client_code
         schema:
           type: string
-        description: RFG datapoint property/name.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
         name: date_time
         schema:
           type: string
-        description: Provider-formatted inventory/closed-survey date-time.
+        description: Provider-formatted changed-since date/time.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/core-metadata/:
+    get:
+      operationId: innovatemr_core_metadata
+      description: |-
+        **Purpose:** Country, language, status, type and other requested platform mappings.
+
+        **You send:** required: metadata_fields; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /mapping/metadata/{metadata_fields}` using server-side authentication.
+
+        **You receive:** Requested InnovateMR mapping dictionaries such as countries, languages, statuses or survey types.
+
+        **Official documentation:** https://developer.innovatemr.com/core-metadata-fields-21242387e0
+      summary: Core metadata
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: metadata_fields
+        schema:
+          type: string
+        description: Comma-separated InnovateMR metadata fields.
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/create-panelist-profile/:
+    post:
+      operationId: innovatemr_create_panelist_profile
+      description: |-
+        **Purpose:** Stores country, language and qualification answers against one supplier PID.
+
+        **You send:** required: pid; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `POST /respondent/setQualifications/{pid}` using server-side authentication.
+
+        **You receive:** Created/success status and provider message.
+
+        **Official documentation:** https://developer.innovatemr.com/set-panellist-profiling-21242409e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Create panelist profile
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  pid: respondent-123
+                  payload:
+                    Country: US
+                    Language: English
+                    Qualifications:
+                    - QuestiondId: 1
+                      QuestionKey: AGE
+                      Options:
+                      - OptionId: 24
+                        OptionText: '24'
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/delete-global-redirects/:
+    post:
+      operationId: innovatemr_delete_global_redirects
+      description: |-
+        **Purpose:** Removes selected account-level redirect URLs or pixels while leaving unspecified values unchanged.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `DELETE /supply/accountUrls` using server-side authentication.
+
+        **You receive:** Success status and InnovateMR confirmation message.
+
+        **Official documentation:** https://developer.innovatemr.com/delete-global-redirect-urls-and-pixels-for-suppliers-account-21242386e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Delete global redirects
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  payload:
+                    oUrl: ''
+                    qTUrl: ''
+                    tUrl: ''
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/delete-survey-redirects/:
+    post:
+      operationId: innovatemr_delete_survey_redirects
+      description: |-
+        **Purpose:** Removes survey-level redirect overrides so account-level redirects can apply.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `DELETE /supply/surveySpecificRedirects/{survey_id}` using server-side authentication.
+
+        **You receive:** Success status and InnovateMR confirmation message.
+
+        **Official documentation:** https://developer.innovatemr.com/delete-redirect-method-for-survey-21242395e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Delete survey redirects
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  survey_id: '16003381'
+                  payload: {}
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/high-priority/:
+    get:
+      operationId: innovatemr_high_priority
+      description: |-
+        **Purpose:** Allocated live high-priority inventory.
+
+        **You send:** required: nothing required; optional: countryCode, languageCode. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getHighPrioritySurveys` using server-side authentication.
+
+        **You receive:** High-priority live survey rows, optionally narrowed by country and language.
+
+        **Official documentation:** https://developer.innovatemr.com/get-allocated-high-priority-surveysall-live-surveys-21242415e0
+      summary: High-priority surveys
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: countryCode
+        schema:
+          type: string
+        description: InnovateMR country code.
+      - in: query
+        name: languageCode
+        schema:
+          type: string
+        description: InnovateMR language code.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/inventory/:
+    get:
+      operationId: innovatemr_inventory
+      description: |-
+        **Purpose:** All currently allocated live surveys.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getAllocatedSurveys` using server-side authentication.
+
+        **You receive:** Live survey rows allocated to this supplier account, including survey ID, market, CPI, IR, LOI, status and entry-link fields supplied by InnovateMR.
+
+        **Official documentation:** https://developer.innovatemr.com/get-allocated-surveys-all-live-surveys-21242389e0
+      summary: Allocated surveys
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/inventory-by-date/:
+    get:
+      operationId: innovatemr_inventory_by_date
+      description: |-
+        **Purpose:** Live inventory changed since a provider date/time.
+
+        **You send:** required: date_time; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getAllocatedSurveysByDate/{date_time}` using server-side authentication.
+
+        **You receive:** Live survey records created or changed since the supplied provider date/time.
+
+        **Official documentation:** https://developer.innovatemr.com/get-allocated-surveys-by-date-live-surveys-only-21242391e0
+      summary: Allocated surveys by date
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: date_time
+        schema:
+          type: string
+        description: Provider-formatted changed-since date/time.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/paged-inventory/:
+    get:
+      operationId: innovatemr_paged_inventory
+      description: |-
+        **Purpose:** One upstream inventory page.
+
+        **You send:** required: nothing required; optional: page_size, cursor. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getAllocatedSurveysPaged` using server-side authentication.
+
+        **You receive:** One page of allocated live surveys plus the provider's next-page/cursor information.
+
+        **Official documentation:** https://developer.innovatemr.com/get-allocated-surveys-with-pagination-live-surveys-only-21242392e0
+      summary: Paged allocated surveys
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: cursor
+        schema:
+          type: string
+        description: Upstream next-page cursor.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Upstream page size.
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/panelist-profile/:
+    get:
+      operationId: innovatemr_panelist_profile
+      description: |-
+        **Purpose:** Stored InnovateMR qualifications for one PID.
+
+        **You send:** required: pid; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /respondent/getQualifications/{pid}` using server-side authentication.
+
+        **You receive:** Country, language and stored qualification answers for the supplied PID.
+
+        **Official documentation:** https://developer.innovatemr.com/get-panellist-profiling-21242401e0
+      summary: Panelist profile
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/question-categories/:
+    get:
+      operationId: innovatemr_question_categories
+      description: |-
+        **Purpose:** Available targeting question categories.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getQuestionsCategories` using server-side authentication.
+
+        **You receive:** All targeting question category keys and labels.
+
+        **Official documentation:** https://developer.innovatemr.com/get-question-categories-21242388e0
+      summary: Question categories
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/question-library/:
+    get:
+      operationId: innovatemr_question_library
+      description: |-
+        **Purpose:** All targeting questions for one country/language market.
+
+        **You send:** required: country, language; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getQuestionsByCountryAndLanguage/{country}/{language}` using server-side authentication.
+
+        **You receive:** Targeting-question definitions available for the requested country/language market.
+
+        **Official documentation:** https://developer.innovatemr.com/lookup-question-library-21242384e0
+      summary: Question library by market
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Two-letter country/market code, for example US.
+        required: true
+      - in: query
+        name: language
+        schema:
+          type: string
+        description: Provider language name/code, for example English.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/questions-by-category/:
+    get:
+      operationId: innovatemr_questions_by_category
+      description: |-
+        **Purpose:** Question library rows in one category.
+
+        **You send:** required: category_key; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getQuestionsByCategory/{category_key}` using server-side authentication.
+
+        **You receive:** Question definitions belonging to the requested category.
+
+        **Official documentation:** https://developer.innovatemr.com/get-questions-by-category-21242404e0
+      summary: Questions by category
+      parameters:
+      - in: query
+        name: category_key
+        schema:
+          type: string
+        description: InnovateMR question-category key.
+        required: true
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/quota/:
+    get:
+      operationId: innovatemr_quota
+      description: |-
+        **Purpose:** Quota rows for one survey.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. For RFG this calls targeting with `rfg_id` and returns only its `quotas` array.
+
+        **Upstream request:** `GET /supply/getQuotaForSurvey/{survey_id}` using server-side authentication.
+
+        **You receive:** Quota groups/rows for the survey, including targets, completes, remaining capacity, status and targeting conditions.
+
+        **Official documentation:** https://developer.innovatemr.com/get-quota-for-survey-21242417e0
+      summary: Survey quota
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/recontact-pids/:
+    get:
+      operationId: innovatemr_recontact_pids
+      description: |-
+        **Purpose:** Included/excluded PIDs for one recontact survey.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getPidsForRecontactSurvey/{survey_id}` using server-side authentication.
+
+        **You receive:** Included/excluded PID collections for the requested recontact survey.
+
+        **Official documentation:** https://developer.innovatemr.com/get-pids-for-re-contact-surveys-studies-21242407e0
+      summary: Recontact PIDs
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/redirect-method/:
+    get:
+      operationId: innovatemr_redirect_method
+      description: |-
+        **Purpose:** Effective redirect URLs/pixels for one survey.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/surveySpecificRedirects/{survey_id}` using server-side authentication.
+
+        **You receive:** The effective survey-level redirect URL, pixel and postback configuration.
+
+        **Official documentation:** https://developer.innovatemr.com/get-redirect-method-for-survey-21242393e0
+      summary: Survey redirect configuration
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/respondent-precheck/:
+    get:
+      operationId: innovatemr_respondent_precheck
+      description: |-
+        **Purpose:** Provider eligibility/disqualification check before redirect.
+
+        **You send:** required: survey_id, pid, ip, device_type; optional: none. Credentials are never entered here. We convert the inputs to `{survNum, pid, ip, deviceType}`.
+
+        **Upstream request:** `POST /supply/respondentPreSurveyCheck` using server-side authentication.
+
+        **You receive:** The provider's pre-survey eligibility/status decision and reason fields.
+
+        **Official documentation:** https://developer.innovatemr.com/respondent-pre-survey-check-21242412e0
+      summary: Respondent pre-survey check
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
         name: device_type
         schema:
           type: string
-        description: Provider device value for respondent eligibility checks.
+        description: Provider device value, for example desktop, mobile or tablet.
+        required: true
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP address.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+        required: true
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/respondent-surveys/:
+    get:
+      operationId: innovatemr_respondent_surveys
+      description: |-
+        **Purpose:** Personalized inventory for a profiled respondent.
+
+        **You send:** required: pid, ip, device_type; optional: num_surveys. Credentials are never entered here. PID is placed in the URL; the upstream JSON body is `{ip, numSurveys, deviceType}`.
+
+        **Upstream request:** `POST /supply/respondent/{pid}/surveys` using server-side authentication.
+
+        **You receive:** Personalized survey inventory matching the supplied profiled PID, IP and device.
+
+        **Official documentation:** https://developer.innovatemr.com/get-surveys-for-respondent-21242411e0
+      summary: Surveys for respondent
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: device_type
+        schema:
+          type: string
+        description: Provider device value, for example desktop, mobile or tablet.
+        required: true
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP address.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: num_surveys
+        schema:
+          type: integer
+        description: Number of personalized surveys requested (1-100; default 10).
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/set-global-redirects/:
+    post:
+      operationId: innovatemr_set_global_redirects
+      description: |-
+        **Purpose:** Creates or replaces account-level success, failure, quota, terminate, postback and verification URLs.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `PUT /supply/accountUrls` using server-side authentication.
+
+        **You receive:** Success status and InnovateMR confirmation message.
+
+        **Official documentation:** https://developer.innovatemr.com/set-global-redirect-urls-and-pixels-for-suppliers-21242385e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Set global redirects
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  payload:
+                    sUrl: https://panel.example/survey?status=1&rid=[%%pid%%]
+                    fUrl: https://panel.example/survey?status=2&rid=[%%pid%%]
+                    oUrl: https://panel.example/survey?status=3&rid=[%%pid%%]
+                    qTUrl: https://panel.example/survey?status=3&rid=[%%pid%%]
+                    tUrl: https://panel.example/survey?status=4&rid=[%%pid%%]
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/set-survey-redirects/:
+    post:
+      operationId: innovatemr_set_survey_redirects
+      description: |-
+        **Purpose:** Creates or replaces redirect URLs and postbacks for one survey only.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `PUT /supply/setRedirectionForSurvey/{survey_id}` using server-side authentication.
+
+        **You receive:** Success status and InnovateMR confirmation message.
+
+        **Official documentation:** https://developer.innovatemr.com/set-redirect-method-for-survey-21242394e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Set survey redirects
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  survey_id: '16003381'
+                  payload:
+                    sUrl: https://panel.example/survey?status=1&rid=[%%pid%%]
+                    fUrl: https://panel.example/survey?status=2&rid=[%%pid%%]
+                    oUrl: https://panel.example/survey?status=3&rid=[%%pid%%]
+                    tUrl: https://panel.example/survey?status=4&rid=[%%pid%%]
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/stats/:
+    get:
+      operationId: innovatemr_stats
+      description: |-
+        **Purpose:** Real-time traffic and revenue statistics for one survey.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. For RFG the local `survey_id` is sent as `rfg_id`.
+
+        **Upstream request:** `GET /supply/getSurveyStats/{survey_id}` using server-side authentication.
+
+        **You receive:** Traffic, completion and revenue/statistics fields for one survey.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-stats-21242408e0
+      summary: Survey statistics
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/stats-by-date/:
+    get:
+      operationId: innovatemr_stats_by_date
+      description: |-
+        **Purpose:** Traffic and revenue statistics across a date range.
+
+        **You send:** required: nothing required; optional: startDate, endDate, verifiedStartDate, verifiedEndDate. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getSurveyStatsByDateRange` using server-side authentication.
+
+        **You receive:** Traffic, completion and revenue/statistics fields for the requested date window.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-stats-data-by-date-range-21242403e0
+      summary: Statistics by date range
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
         name: endDate
         schema:
           type: string
         description: InnovateMR end date/time filter.
       - in: query
-        name: external_id
+        name: limit
         schema:
-          type: string
-        description: Provider transaction/check ID used by InnovateMR unique PID/IP
-          check.
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
       - in: query
-        name: fingerprint
+        name: startDate
         schema:
           type: string
-        description: Optional RFG duplicate-check fingerprint.
+        description: InnovateMR start date/time filter.
+      - in: query
+        name: verifiedEndDate
+        schema:
+          type: string
+        description: InnovateMR verified-end date/time filter.
+      - in: query
+        name: verifiedStartDate
+        schema:
+          type: string
+        description: InnovateMR verified-start date/time filter.
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/survey/:
+    get:
+      operationId: innovatemr_survey
+      description: |-
+        **Purpose:** Live survey metadata for one survey ID.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getAllocatedSurveysBySurveyId/{survey_id}` using server-side authentication.
+
+        **You receive:** The current metadata record for the requested InnovateMR Survey ID.
+
+        **Official documentation:** https://developer.innovatemr.com/get-allocated-surveys-by-id-21242390e0
+      summary: Survey by ID
+      parameters:
       - in: path
-        name: id
+        name: client_code
         schema:
-          type: integer
-        description: A unique integer value identifying this client integration.
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
         required: true
-      - in: query
-        name: inventory_type
-        schema:
-          type: integer
-        description: RFG inventory type (normally 1 for LiveAlert).
-      - in: query
-        name: ip
-        schema:
-          type: string
-        description: Respondent public IP, required only for duplicate checks.
-      - in: query
-        name: language
-        schema:
-          type: string
-        description: Provider language name/code where supported.
-      - in: query
-        name: languageCode
-        schema:
-          type: string
-        description: InnovateMR high-priority language code.
       - in: query
         name: limit
         schema:
           type: integer
-        description: Maximum list rows returned to Swagger (1-200; default 50).
+        description: Maximum list rows shown in this response (1-200).
       - in: query
-        name: metadata_fields
+        name: survey_id
         schema:
           type: string
-        description: Comma-separated InnovateMR core metadata fields.
-      - in: query
-        name: modified_since
-        schema:
-          type: string
-        description: RFG modifiedSince value.
-      - in: query
-        name: num_surveys
-        schema:
-          type: integer
-        description: Requested personalized inventory size (1-100).
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/survey-status/:
+    get:
+      operationId: innovatemr_survey_status
+      description: |-
+        **Purpose:** Current availability for one survey.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getSurveyStatus/{survey_id}` using server-side authentication.
+
+        **You receive:** The survey's current availability/status decision.
+
+        **Official documentation:** https://developer.innovatemr.com/survey-availability-endpoint-21242402e0
+      summary: Survey availability
+      parameters:
       - in: path
-        name: operation
+        name: client_code
         schema:
           type: string
-        description: 'Allow-listed provider operation. First call the integration
-          metadata endpoint to see which operations this provider supports and its
-          exact upstream URL. Built-in examples: answers_by_question, closed_by_date,
-          core_metadata, create_link, datapoint, datapoints, duplicate_check, high_priority,
-          inventory, inventory_by_date, paged_inventory, panelist_profile, question_categories,
-          question_library, questions_by_category, quota, recontact_pids, redirect_method,
-          respondent_precheck, respondent_surveys, stats, stats_by_date, survey, survey_status,
-          targeting, term_reason, term_reasons, test, transactions, transactions_by_date,
-          transactions_by_pid, unique_ip_check, unique_pid_ip_check.'
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
         required: true
       - in: query
-        name: page_size
+        name: limit
         schema:
           type: integer
-        description: Upstream page size for paged inventory.
+        description: Maximum list rows shown in this response (1-200).
       - in: query
-        name: parameters
+        name: survey_id
         schema:
           type: string
-        description: Optional JSON object for parameters declared by a future configured
-          read operation, for example {"market":"US"}. Built-in parameters have dedicated
-          fields below.
-      - in: query
-        name: pid
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/targeting/:
+    get:
+      operationId: innovatemr_targeting
+      description: |-
+        **Purpose:** Pre-screening targeting questions and accepted values.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. The local `survey_id` is sent upstream as RFG `rfg_id` for an RFG client.
+
+        **Upstream request:** `GET /supply/getSurveyTargeting/{survey_id}` using server-side authentication.
+
+        **You receive:** Pre-screening questions, question types and accepted answer/option IDs for the survey.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-targeting-21242416e0
+      summary: Survey targeting
+      parameters:
+      - in: path
+        name: client_code
         schema:
           type: string
-        description: Supplier respondent/PID value.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
       - in: query
-        name: question_key
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
         schema:
           type: string
-        description: InnovateMR question key for answer lookup.
-      - in: query
-        name: rid
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/term-reason/:
+    get:
+      operationId: innovatemr_term_reason
+      description: |-
+        **Purpose:** One provider termination category.
+
+        **You send:** required: term_code; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /resources/termReasonCategories/{term_code}` using server-side authentication.
+
+        **You receive:** The termination category/description for one provider term code.
+
+        **Official documentation:** https://developer.innovatemr.com/single-term-reason-category-code-21242413e0
+      summary: Termination reason by code
+      parameters:
+      - in: path
+        name: client_code
         schema:
           type: string
-        description: Platform-generated respondent RID.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: term_code
+        schema:
+          type: string
+        description: InnovateMR termination category code.
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/term-reasons/:
+    get:
+      operationId: innovatemr_term_reasons
+      description: |-
+        **Purpose:** All provider termination categories.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /resources/termReasonCategories` using server-side authentication.
+
+        **You receive:** All InnovateMR termination codes, categories and descriptions.
+
+        **Official documentation:** https://developer.innovatemr.com/term-reason-category-21242414e0
+      summary: Termination reason categories
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/transactions/:
+    get:
+      operationId: innovatemr_transactions
+      description: |-
+        **Purpose:** Transactions for one survey.
+
+        **You send:** required: survey_id; optional: startDate, endDate, status. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getSurveyTransactions/{survey_id}` using server-side authentication.
+
+        **You receive:** Respondent transactions for one survey, optionally filtered by date/status.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-transactions-data-21242397e0
+      summary: Survey transactions
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: InnovateMR end date/time filter.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
       - in: query
         name: startDate
         schema:
@@ -3726,29 +5422,88 @@ paths:
         name: survey_id
         schema:
           type: string
-        description: InnovateMR Survey ID or RFG project/rfg_id.
-      - in: query
-        name: term_code
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/transactions-by-date/:
+    get:
+      operationId: innovatemr_transactions_by_date
+      description: |-
+        **Purpose:** Transactions across surveys in a date range.
+
+        **You send:** required: nothing required; optional: startDate, endDate, verifiedStartDate, verifiedEndDate, status. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getSurveyTransactionsByDateRange` using server-side authentication.
+
+        **You receive:** Respondent transactions across allocated surveys for the requested date/status window.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-transactions-data-by-date-range-21242398e0
+      summary: Transactions by date range
+      parameters:
+      - in: path
+        name: client_code
         schema:
           type: string
-        description: InnovateMR termination category code.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: InnovateMR end date/time filter.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: InnovateMR start date/time filter.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Optional InnovateMR transaction status.
       - in: query
         name: verifiedEndDate
         schema:
           type: string
-        description: InnovateMR verified end date/time filter.
+        description: InnovateMR verified-end date/time filter.
       - in: query
         name: verifiedStartDate
         schema:
           type: string
-        description: InnovateMR verified start date/time filter.
-      - in: query
-        name: zips_only
-        schema:
-          type: boolean
-        description: Return only RFG postal targeting where supported.
+        description: InnovateMR verified-start date/time filter.
       tags:
-      - Upstream client APIs
+      - InnovateMR APIs
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3764,28 +5519,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UpstreamError'
-          description: Unsupported operation, missing input, or safe upstream error.
+          description: Missing/invalid input or safe upstream error.
         '403':
           description: Admin or super-admin session required.
-  /api/v1/vendors/upstream-explorer/{id}/inventory/:
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/transactions-by-pid/:
     get:
-      operationId: api_v1_vendors_upstream_explorer_inventory_retrieve
-      description: Admin-only proxy for explicit, read-oriented provider operations.
-      summary: Run this client's inventory API
+      operationId: innovatemr_transactions_by_pid
+      description: |-
+        **Purpose:** One respondent transaction lookup.
+
+        **You send:** required: survey_id, pid; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `GET /supply/getSurveyTransactionsByCond/{survey_id}/{pid}` using server-side authentication.
+
+        **You receive:** The respondent transaction matching the supplied Survey ID and PID, including provider status and termination fields when available.
+
+        **Official documentation:** https://developer.innovatemr.com/get-survey-transactions-data-by-pid-and-survey-number-21242406e0
+      summary: Transaction by survey and PID
       parameters:
       - in: path
-        name: id
+        name: client_code
         schema:
-          type: integer
-        description: A unique integer value identifying this client integration.
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
         required: true
       - in: query
         name: limit
         schema:
           type: integer
-        description: Maximum returned rows (1-200).
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+        required: true
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
       tags:
-      - Upstream client APIs
+      - InnovateMR APIs
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3801,33 +5584,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UpstreamError'
-          description: ''
-  /api/v1/vendors/upstream-explorer/{id}/quota/:
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/unique-ip-check/:
     get:
-      operationId: api_v1_vendors_upstream_explorer_quota_retrieve
-      description: For RFG, quotas are returned by its targeting command and extracted
-        here.
-      summary: Run this client's survey quota API
+      operationId: innovatemr_unique_ip_check
+      description: |-
+        **Purpose:** Non-mutating provider eligibility check for a survey and IP.
+
+        **You send:** required: survey_id, ip; optional: none. Credentials are never entered here. We convert `survey_id` + `ip` to `{survNum, ip}`.
+
+        **Upstream request:** `POST /supply/checkAllowUniqueIP` using server-side authentication.
+
+        **You receive:** An allow/deny decision indicating whether the IP can enter the survey.
+
+        **Official documentation:** https://developer.innovatemr.com/survey-allow-for-unique-ip-21242399e0
+      summary: Unique IP check
       parameters:
       - in: path
-        name: id
+        name: client_code
         schema:
-          type: integer
-        description: A unique integer value identifying this client integration.
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP address.
         required: true
       - in: query
         name: limit
         schema:
           type: integer
-        description: Maximum returned rows (1-200).
+        description: Maximum list rows shown in this response (1-200).
       - in: query
         name: survey_id
         schema:
           type: string
-        description: Survey ID or RFG rfg_id.
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
         required: true
       tags:
-      - Upstream client APIs
+      - InnovateMR APIs
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3843,37 +5649,857 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UpstreamError'
-          description: ''
-  /api/v1/vendors/upstream-explorer/{id}/targeting/:
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/unique-pid-ip-check/:
     get:
-      operationId: api_v1_vendors_upstream_explorer_targeting_retrieve
-      description: Admin-only proxy for explicit, read-oriented provider operations.
-      summary: Run this client's survey targeting API
+      operationId: innovatemr_unique_pid_ip_check
+      description: |-
+        **Purpose:** Non-mutating provider eligibility check for survey, PID and provider ID.
+
+        **You send:** required: survey_id, pid, external_id; optional: none. Credentials are never entered here. We convert `survey_id`, `pid`, `external_id` to `{survNum, pid, id}`.
+
+        **Upstream request:** `POST /supply/allowUniquePIDAndIP` using server-side authentication.
+
+        **You receive:** An allow/deny decision for the supplied survey, PID, IP-associated provider ID combination.
+
+        **Official documentation:** https://developer.innovatemr.com/allow-unique-pid-ip-21242400e0
+      summary: Unique PID and IP check
       parameters:
       - in: path
-        name: id
+        name: client_code
         schema:
-          type: integer
-        description: A unique integer value identifying this client integration.
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: external_id
+        schema:
+          type: string
+        description: Provider transaction/check ID for InnovateMR's unique PID/IP
+          check.
         required: true
       - in: query
         name: limit
         schema:
           type: integer
-        description: Maximum returned rows (1-200).
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+        required: true
       - in: query
         name: survey_id
         schema:
           type: string
-        description: Survey ID or RFG rfg_id.
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - InnovateMR APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/innovatemr/update-panelist-profile/:
+    post:
+      operationId: innovatemr_update_panelist_profile
+      description: |-
+        **Purpose:** Updates country, language and qualification answers for an existing supplier PID.
+
+        **You send:** required: pid; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `PUT /respondent/setQualifications/{pid}` using server-side authentication.
+
+        **You receive:** Success status and provider message.
+
+        **Official documentation:** https://developer.innovatemr.com/update-panellist-profiling-21242410e0
+
+        **Safety:** This changes live provider data. Send `confirm_upstream_mutation: true`; without it the call is rejected before contacting InnovateMR.
+      summary: Update panelist profile
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - InnovateMR APIs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+            examples:
+              ConfirmedLiveChange:
+                value:
+                  confirm_upstream_mutation: true
+                  pid: respondent-123
+                  payload:
+                    Country: US
+                    Language: English
+                    Qualifications: []
+                summary: Confirmed live change
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpstreamMutationRequestRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/callback-guide/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_rfg_callback_guide_retrieve
+      description: Non-writing callback setup guide. It explains RFG page redirects,
+        browser pixels and server callbacks; which one this platform accepts; required
+        placeholders; and why an ordinary Swagger request cannot impersonate an RFG
+        production callback.
+      summary: Understand the three documented RFG callback methods
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - RFG Callbacks
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: Callback methods, platform URL and security requirements.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/callback-preview/:
+    post:
+      operationId: api_v1_vendors_upstream_explorer_rfg_callback_preview_create
+      description: Safe, non-writing helper for administrators. Enter RFG result/live
+        fields and receive the human-readable platform status and reason. It does
+        not update an RID. The real callback is `GET /survey/rfg/callback` and remains
+        restricted to RFG's documented server IP addresses.
+      summary: Preview how an RFG callback result will be interpreted
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      tags:
+      - RFG Callbacks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RFGCallbackPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RFGCallbackPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RFGCallbackPreviewRequest'
+        required: true
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: Mapped platform status, title and reason.
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/create-link/:
+    get:
+      operationId: rfg_create_link
+      description: |-
+        **Purpose:** Returns the provider entry link for one project.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. The local `survey_id` is sent as RFG `rfg_id`; RFG returns a reusable link.
+
+        **Upstream request:** `POST livealert/createLink/1` using server-side authentication.
+
+        **You receive:** RFG's reusable project entry link. Respondent RID, country, postal code, gender, birthday and datapoint values are added later for a live attempt.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/createLink.html
+      summary: Create live project link
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/datapoint/:
+    get:
+      operationId: rfg_datapoint
+      description: |-
+        **Purpose:** Question and answer metadata for one datapoint.
+
+        **You send:** required: datapoint_name; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `POST livealert/datapoint/1` using server-side authentication.
+
+        **You receive:** The datapoint property, question translations, answer choices, modes/types and supported countries.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/datapoint.html
+      summary: Datapoint details
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: datapoint_name
+        schema:
+          type: string
+        description: RFG datapoint property/name.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/datapoints/:
+    get:
+      operationId: rfg_datapoints
+      description: |-
+        **Purpose:** Available RFG profiling datapoints.
+
+        **You send:** required: nothing required; optional: country, modified_since. Credentials are never entered here.
+
+        **Upstream request:** `POST livealert/listDatapoints/1` using server-side authentication.
+
+        **You receive:** Names of RFG profiling datapoints available for the requested market/date.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/listDatapoints.html
+      summary: List datapoints
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Two-letter country/market code, for example US.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: modified_since
+        schema:
+          type: string
+        description: RFG modifiedSince date in yyyy-MM-dd format.
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/duplicate-check/:
+    get:
+      operationId: rfg_duplicate_check
+      description: |-
+        **Purpose:** Checks respondent eligibility using RFG duplicate rules.
+
+        **You send:** required: survey_id, rid, ip; optional: fingerprint. Credentials are never entered here. We send `{rfg_id, rid, ip, fingerprint}` in RFG's signed JSON command.
+
+        **Upstream request:** `POST livealert/duplicateCheck/1` using server-side authentication.
+
+        **You receive:** An isDuplicate decision for one respondent/project combination.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/duplicateCheck.html
+      summary: Duplicate check
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: fingerprint
+        schema:
+          type: string
+        description: Optional RFG browser fingerprint; use 0 when unavailable.
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP address.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: rid
+        schema:
+          type: string
+        description: Our platform-generated 10-character respondent RID.
+        required: true
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/duplicate-checks/:
+    get:
+      operationId: rfg_duplicate_checks
+      description: |-
+        **Purpose:** Checks one respondent against multiple RFG projects in one signed request.
+
+        **You send:** required: survey_ids, rid, ip; optional: fingerprint. Credentials are never entered here. We send `{rfg_ids, rid, ip, fingerprint}` in RFG's signed JSON command.
+
+        **Upstream request:** `POST livealert/duplicateChecks/1` using server-side authentication.
+
+        **You receive:** A projects array with an isDuplicate decision for each supplied RFG project.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/duplicateChecks.html
+      summary: Bulk duplicate checks
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: fingerprint
+        schema:
+          type: string
+        description: Optional RFG browser fingerprint; use 0 when unavailable.
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP address.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: rid
+        schema:
+          type: string
+        description: Our platform-generated 10-character respondent RID.
+        required: true
+      - in: query
+        name: survey_ids
+        schema:
+          type: string
+        description: RFG project IDs as a comma-separated list or JSON array (maximum
+          100).
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/inventory/:
+    get:
+      operationId: rfg_inventory
+      description: |-
+        **Purpose:** Current Research For Good project inventory.
+
+        **You send:** required: nothing required; optional: country, category, allow_recontacts, inventory_type. Credentials are never entered here.
+
+        **Upstream request:** `POST livealert/inventory/1` using server-side authentication.
+
+        **You receive:** RFG project rows including rfg_id, title, country, CPI, estimated IR/LOI, desired/current completes, state, category and targeting hints.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/inventory.html
+      summary: LiveAlert inventory
+      parameters:
+      - in: query
+        name: allow_recontacts
+        schema:
+          type: boolean
+        description: Include RFG recontact projects.
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: RFG B2B/B2C category.
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Two-letter country/market code, for example US.
+      - in: query
+        name: inventory_type
+        schema:
+          type: integer
+        description: 'RFG inventory type: 0 all, 1 LiveAlert, 2 traditional.'
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/log/:
+    get:
+      operationId: rfg_log
+      description: |-
+        **Purpose:** Returns RFG session/result log rows for one project and optional result/date filters.
+
+        **You send:** required: survey_id; optional: result, start, end. Credentials are never entered here. The local `survey_id` is sent as RFG `rfg_id` with optional result/start/end filters.
+
+        **Upstream request:** `POST livealert/log/1` using server-side authentication.
+
+        **You receive:** RFG session log rows containing sesskey, start, end and result.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/log.html
+      summary: Project respondent log
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: end
+        schema:
+          type: string
+        description: RFG log end date/time filter.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: result
+        schema:
+          type: string
+        description: Provider result code filter.
+      - in: query
+        name: start
+        schema:
+          type: string
+        description: RFG log start date/time filter.
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/quota/:
+    get:
+      operationId: rfg_quota
+      description: |-
+        **Purpose:** Quotas extracted from the documented targeting response.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. For RFG this calls targeting with `rfg_id` and returns only its `quotas` array.
+
+        **Upstream request:** `POST livealert/targeting/1` using server-side authentication.
+
+        **You receive:** Only the quota array extracted from RFG's targeting response.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/targeting.html
+      summary: Project quotas
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/stats/:
+    get:
+      operationId: rfg_stats
+      description: |-
+        **Purpose:** Current statistics for one RFG project.
+
+        **You send:** required: survey_id; optional: none. Credentials are never entered here. For RFG the local `survey_id` is sent as `rfg_id`.
+
+        **Upstream request:** `POST livealert/stats/1` using server-side authentication.
+
+        **You receive:** Project starts, completes, terminates, quotas, CR, EPC, project/trailing CR and EPC.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/stats.html
+      summary: Project statistics
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/targeting/:
+    get:
+      operationId: rfg_targeting
+      description: |-
+        **Purpose:** Targeting datapoints and quotas for one RFG project.
+
+        **You send:** required: survey_id; optional: zips_only. Credentials are never entered here. The local `survey_id` is sent upstream as RFG `rfg_id` for an RFG client.
+
+        **Upstream request:** `POST livealert/targeting/1` using server-side authentication.
+
+        **You receive:** Targeting datapoints and quota definitions for the requested RFG project.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/targeting.html
+      summary: Project targeting
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: 'Provider survey/project ID. InnovateMR example: 16003381; RFG
+          example: RFG2300540746-001.'
         required: true
       - in: query
         name: zips_only
         schema:
           type: boolean
-        description: RFG-only postal targeting switch.
+        description: When true, RFG returns postal targeting only.
       tags:
-      - Upstream client APIs
+      - RFG APIs
       security:
       - VendorApiKeyAuth: []
       - cookieAuth: []
@@ -3889,12 +6515,139 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/test/:
+    get:
+      operationId: rfg_test
+      description: |-
+        **Purpose:** Signed echo request used to validate APID and secret.
+
+        **You send:** required: nothing required; optional: none. Credentials are never entered here.
+
+        **Upstream request:** `POST test/copy/1` using server-side authentication.
+
+        **You receive:** Authentication status and confirmation that RFG returned the signed echo marker.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/test.html
+      summary: Connection test
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
           description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
+  /api/v1/vendors/upstream-explorer/{client_code}/rfg/zip-to-geo/:
+    get:
+      operationId: rfg_zip_to_geo
+      description: |-
+        **Purpose:** Converts a country/postal-code pair into RFG geographic region indexes.
+
+        **You send:** required: zip, country_code; optional: none. Credentials are never entered here. We send the local `zip` and uppercase `country_code` as RFG `{zip, countryCode}`.
+
+        **Upstream request:** `POST livealert/zipToGeo/1` using server-side authentication.
+
+        **You receive:** RFG country/geography region indexes resolved from the postal code.
+
+        **Official documentation:** https://docs.researchforgood.com/RFGAPI/livealert/apidocs/commands/zipToGeo.html
+      summary: Postal code to geography
+      parameters:
+      - in: path
+        name: client_code
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+        required: true
+      - in: query
+        name: country_code
+        schema:
+          type: string
+        description: Two-letter RFG country code.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows shown in this response (1-200).
+      - in: query
+        name: zip
+        schema:
+          type: string
+        description: Respondent postal/ZIP code.
+        required: true
+      tags:
+      - RFG APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Missing/invalid input or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Client alias is ambiguous.
   /survey/rfg/callback:
     get:
       operationId: survey_rfg_callback_retrieve
-      description: Updates the RID attempt, exit IP/time, LOI and allocation state.
-        Requests outside the configured RFG IP allowlist are rejected.
+      description: 'Called by RFG after a respondent outcome. It updates the RID attempt,
+        exit IP/time, LOI and allocation state. This is not a normal admin test endpoint:
+        Swagger calls will normally receive 403 because only RFG''s configured server
+        IPs are trusted. Use the RFG callback preview endpoint to safely understand
+        result/live codes without writing data.'
       summary: Receive a verified Research For Good result callback
       parameters:
       - in: query
@@ -3940,7 +6693,7 @@ paths:
           type: string
         description: RFG session identifier
       tags:
-      - Respondent callbacks
+      - RFG Callbacks
       security:
       - {}
       responses:
@@ -5850,6 +8603,25 @@ components:
       required:
       - key
       - label
+    RFGCallbackPreviewRequest:
+      type: object
+      properties:
+        result:
+          type: string
+          minLength: 1
+          description: RFG result code, for example 1, 2, 7, 30 or 50.
+        ruledOutBy:
+          type: string
+        liveP:
+          type: string
+        liveS:
+          type: string
+        liveI:
+          type: string
+        quotaThrottle:
+          type: string
+      required:
+      - result
     RFGCallbackResponse:
       type: object
       properties:
@@ -6979,8 +9751,9 @@ components:
     UpstreamExecutionIntegration:
       type: object
       properties:
-        id:
-          type: integer
+        client_code:
+          type: string
+          pattern: ^[-a-zA-Z0-9_]+$
         client:
           type: string
         name:
@@ -6989,7 +9762,7 @@ components:
           type: string
       required:
       - client
-      - id
+      - client_code
       - name
       - provider
     UpstreamExecutionResponse:
@@ -7020,8 +9793,13 @@ components:
     UpstreamIntegrationMetadata:
       type: object
       properties:
-        id:
-          type: integer
+        client_code:
+          type: string
+          pattern: ^[-a-zA-Z0-9_]+$
+        lookup_aliases:
+          type: array
+          items:
+            type: string
         client:
           type: string
         integration:
@@ -7043,11 +9821,32 @@ components:
       - active
       - base_url
       - client
+      - client_code
       - credential
-      - id
       - integration
+      - lookup_aliases
       - operations
       - provider
+    UpstreamMutationRequestRequest:
+      type: object
+      properties:
+        confirm_upstream_mutation:
+          type: boolean
+          description: Must be true. The request changes live data in the provider
+            account.
+        survey_id:
+          type: string
+          minLength: 1
+          description: InnovateMR Survey ID, when required.
+        pid:
+          type: string
+          minLength: 1
+          description: Supplier panelist PID, when required.
+        payload:
+          description: Exact documented InnovateMR JSON body. Credentials are added
+            server-side.
+      required:
+      - confirm_upstream_mutation
     UpstreamOperationMetadata:
       type: object
       properties:
@@ -7076,6 +9875,11 @@ components:
           type: array
           items:
             type: string
+        mutating:
+          type: boolean
+          default: false
+        response_description:
+          type: string
       required:
       - api_url
       - code
@@ -7929,7 +10733,15 @@ tags:
 - name: Organization hierarchy
   description: Branch, Sub-branch, Shift, team assignment and unit-level client visibility
     APIs.
-- name: Upstream client APIs
-  description: Admin-only, allow-listed live calls to configured client inventory,
-    quota, targeting, transaction and metadata APIs. Secrets are resolved on the server
-    and never returned.
+- name: Client API catalog
+  description: Search configured clients by stable name/code and inspect their available
+    provider operations without database IDs.
+- name: InnovateMR APIs
+  description: Every documented InnovateMR Supplier API, grouped for direct testing
+    with server-side credentials and guarded live mutations.
+- name: RFG APIs
+  description: Every documented Research For Good LiveAlert command using server-generated
+    HMAC authentication.
+- name: RFG Callbacks
+  description: Research For Good callback contract and safe result-code interpretation
+    tools.

@@ -37,7 +37,10 @@ class ResearchForGoodProvider(SurveyProvider):
         "livealert/datapoint/1",
         "livealert/createLink/1",
         "livealert/duplicateCheck/1",
+        "livealert/duplicateChecks/1",
+        "livealert/log/1",
         "livealert/stats/1",
+        "livealert/zipToGeo/1",
     })
 
     def __init__(self, integration, *, session=None, clock=None):

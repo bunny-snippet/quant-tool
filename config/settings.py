@@ -160,7 +160,7 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Survey Workspace API",
     "DESCRIPTION": (
-        "Internal multi-provider survey API. The Upstream client APIs section lets authorized "
+        "Internal multi-provider survey API. The client-specific InnovateMR and RFG sections let authorized "
         "administrators execute allow-listed provider operations while every credential remains "
         "server-side. Authentication requires the current Django admin session and the separate "
         "documentation password."
@@ -178,7 +178,10 @@ SPECTACULAR_SETTINGS = {
         {"name": "Access control", "description": "Dynamic roles, function assignments and per-user access overrides."},
         {"name": "Vendors & allocations", "description": "UAT client scope, vendor commercial policy and quantity allocation APIs."},
         {"name": "Organization hierarchy", "description": "Branch, Sub-branch, Shift, team assignment and unit-level client visibility APIs."},
-        {"name": "Upstream client APIs", "description": "Admin-only, allow-listed live calls to configured client inventory, quota, targeting, transaction and metadata APIs. Secrets are resolved on the server and never returned."},
+        {"name": "Client API catalog", "description": "Search configured clients by stable name/code and inspect their available provider operations without database IDs."},
+        {"name": "InnovateMR APIs", "description": "Every documented InnovateMR Supplier API, grouped for direct testing with server-side credentials and guarded live mutations."},
+        {"name": "RFG APIs", "description": "Every documented Research For Good LiveAlert command using server-generated HMAC authentication."},
+        {"name": "RFG Callbacks", "description": "Research For Good callback contract and safe result-code interpretation tools."},
     ],
     "ENUM_NAME_OVERRIDES": {
         "SurveyStatusEnum": "surveys.models.Survey.Status",
