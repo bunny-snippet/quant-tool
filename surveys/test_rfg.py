@@ -271,6 +271,13 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertEqual(outbound["household_income"], ["2"])
         self.assertEqual(outbound["code"], [survey.local_id])
 
+        answers[str(birthday.pk)]["upstream_values"] = ["32"]
+        self.assertEqual(provider.validate_prescreener(survey, answers), (True, ""))
+        age_outbound = parse_qs(
+            urlsplit(provider.build_outbound_url(survey, attempt, answers)).query
+        )
+        self.assertEqual(provider._age_on(age_outbound["birthday"][0]), 32)
+
         answers[str(income.pk)]["upstream_values"] = ["1"]
         eligible, reason = provider.validate_prescreener(survey, answers)
         self.assertFalse(eligible)
@@ -489,9 +496,19 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertContains(prescreener, "Male")
         self.assertNotContains(prescreener, "Female")
         self.assertContains(prescreener, "Only answers accepted by this survey are shown.")
+        self.assertContains(prescreener, "What is your age?")
+        self.assertContains(prescreener, "Qualifying age: 18–35")
+        self.assertContains(prescreener, 'type="number"', html=False)
+        self.assertContains(prescreener, 'min="18"', html=False)
+        self.assertContains(prescreener, 'max="35"', html=False)
+        self.assertNotContains(prescreener, 'type="date"', html=False)
+        self.assertNotContains(prescreener, 'class="survey-context"', html=False)
+        self.assertNotContains(prescreener, "About 18 min")
+        self.assertNotContains(prescreener, "Continue to survey")
+        self.assertContains(prescreener, ">Submit</button>", html=False)
         response = self.client.post("/survey/start", {
             "rid": attempt.rid,
-            f"question_{birthday.pk}": "2000-01-01",
+            f"question_{birthday.pk}": "26",
             f"question_{gender.pk}": "M",
             f"question_{postal.pk}": "12345",
             f"question_{income.pk}": "1",
@@ -515,7 +532,7 @@ class ResearchForGoodIntegrationTests(TestCase):
         with patch.object(ResearchForGoodProvider, "duplicate_check", return_value=False):
             response = self.client.post("/survey/start", {
                 "rid": relaxed_attempt.rid,
-                f"question_{birthday.pk}": "2000-01-01",
+                f"question_{birthday.pk}": "26",
                 f"question_{gender.pk}": "M",
                 f"question_{postal.pk}": "12345",
                 f"question_{income.pk}": "1",

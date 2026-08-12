@@ -749,6 +749,13 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
     for question in survey.targeting_questions.all():
         display_text = clean_rfg_display_text(question.text or question.key)
         lowered_type = question.question_type.lower()
+        normalized_key = str(question.key or "").upper()
+        normalized_text = display_text.lower()
+        is_age_question = (
+            normalized_key in {"AGE", "DOB", "BIRTHDAY", "RFG_BIRTHDAY"}
+            or "date of birth" in normalized_text
+            or "your age" in normalized_text
+        )
         options = []
         age_ranges = []
         allowed_values = _rfg_qualifying_option_values(question) if is_rfg else None
@@ -765,8 +772,24 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             if qualifying_options_only and allowed_values and value not in allowed_values:
                 continue
             options.append({"value": value, "label": label})
-        if "date" in lowered_type:
-            input_kind = "date"
+        if is_age_question:
+            input_kind = "number"
+            display_text = "What is your age?"
+            for item in (question.raw_data or {}).get("targeting_age_ranges") or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    age_ranges.append({
+                        "ageStart": int(item["min"]),
+                        "ageEnd": int(item["max"]),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+        elif "date" in lowered_type:
+            # Calendar controls are intentionally avoided across all providers.
+            # Non-age date datapoints remain plain text so their provider format
+            # is preserved instead of being silently converted into an age.
+            input_kind = "text"
         elif "multi" in lowered_type:
             input_kind = "checkbox"
         elif "single" in lowered_type and options:
@@ -779,20 +802,31 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         selected_values = submitted_data.getlist(field_name) if submitted_data is not None else []
         for option in options:
             option["selected"] = option["value"] in selected_values
+        min_value = min((int(item["ageStart"]) for item in age_ranges), default=None)
+        max_value = max((int(item["ageEnd"]) for item in age_ranges), default=None)
+        age_range_labels = [
+            f"{int(item['ageStart'])}\u2013{int(item['ageEnd'])}"
+            for item in age_ranges
+        ]
         prepared.append({
             "model": question,
             "display_text": display_text,
             "field_name": field_name,
             "input_kind": input_kind,
+            "type_label": "Age" if is_age_question else (question.question_type or "Question"),
             "options": options,
             "current_value": selected_values[0] if selected_values else "",
-            "min_value": min((int(item["ageStart"]) for item in age_ranges), default=None),
-            "max_value": max((int(item["ageEnd"]) for item in age_ranges), default=None),
+            "min_value": min_value,
+            "max_value": max_value,
+            "input_label": "Age" if is_age_question else "Your answer",
+            "placeholder": "Enter your age" if is_age_question else "Enter a number",
             "qualifying_options_only": bool(
                 qualifying_options_only and allowed_values
             ),
             "targeting_note": (
-                "Only answers accepted by this survey are shown."
+                f"Qualifying age: {', '.join(age_range_labels)}"
+                if is_age_question and age_range_labels
+                else "Only answers accepted by this survey are shown."
                 if qualifying_options_only and allowed_values else ""
             ),
         })
@@ -943,7 +977,7 @@ def survey_start(request):
         )
         if is_rfg:
             stale = stale or not survey.entry_link or not survey.targeting_questions.filter(
-                raw_data__adapter_version=2
+                raw_data__adapter_version__in=[2, 3]
             ).exists()
         targeting_warning = ""
         if stale:

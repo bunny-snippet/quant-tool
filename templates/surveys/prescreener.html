@@ -12,7 +12,6 @@
     <p class="flow-eyebrow">Before you continue</p>
     <h1>A few quick questions</h1>
     <p>Your answers help route you to the right survey experience.</p>
-    <div class="survey-context"><span>{{ survey.company_name }}</span><i></i><span>{{ survey.country_code }} {{ survey.language_code }}</span><i></i><span>About {{ survey.loi|default:"—" }} min</span></div>
     {% if questions %}<div class="question-progress"><span>{{ questions|length }} question{{ questions|length|pluralize }}</span><b>Usually under a minute</b></div>{% endif %}
   </section>
 
@@ -25,7 +24,7 @@
     {% if is_rfg %}<input type="hidden" id="rfgFingerprint" name="rfg_fingerprint" value="0">{% endif %}
     {% for question in questions %}
       <section class="screen-question" aria-labelledby="question-title-{{ question.model.pk }}">
-        <header class="screen-question-header"><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><div><small>{{ question.model.category|default:"Profile" }} · {{ question.model.question_type|default:"Question" }}</small><h2 id="question-title-{{ question.model.pk }}">{{ question.display_text }}</h2></div></header>
+        <header class="screen-question-header"><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><div><small>{{ question.model.category|default:"Profile" }} · {{ question.type_label }}</small><h2 id="question-title-{{ question.model.pk }}">{{ question.display_text }}</h2></div></header>
         {% if question.targeting_note %}<p class="answer-guidance"><span>✓</span>{{ question.targeting_note }}</p>{% endif %}
 
         {% if question.input_kind == "radio" %}
@@ -37,10 +36,8 @@
             {% for option in question.options %}<label class="choice-card"><input type="checkbox" name="{{ question.field_name }}" value="{{ option.value }}" {% if option.selected %}checked{% endif %}><span>{{ option.label }}</span></label>{% endfor %}
           </div>
         {% elif question.input_kind == "number" %}
-          <label class="open-answer"><span>Your answer</span><input type="number" inputmode="numeric" name="{{ question.field_name }}" value="{{ question.current_value }}" {% if question.min_value != None %}min="{{ question.min_value }}"{% endif %} {% if question.max_value != None %}max="{{ question.max_value }}"{% endif %} placeholder="Enter a number" required></label>
+          <label class="open-answer"><span>{{ question.input_label }}</span><input type="number" inputmode="numeric" name="{{ question.field_name }}" value="{{ question.current_value }}" {% if question.min_value != None %}min="{{ question.min_value }}"{% endif %} {% if question.max_value != None %}max="{{ question.max_value }}"{% endif %} placeholder="{{ question.placeholder }}" required></label>
           {% if question.min_value != None %}<small class="answer-hint">Accepted range: {{ question.min_value }}–{{ question.max_value }}</small>{% endif %}
-        {% elif question.input_kind == "date" %}
-          <label class="open-answer"><span>Your answer</span><input type="date" name="{{ question.field_name }}" value="{{ question.current_value }}" required></label>
         {% else %}
           <label class="open-answer"><span>Your answer</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="Type your answer" required></label>
         {% endif %}
@@ -53,7 +50,7 @@
       </section>
     {% endfor %}
 
-    <div class="form-actions"><p>By continuing, your survey attempt and duration will be recorded against this RID.</p><button type="submit">Continue to survey <span>→</span></button></div>
+    <div class="form-actions"><button type="submit">Submit</button></div>
   </form>
 </main>
 {% endblock %}

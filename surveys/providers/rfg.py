@@ -199,7 +199,7 @@ class ResearchForGoodProvider(SurveyProvider):
                     if isinstance(item, dict) and str(item.get("choice", "")).isdigit()
                 ]
         questions = [
-            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your date of birth?", question_type="date", category="Required profile", options=[], raw_data={"adapter_version": 2, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges}),
+            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your age?", question_type="number", category="Required profile", options=[], raw_data={"adapter_version": 3, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges, "respondent_input": "age"}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-gender"), key="RFG_GENDER", text="What is your gender?", question_type="single", category="Required profile", options=[{"OptionId": "M", "OptionText": "Male"}, {"OptionId": "F", "OptionText": "Female"}], raw_data={"adapter_version": 2, "mandatory_link_parameter": "gender", "targeting_choices": gender_choices}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-postal"), key="RFG_POSTAL_CODE", text="What is your postal code?", question_type="text", category="Required profile", options=[], raw_data={"adapter_version": 2, "mandatory_link_parameter": "postalCode", "country": survey.country_code}),
         ]
@@ -298,15 +298,15 @@ class ResearchForGoodProvider(SurveyProvider):
 
     def build_outbound_url(self, survey, attempt, answers):
         values = self._answer_map(answers)
-        birthday = (values.get("RFG_BIRTHDAY") or [""])[0]
+        age_or_birthday = (values.get("RFG_BIRTHDAY") or [""])[0]
         gender = (values.get("RFG_GENDER") or [""])[0]
         postal = re.sub(
             r"[\s-]", "", str((values.get("RFG_POSTAL_CODE") or [""])[0]).upper()
         )
         try:
-            datetime.strptime(str(birthday), "%Y-%m-%d")
-        except ValueError as exc:
-            raise ProviderError("Date of birth must use YYYY-MM-DD format.") from exc
+            birthday = self._birthday_from_age_or_date(age_or_birthday)
+        except (TypeError, ValueError) as exc:
+            raise ProviderError("Enter a valid age between 1 and 120.") from exc
         if str(gender).upper() not in {"M", "F", "1", "2"}:
             raise ProviderError("Select a valid gender for Research For Good.")
         if not postal:
@@ -335,6 +335,37 @@ class ResearchForGoodProvider(SurveyProvider):
         return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
     @staticmethod
+    def _birthday_from_age_or_date(value, today=None):
+        """Convert UI age into RFG's mandatory birthday query parameter.
+
+        Legacy YYYY-MM-DD answers remain supported for attempts opened before the
+        age-input UI was deployed.
+        """
+        raw_value = str(value or "").strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_value):
+            datetime.strptime(raw_value, "%Y-%m-%d")
+            return raw_value
+        age = int(raw_value)
+        if not 1 <= age <= 120:
+            raise ValueError("age outside supported range")
+        today = today or date.today()
+        try:
+            birthday = today.replace(year=today.year - age)
+        except ValueError:
+            birthday = today.replace(year=today.year - age, day=28)
+        return birthday.isoformat()
+
+    @classmethod
+    def _age_from_age_or_date(cls, value, today=None):
+        raw_value = str(value or "").strip()
+        if raw_value.isdigit():
+            age = int(raw_value)
+            if not 1 <= age <= 120:
+                raise ValueError("age outside supported range")
+            return age
+        return cls._age_on(raw_value, today=today)
+
+    @staticmethod
     def _postal_is_valid(country, postal):
         compact = re.sub(r"[\s-]", "", str(postal or "").upper())
         patterns = {
@@ -351,13 +382,13 @@ class ResearchForGoodProvider(SurveyProvider):
 
     def validate_prescreener(self, survey, answers):
         values = self._answer_map(answers)
-        birthday = (values.get("RFG_BIRTHDAY") or [""])[0]
+        age_or_birthday = (values.get("RFG_BIRTHDAY") or [""])[0]
         gender = str((values.get("RFG_GENDER") or [""])[0]).upper()
         postal = re.sub(r"[\s-]", "", str((values.get("RFG_POSTAL_CODE") or [""])[0]).upper())
         try:
-            age = self._age_on(birthday)
+            age = self._age_from_age_or_date(age_or_birthday)
         except (TypeError, ValueError):
-            return False, "Please enter a valid date of birth."
+            return False, "Please enter a valid age."
         if gender not in {"M", "F", "1", "2"}:
             return False, "Please select a valid gender."
         if not self._postal_is_valid(survey.country_code, postal):
