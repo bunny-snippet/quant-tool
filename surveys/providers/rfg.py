@@ -29,6 +29,16 @@ class ResearchForGoodProvider(SurveyProvider):
     default_base_url = "https://api.researchforgood.com/API"
     minimum_sync_interval_seconds = 60
     credential_fields = (("apid", "APID environment key"), ("secret", "Secret environment key"))
+    explorer_commands = frozenset({
+        "test/copy/1",
+        "livealert/listDatapoints/1",
+        "livealert/inventory/1",
+        "livealert/targeting/1",
+        "livealert/datapoint/1",
+        "livealert/createLink/1",
+        "livealert/duplicateCheck/1",
+        "livealert/stats/1",
+    })
 
     def __init__(self, integration, *, session=None, clock=None):
         super().__init__(integration, session=session or requests.Session())
@@ -86,6 +96,12 @@ class ResearchForGoodProvider(SurveyProvider):
         if not isinstance(result, dict):
             raise ProviderError("Research For Good response payload must be an object.")
         return result
+
+    def explorer_read(self, command: str, **parameters) -> dict:
+        """Run an explicitly allow-listed RFG command for the admin explorer."""
+        if command not in self.explorer_commands:
+            raise ProviderConfigurationError("This RFG command is not available in the read-only explorer.")
+        return self._command({"command": command, **parameters})
 
     def test_connection(self) -> dict:
         marker = f"quest-tool-{int(self.clock())}"

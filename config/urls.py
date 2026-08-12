@@ -2,22 +2,19 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from accounts.access import HasFunctionPermission
+from .api_docs import DocumentationProtectionMixin, IsDocumentationAdmin
 
 
-class ProtectedSchemaView(SpectacularAPIView):
-    permission_classes = [HasFunctionPermission]
-    required_function_permission = "api_docs.view"
+class ProtectedSchemaView(DocumentationProtectionMixin, SpectacularAPIView):
+    permission_classes = [IsDocumentationAdmin]
 
 
-class ProtectedSwaggerView(SpectacularSwaggerView):
-    permission_classes = [HasFunctionPermission]
-    required_function_permission = "api_docs.view"
+class ProtectedSwaggerView(DocumentationProtectionMixin, SpectacularSwaggerView):
+    permission_classes = [IsDocumentationAdmin]
 
 
-class ProtectedRedocView(SpectacularRedocView):
-    permission_classes = [HasFunctionPermission]
-    required_function_permission = "api_docs.view"
+class ProtectedRedocView(DocumentationProtectionMixin, SpectacularRedocView):
+    permission_classes = [IsDocumentationAdmin]
 
 
 urlpatterns = [

@@ -14,6 +14,8 @@ def env_bool(name: str, default: bool = False) -> bool:
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "development-only-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = [value.strip() for value in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if value.strip()]
+API_DOCS_BASIC_USERNAME = os.getenv("API_DOCS_BASIC_USERNAME", "").strip()
+API_DOCS_BASIC_PASSWORD = os.getenv("API_DOCS_BASIC_PASSWORD", "")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -157,7 +159,12 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Survey Workspace API",
-    "DESCRIPTION": "Internal API for InnovateMR survey ingestion, browsing, quotas and pre-screening targeting. Upstream credentials remain server-side.",
+    "DESCRIPTION": (
+        "Internal multi-provider survey API. The Upstream client APIs section lets authorized "
+        "administrators execute allow-listed provider operations while every credential remains "
+        "server-side. Authentication requires the current Django admin session and the separate "
+        "documentation password."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
@@ -171,6 +178,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "Access control", "description": "Dynamic roles, function assignments and per-user access overrides."},
         {"name": "Vendors & allocations", "description": "UAT client scope, vendor commercial policy and quantity allocation APIs."},
         {"name": "Organization hierarchy", "description": "Branch, Sub-branch, Shift, team assignment and unit-level client visibility APIs."},
+        {"name": "Upstream client APIs", "description": "Admin-only, allow-listed live calls to configured client inventory, quota, targeting, transaction and metadata APIs. Secrets are resolved on the server and never returned."},
     ],
     "ENUM_NAME_OVERRIDES": {
         "SurveyStatusEnum": "surveys.models.Survey.Status",

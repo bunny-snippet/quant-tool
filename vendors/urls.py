@@ -15,6 +15,7 @@ from .views import (
     OrganizationManagementOptionsView,
     OrganizationUnitViewSet,
 )
+from .upstream_views import UpstreamExplorerViewSet
 
 
 router = DefaultRouter()
@@ -28,6 +29,7 @@ router.register("survey-allocations", VendorSurveyAllocationViewSet, basename="v
 router.register("reservations", AllocationReservationViewSet, basename="allocation-reservation")
 router.register("organization-units", OrganizationUnitViewSet, basename="organization-unit")
 router.register("organization-client-access", OrganizationClientAccessViewSet, basename="organization-client-access")
+router.register("upstream-explorer", UpstreamExplorerViewSet, basename="upstream-explorer")
 
 urlpatterns = router.urls
 urlpatterns += [path("management-options/", VendorManagementOptionsView.as_view(), name="vendor-management-options")]

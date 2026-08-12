@@ -2,8 +2,10 @@ openapi: 3.0.3
 info:
   title: Survey Workspace API
   version: 1.0.0
-  description: Internal API for InnovateMR survey ingestion, browsing, quotas and
-    pre-screening targeting. Upstream credentials remain server-side.
+  description: Internal multi-provider survey API. The Upstream client APIs section
+    lets authorized administrators execute allow-listed provider operations while
+    every credential remains server-side. Authentication requires the current Django
+    admin session and the separate documentation password.
 paths:
   /api/v1/access/functions/:
     get:
@@ -3508,6 +3510,386 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/vendors/upstream-explorer/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_list
+      description: Shows client/provider base URLs, exact API endpoints, official
+        documentation links and credential environment-variable names. Credential
+        values are never returned.
+      summary: List configured upstream integrations and every runnable API
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UpstreamIntegrationMetadata'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{id}/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_retrieve
+      description: Admin-only proxy for explicit, read-oriented provider operations.
+      summary: Inspect one integration's upstream API catalog
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client integration.
+        required: true
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamIntegrationMetadata'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{id}/execute/{operation}/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_execute_retrieve
+      description: Runs the selected provider API using credentials resolved on the
+        server. For future providers, additional GET operations configured in integration.config.read_api_operations
+        are accepted here without exposing an arbitrary URL parameter. This endpoint
+        is local GET even when a provider such as RFG requires a signed POST upstream.
+      summary: Execute any allow-listed upstream client API
+      parameters:
+      - in: query
+        name: allow_recontacts
+        schema:
+          type: boolean
+        description: Include RFG recontacts in inventory.
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: Question category key or RFG B2B/B2C category.
+      - in: query
+        name: category_key
+        schema:
+          type: string
+        description: InnovateMR question category key.
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Two-letter market code where supported.
+      - in: query
+        name: countryCode
+        schema:
+          type: string
+        description: InnovateMR high-priority country code.
+      - in: query
+        name: cursor
+        schema:
+          type: string
+        description: Upstream next cursor for paged inventory.
+      - in: query
+        name: datapoint_name
+        schema:
+          type: string
+        description: RFG datapoint property/name.
+      - in: query
+        name: date_time
+        schema:
+          type: string
+        description: Provider-formatted inventory/closed-survey date-time.
+      - in: query
+        name: device_type
+        schema:
+          type: string
+        description: Provider device value for respondent eligibility checks.
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: InnovateMR end date/time filter.
+      - in: query
+        name: external_id
+        schema:
+          type: string
+        description: Provider transaction/check ID used by InnovateMR unique PID/IP
+          check.
+      - in: query
+        name: fingerprint
+        schema:
+          type: string
+        description: Optional RFG duplicate-check fingerprint.
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client integration.
+        required: true
+      - in: query
+        name: inventory_type
+        schema:
+          type: integer
+        description: RFG inventory type (normally 1 for LiveAlert).
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: Respondent public IP, required only for duplicate checks.
+      - in: query
+        name: language
+        schema:
+          type: string
+        description: Provider language name/code where supported.
+      - in: query
+        name: languageCode
+        schema:
+          type: string
+        description: InnovateMR high-priority language code.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum list rows returned to Swagger (1-200; default 50).
+      - in: query
+        name: metadata_fields
+        schema:
+          type: string
+        description: Comma-separated InnovateMR core metadata fields.
+      - in: query
+        name: modified_since
+        schema:
+          type: string
+        description: RFG modifiedSince value.
+      - in: query
+        name: num_surveys
+        schema:
+          type: integer
+        description: Requested personalized inventory size (1-100).
+      - in: path
+        name: operation
+        schema:
+          type: string
+        description: 'Allow-listed provider operation. First call the integration
+          metadata endpoint to see which operations this provider supports and its
+          exact upstream URL. Built-in examples: answers_by_question, closed_by_date,
+          core_metadata, create_link, datapoint, datapoints, duplicate_check, high_priority,
+          inventory, inventory_by_date, paged_inventory, panelist_profile, question_categories,
+          question_library, questions_by_category, quota, recontact_pids, redirect_method,
+          respondent_precheck, respondent_surveys, stats, stats_by_date, survey, survey_status,
+          targeting, term_reason, term_reasons, test, transactions, transactions_by_date,
+          transactions_by_pid, unique_ip_check, unique_pid_ip_check.'
+        required: true
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Upstream page size for paged inventory.
+      - in: query
+        name: parameters
+        schema:
+          type: string
+        description: Optional JSON object for parameters declared by a future configured
+          read operation, for example {"market":"US"}. Built-in parameters have dedicated
+          fields below.
+      - in: query
+        name: pid
+        schema:
+          type: string
+        description: Supplier respondent/PID value.
+      - in: query
+        name: question_key
+        schema:
+          type: string
+        description: InnovateMR question key for answer lookup.
+      - in: query
+        name: rid
+        schema:
+          type: string
+        description: Platform-generated respondent RID.
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: InnovateMR start date/time filter.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Optional InnovateMR transaction status.
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: InnovateMR Survey ID or RFG project/rfg_id.
+      - in: query
+        name: term_code
+        schema:
+          type: string
+        description: InnovateMR termination category code.
+      - in: query
+        name: verifiedEndDate
+        schema:
+          type: string
+        description: InnovateMR verified end date/time filter.
+      - in: query
+        name: verifiedStartDate
+        schema:
+          type: string
+        description: InnovateMR verified start date/time filter.
+      - in: query
+        name: zips_only
+        schema:
+          type: boolean
+        description: Return only RFG postal targeting where supported.
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: Unsupported operation, missing input, or safe upstream error.
+        '403':
+          description: Admin or super-admin session required.
+  /api/v1/vendors/upstream-explorer/{id}/inventory/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_inventory_retrieve
+      description: Admin-only proxy for explicit, read-oriented provider operations.
+      summary: Run this client's inventory API
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client integration.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum returned rows (1-200).
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{id}/quota/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_quota_retrieve
+      description: For RFG, quotas are returned by its targeting command and extracted
+        here.
+      summary: Run this client's survey quota API
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client integration.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum returned rows (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: Survey ID or RFG rfg_id.
+        required: true
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
+  /api/v1/vendors/upstream-explorer/{id}/targeting/:
+    get:
+      operationId: api_v1_vendors_upstream_explorer_targeting_retrieve
+      description: Admin-only proxy for explicit, read-oriented provider operations.
+      summary: Run this client's survey targeting API
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client integration.
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum returned rows (1-200).
+      - in: query
+        name: survey_id
+        schema:
+          type: string
+        description: Survey ID or RFG rfg_id.
+        required: true
+      - in: query
+        name: zips_only
+        schema:
+          type: boolean
+        description: RFG-only postal targeting switch.
+      tags:
+      - Upstream client APIs
+      security:
+      - VendorApiKeyAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamExecutionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpstreamError'
+          description: ''
   /survey/rfg/callback:
     get:
       operationId: survey_rfg_callback_retrieve
@@ -6569,6 +6951,137 @@ components:
         * `branch` - Branch
         * `sub_branch` - Sub-branch
         * `shift` - Shift
+    UpstreamCredentialMetadata:
+      type: object
+      properties:
+        source:
+          type: string
+        environment_variables:
+          type: array
+          items:
+            type: string
+        configured:
+          type: boolean
+        authentication:
+          type: string
+      required:
+      - authentication
+      - configured
+      - environment_variables
+      - source
+    UpstreamError:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    UpstreamExecutionIntegration:
+      type: object
+      properties:
+        id:
+          type: integer
+        client:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+      required:
+      - client
+      - id
+      - name
+      - provider
+    UpstreamExecutionResponse:
+      type: object
+      properties:
+        integration:
+          $ref: '#/components/schemas/UpstreamExecutionIntegration'
+        operation:
+          $ref: '#/components/schemas/UpstreamOperationMetadata'
+        credential:
+          $ref: '#/components/schemas/UpstreamCredentialMetadata'
+        result: {}
+        total_rows_in_response:
+          type: integer
+          nullable: true
+        response_truncated:
+          type: boolean
+        response_limit:
+          type: integer
+      required:
+      - credential
+      - integration
+      - operation
+      - response_limit
+      - response_truncated
+      - result
+      - total_rows_in_response
+    UpstreamIntegrationMetadata:
+      type: object
+      properties:
+        id:
+          type: integer
+        client:
+          type: string
+        integration:
+          type: string
+        provider:
+          type: string
+        base_url:
+          type: string
+          format: uri
+        active:
+          type: boolean
+        credential:
+          $ref: '#/components/schemas/UpstreamCredentialMetadata'
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpstreamOperationMetadata'
+      required:
+      - active
+      - base_url
+      - client
+      - credential
+      - id
+      - integration
+      - operations
+      - provider
+    UpstreamOperationMetadata:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        upstream_method:
+          type: string
+        api_url:
+          type: string
+        documentation_url:
+          type: string
+          format: uri
+        required_parameters:
+          type: array
+          items:
+            type: string
+        query_parameters:
+          type: array
+          items:
+            type: string
+        body_parameters:
+          type: array
+          items:
+            type: string
+      required:
+      - api_url
+      - code
+      - documentation_url
+      - label
+      - upstream_method
     UserAccess:
       type: object
       properties:
@@ -7416,3 +7929,7 @@ tags:
 - name: Organization hierarchy
   description: Branch, Sub-branch, Shift, team assignment and unit-level client visibility
     APIs.
+- name: Upstream client APIs
+  description: Admin-only, allow-listed live calls to configured client inventory,
+    quota, targeting, transaction and metadata APIs. Secrets are resolved on the server
+    and never returned.

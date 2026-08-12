@@ -114,6 +114,42 @@ class InnovateMRClient:
             raise InnovateMRAPIError(f"Bio Brain rejected the request: {'; '.join(str(item) for item in messages) or str(payload.get('error') or 'Unexpected response')}")
         return payload
 
+    def _post(self, endpoint: str, body: dict[str, Any]) -> Any:
+        url = self._url(endpoint)
+        try:
+            response = self.session.post(
+                url, json=body, headers=self._headers(), timeout=self.timeout
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise InnovateMRNotFound(f"{self.provider_code} returned no data for {url}") from exc
+            raise InnovateMRAPIError(f"{self.provider_code} request failed for {url}: {exc}") from exc
+        except (requests.RequestException, ValueError) as exc:
+            raise InnovateMRAPIError(f"{self.provider_code} request failed for {url}: {exc}") from exc
+        if not isinstance(payload, (dict, list)):
+            raise InnovateMRAPIError(f"{self.provider_code} returned an invalid JSON payload")
+        if isinstance(payload, dict) and self.provider_key == "innovatemr" and payload.get("apiStatus") not in {None, "success"}:
+            raise InnovateMRAPIError(f"InnovateMR rejected the request: {payload.get('msg', 'Unexpected response')}")
+        return payload
+
+    def request_json(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+        """Execute one server-configured read request for the admin API explorer.
+
+        Authentication is still resolved internally. Callers receive only the
+        provider JSON payload, never request headers or credential values.
+        """
+        return self._get(endpoint, params=params)
+
+    def post_json(self, endpoint: str, body: dict[str, Any]) -> Any:
+        """Execute one allow-listed, non-mutating provider check via POST."""
+        return self._post(endpoint, body)
+
+    def endpoint_url(self, endpoint: str) -> str:
+        """Return the non-secret effective URL used for documentation metadata."""
+        return self._url(endpoint)
+
     def _result_list(self, payload: Any, key: str) -> list[dict[str, Any]]:
         result = _path_value(payload, key, []) if isinstance(payload, dict) else payload
         if not isinstance(result, list):
