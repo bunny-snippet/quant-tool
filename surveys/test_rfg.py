@@ -127,7 +127,7 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertEqual(response.json()[0]["code"], "rfg")
         self.assertEqual(
             {provider["code"] for provider in response.json()},
-            {"rfg", "innovatemr", "biobrain", "custom"},
+            {"rfg", "innovatemr", "custom"},
         )
         response = api.post("/api/v1/vendors/integrations/", {
             "client": self.client_record.pk,
@@ -170,11 +170,10 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.client.force_login(admin)
         page = self.client.get("/organization/")
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "Secure upstream connection")
-        self.assertContains(page, "Test connection")
 
         integration_page = self.client.get("/client-integrations/")
         self.assertEqual(integration_page.status_code, 200)
+        self.assertContains(integration_page, "Test connection")
         self.assertContains(integration_page, "RFG credential references")
         self.assertContains(integration_page, "No provider is assumed automatically")
         self.assertContains(integration_page, "Custom REST API")

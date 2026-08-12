@@ -1,4 +1,6 @@
 import re
+import zipfile
+from io import BytesIO
 from io import StringIO
 from unittest.mock import patch
 
@@ -6,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from xml.etree import ElementTree
 
 from surveys.models import Survey, SurveyAttempt, TargetingQuestion
 from surveys.survey_flow import create_attempt
@@ -121,6 +124,24 @@ class PrescreenerVaultFlowTests(TestCase):
         self.assertContains(response, "What is your age?")
         self.assertContains(response, "Male")
         self.assertContains(response, "All countries")
+        self.assertContains(response, "vault-answer-drawer")
+        self.assertNotContains(response, "<details")
+
+        exported = self.client.get(reverse("prescreened-data-export"), {
+            "country": "US", "age_group": "18-24", "gender": "male",
+        })
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn(".xlsx", exported["Content-Disposition"])
+        content = b"".join(exported.streaming_content)
+        with zipfile.ZipFile(BytesIO(content)) as workbook:
+            self.assertIn("xl/worksheets/sheet2.xml", workbook.namelist())
+            submissions = ElementTree.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
+            answers = ElementTree.fromstring(workbook.read("xl/worksheets/sheet2.xml"))
+        submission_text = " ".join(submissions.itertext())
+        answer_text = " ".join(answers.itertext())
+        self.assertIn(attempt.rid, submission_text)
+        self.assertIn("What is your age?", answer_text)
+        self.assertIn("Male", answer_text)
 
     def test_vault_failure_does_not_redirect_or_lose_the_retry(self):
         attempt = self._attempt()

@@ -435,6 +435,7 @@
 
   $$('.vendor-tabs [data-vendor-tab]').forEach((button) => button.addEventListener('click', () => {
     $$('.vendor-tabs [data-vendor-tab]').forEach((item) => item.classList.toggle('active', item === button));
+    $$('.vendor-tabs [data-vendor-tab]').forEach((item) => item.setAttribute('aria-selected', String(item === button)));
     $$('[data-vendor-panel]').forEach((panel) => {
       const active = panel.dataset.vendorPanel === button.dataset.vendorTab;
       panel.hidden = !active; panel.classList.toggle('active', active);
@@ -442,6 +443,18 @@
   }));
 
   workspace.addEventListener('click', (event) => {
+    const createClient = event.target.closest('button[data-create-allocation="client"]');
+    const createSurvey = event.target.closest('button[data-create-allocation="survey"]');
+    const createApiKey = event.target.closest('button[data-create-api-key]');
+    if (createClient && canAllocateClient) {
+      event.preventDefault(); event.stopPropagation(); openClientAllocation(); return;
+    }
+    if (createSurvey && canAllocateProject) {
+      event.preventDefault(); event.stopPropagation(); openSurveyAllocation(); return;
+    }
+    if (createApiKey && canCreateApiKey) {
+      event.preventDefault(); event.stopPropagation(); openApiKey(); return;
+    }
     const policy = event.target.closest('[data-edit-policy]');
     const client = event.target.closest('[data-edit-client]');
     const survey = event.target.closest('[data-edit-survey]');
@@ -454,10 +467,7 @@
         .then(() => { toast('API key revoked.'); return reloadData(); })
         .catch((error) => toast(error.message, true));
     }
-  });
-  $('[data-create-allocation="client"]')?.addEventListener('click', () => openClientAllocation());
-  $('[data-create-allocation="survey"]')?.addEventListener('click', () => openSurveyAllocation());
-  $('[data-create-api-key]')?.addEventListener('click', openApiKey);
+  }, true);
   $$('[data-close-vendor-modal]').forEach((button) => button.addEventListener('click', closeModal));
   backdrop.addEventListener('click', closeModal);
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && modal && !modal.hidden) closeModal(); });

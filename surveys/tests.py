@@ -1,10 +1,12 @@
 import csv
 import os
+import zipfile
 from datetime import datetime, time, timedelta
-from io import StringIO
+from io import BytesIO, StringIO
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
+from xml.etree import ElementTree
 
 from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
@@ -25,6 +27,22 @@ from .services import (
     sync_surveys,
 )
 from .survey_flow import create_attempt
+
+
+def xlsx_rows(response, sheet_number=1):
+    content = b"".join(response.streaming_content)
+    with zipfile.ZipFile(BytesIO(content)) as workbook:
+        root = ElementTree.fromstring(workbook.read(f"xl/worksheets/sheet{sheet_number}.xml"))
+    namespace = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rows = []
+    for row in root.findall(".//x:sheetData/x:row", namespace):
+        values = []
+        for cell in row.findall("x:c", namespace):
+            inline = cell.find("x:is/x:t", namespace)
+            numeric = cell.find("x:v", namespace)
+            values.append(inline.text if inline is not None else numeric.text if numeric is not None else "")
+        rows.append(values)
+    return rows
 
 
 def survey_payload(survey_id=12632, modified="09/11/2017, 11:50:27 pm PST", **overrides):
@@ -329,7 +347,8 @@ class SurveyAPITests(TestCase):
         response = self.api.get(reverse("survey-export"), {"max_cpi": "3.00", "ordering": "-cpi"})
         self.assertEqual(response.status_code, 200)
         self.assertIn("projects-", response["Content-Disposition"])
-        rows = list(csv.reader(StringIO(b"".join(response.streaming_content).decode("utf-8-sig"))))
+        self.assertIn(".xlsx", response["Content-Disposition"])
+        rows = xlsx_rows(response)
         self.assertIn("Project ID", rows[0])
         self.assertIn("CPI", rows[0])
         self.assertIn(str(self.survey.source_id), rows[1])
@@ -341,7 +360,7 @@ class SurveyAPITests(TestCase):
             effect=UserFunctionOverride.Effect.DENY,
         )
         denied_response = self.api.get(reverse("survey-export"), {"max_cpi": "3.00"})
-        denied_rows = list(csv.reader(StringIO(b"".join(denied_response.streaming_content).decode("utf-8-sig"))))
+        denied_rows = xlsx_rows(denied_response)
         self.assertNotIn("CPI", denied_rows[0])
 
     def test_detail_actions_return_cached_data(self):
@@ -659,7 +678,8 @@ class StudiesTrackingTests(TestCase):
         self.assertContains(page, 'id="studyFromDateTime"')
         self.assertContains(page, 'id="studyToDateTime"')
         self.assertNotContains(page, 'id="studyFromTime"')
-        self.assertContains(page, "Export full CSV")
+        self.assertContains(page, 'id="exportStudies"')
+        self.assertNotContains(page, "Export full CSV")
         self.assertContains(page, "Kanik Sharma")
         self.assertContains(page, "Idle Studies")
         self.assertContains(page, "Canada · CA")
@@ -809,20 +829,27 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(summary["incidence_rate"], 100.0)
         self.assertEqual(summary["completed_devices"], {"desktop": 1, "mobile": 1, "tablet": 1, "unclassified": 0})
 
-    def test_filtered_csv_contains_full_backend_record_not_only_ui_columns(self):
+    def test_filtered_excel_uses_exact_operational_columns(self):
         response = self.api.get(reverse("survey-attempt-export"), {
             "user": self.kanik.pk,
             "status": SurveyAttempt.Status.COMPLETED,
         })
         self.assertEqual(response.status_code, 200)
-        content = b"".join(response.streaming_content).decode("utf-8")
-        self.assertIn("Entry user agent", content)
-        self.assertIn("Pre-screener answers", content)
-        self.assertIn("Outbound supplier URL", content)
-        self.assertIn("Payable CPI snapshot", content)
-        self.assertIn("Kanik Sharma", content)
-        self.assertIn(self.complete.rid, content)
-        self.assertNotIn("Ee4Ff5Gg6H", content)
+        self.assertIn("traffic-reports-", response["Content-Disposition"])
+        self.assertIn(".xlsx", response["Content-Disposition"])
+        rows = xlsx_rows(response)
+        self.assertEqual(rows[0], [
+            "Project id", "Cleint survey id", "PID", "RID", "Status", "Status source",
+            "Client name", "Country", "Study type", "Actual LOI", "Current Client CPI",
+            "Client entry link CPI", "Vendor CPI", "Vendor name", "User name", "Device",
+            "OS", "Browser", "User agent", "Entry IP", "Exit IP", "Inisitate at",
+            "Presecreent at", "Redirect at", "entry date time", "Exit date time",
+        ])
+        self.assertIn("Kanik Sharma", rows[1])
+        self.assertIn(self.complete.rid, rows[1])
+        self.assertNotIn("Pre-screener answers", rows[0])
+        self.assertNotIn("Outbound supplier URL", rows[0])
+        self.assertNotIn("Ee4Ff5Gg6H", str(rows))
 
     def test_view_permission_is_scoped_and_does_not_grant_csv_export(self):
         viewer = get_user_model().objects.create_user(username="viewer", first_name="Scoped")
@@ -851,7 +878,7 @@ class StudiesTrackingTests(TestCase):
         self.client.force_login(viewer)
         page = self.client.get(reverse("studies"))
         self.assertEqual(page.status_code, 200)
-        self.assertNotContains(page, "Export full CSV")
+        self.assertNotContains(page, 'id="exportStudies"')
         self.assertNotContains(page, 'id="studySearch"')
         self.assertNotContains(page, "Status</th>")
         self.assertContains(page, 'id="studyMetricTotal"')

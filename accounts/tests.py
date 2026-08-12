@@ -137,6 +137,8 @@ class RoleConfigurationCommandTests(TestCase):
                 "user_hits.card.completes",
                 "user_hits.card.conversion",
                 "user_hits.card.active_users",
+                "user_hits.card.devices",
+                "user_hits.card.ir",
             })
             self.assertEqual(set(assignments.values()), {False})
 

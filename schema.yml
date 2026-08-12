@@ -734,9 +734,9 @@ paths:
   /api/v1/survey-attempts/export/:
     get:
       operationId: api_v1_survey_attempts_export_retrieve
-      description: Downloads every field associated with the currently filtered attempts,
-        including user and survey identifiers, entry/exit network metadata, client
-        metadata, timestamps, answers and callback audit data.
+      description: Downloads the agreed Traffic Reports Excel columns for every filtered
+        attempt, including immutable hit-time CPI, supplier CPI, respondent device/network
+        audit and lifecycle timestamps.
       summary: Export all filtered survey attempt data
       parameters:
       - in: query
@@ -847,7 +847,7 @@ paths:
       responses:
         '200':
           content:
-            text/csv:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema:
                 type: string
                 format: binary
@@ -1296,9 +1296,9 @@ paths:
   /api/v1/surveys/export/:
     get:
       operationId: api_v1_surveys_export_retrieve
-      description: Downloads every survey matching the current Projects filters and
-        ordering. Pagination is ignored, and CSV columns follow the requesting user's
-        project-column and link-copy permissions.
+      description: Downloads an Excel workbook containing every survey matching the
+        current Projects filters and ordering. Pagination is ignored and columns follow
+        the requesting user's project permissions.
       summary: Export all filtered projects
       parameters:
       - in: query
@@ -1378,7 +1378,7 @@ paths:
       responses:
         '200':
           content:
-            text/csv:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema:
                 type: string
                 format: binary

@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Max, Min, Q, Sum
-from django.http import HttpResponseRedirect, StreamingHttpResponse
+from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from django.core.paginator import Paginator
 from django.shortcuts import render
 from django.urls import reverse
@@ -43,6 +43,7 @@ from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 
 from .filters import SurveyAttemptFilter, SurveyFilter
 from .dashboard import build_dashboard_payload, dashboard_attempts
+from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncRun
 from .outcomes import provider_outcome
@@ -449,9 +450,86 @@ def prescreener_data_page(request):
         "vault_filters": filters_access,
         "vault_columns": columns,
         "vault_column_count": max(1, len(columns)),
+        "can_export_vault": "prescreener_data.export" in codes,
         "can_paginate_vault": "prescreener_data.control.pagination" in codes,
         "page_query": query_without_page.urlencode(),
     })
+
+
+@function_permission_required("prescreener_data.export")
+def prescreener_data_export(request):
+    """Export the filtered vault as analysis-friendly submission and answer sheets."""
+
+    if not getattr(settings, "PRESCREENER_VAULT_ENABLED", False):
+        return HttpResponse("The pre-screener vault is not enabled.", status=503)
+
+    codes = effective_permission_codes(request.user)
+    filters_access = _component_access(codes, PRESCREENER_DATA_FILTER_PERMISSIONS)
+    selected = {
+        "search": request.GET.get("search", "").strip(),
+        "country": request.GET.get("country", "").strip(),
+        "language": request.GET.get("language", "").strip(),
+        "age_group": request.GET.get("age_group", "").strip(),
+        "gender": request.GET.get("gender", "").strip(),
+    }
+    for name, value in selected.items():
+        if value and not filters_access[name]:
+            raise PermissionDenied(f"Your account cannot use the {name.replace('_', ' ')} filter.")
+
+    queryset = PrescreenerSubmission.objects.using("prescreener_vault").all()
+    if selected["search"]:
+        queryset = queryset.filter(Q(uid__icontains=selected["search"]) | Q(rid__icontains=selected["search"]))
+    if selected["country"]:
+        queryset = queryset.filter(country_code__iexact=selected["country"])
+    if selected["language"]:
+        queryset = queryset.filter(language_code__iexact=selected["language"])
+    if selected["age_group"]:
+        queryset = queryset.filter(respondent_age_group__iexact=selected["age_group"])
+    if selected["gender"]:
+        queryset = queryset.filter(respondent_gender__iexact=selected["gender"])
+    queryset = queryset.prefetch_related("question_answers").order_by("-submitted_at")
+
+    def submission_rows():
+        for submission in queryset.iterator(chunk_size=500):
+            yield [
+                submission.uid, submission.rid, submission.country, submission.country_code,
+                submission.language, submission.language_code, submission.respondent_age,
+                submission.respondent_age_group, submission.respondent_gender,
+                submission.respondent_ethnicity, submission.respondent_postal_code,
+                submission.answer_count, _excel_datetime(submission.submitted_at),
+                _excel_datetime(submission.captured_at),
+            ]
+
+    def answer_rows():
+        for submission in queryset.iterator(chunk_size=250):
+            for answer in submission.question_answers.all():
+                yield [
+                    submission.uid, submission.rid, answer.position, answer.question_id,
+                    answer.question_key, answer.question_text, answer.question_type,
+                    answer.question_category, answer.canonical_attribute,
+                    ", ".join(str(value) for value in answer.answer_values),
+                    ", ".join(str(value) for value in answer.answer_labels),
+                    ", ".join(str(value) for value in answer.upstream_values),
+                ]
+
+    local_now = timezone.localtime()
+    return build_excel_response(
+        f"prescreened-data-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+        [
+            ExcelSheet(
+                "Submissions",
+                ["UID", "RID", "Country", "Country code", "Language", "Language code", "Age", "Age group", "Gender", "Ethnicity", "ZIP / postal code", "Answer count", "Submitted at (IST)", "Captured at (IST)"],
+                submission_rows(),
+                [22, 14, 20, 13, 17, 14, 9, 13, 14, 24, 18, 13, 22, 22],
+            ),
+            ExcelSheet(
+                "Answers",
+                ["UID", "RID", "Position", "Question ID", "Question key", "Question", "Question type", "Category", "Reusable attribute", "Answer values", "Answer labels", "Upstream values"],
+                answer_rows(),
+                [22, 14, 10, 16, 22, 48, 18, 18, 20, 28, 34, 25],
+            ),
+        ],
+    )
 
 
 def _refresh_provider_outcome(attempt, integration):
@@ -1228,8 +1306,8 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         tags=["Surveys"],
         summary="Export all filtered projects",
         description=(
-            "Downloads every survey matching the current Projects filters and ordering. Pagination is ignored, "
-            "and CSV columns follow the requesting user's project-column and link-copy permissions."
+            "Downloads an Excel workbook containing every survey matching the current Projects filters and "
+            "ordering. Pagination is ignored and columns follow the requesting user's project permissions."
         ),
         parameters=[
             OpenApiParameter("search", OpenApiTypes.STR, description="Search project ID, survey ID, name, country or category."),
@@ -1246,7 +1324,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
             OpenApiParameter("max_cpi", OpenApiTypes.NUMBER, description="Maximum CPI, inclusive."),
             OpenApiParameter("ordering", OpenApiTypes.STR, description="Current Projects ordering, including cpi or -cpi."),
         ],
-        responses={(200, "text/csv"): OpenApiTypes.BINARY},
+        responses={(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): OpenApiTypes.BINARY},
     )
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request, *args, **kwargs):
@@ -1255,13 +1333,11 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         columns = [column for column in _project_columns_for_user(request.user) if column != "actions"]
         local_now = timezone.localtime()
-        response = StreamingHttpResponse(
-            _survey_csv_rows(queryset, request, columns),
-            content_type="text/csv; charset=utf-8",
+        headers, rows, widths = _survey_excel_rows(queryset, request, columns)
+        return build_excel_response(
+            f"projects-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+            [ExcelSheet("Projects", headers, rows, widths)],
         )
-        response["Content-Disposition"] = f'attachment; filename="projects-{local_now:%Y%m%d-%H%M%S}-IST.csv"'
-        response["X-Content-Type-Options"] = "nosniff"
-        return response
 
     @staticmethod
     def _refresh_if_stale(survey, detail_type):
@@ -1488,8 +1564,8 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
         tags=["Survey attempts"],
         summary="Export all filtered survey attempt data",
         description=(
-            "Downloads every field associated with the currently filtered attempts, including user and survey "
-            "identifiers, entry/exit network metadata, client metadata, timestamps, answers and callback audit data."
+            "Downloads the agreed Traffic Reports Excel columns for every filtered attempt, including immutable "
+            "hit-time CPI, supplier CPI, respondent device/network audit and lifecycle timestamps."
         ),
         parameters=[
             OpenApiParameter("search", OpenApiTypes.STR, description="Search RID, user, survey, IP or client metadata."),
@@ -1512,19 +1588,17 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             OpenApiParameter("callback_to", OpenApiTypes.DATETIME, description="Exit timestamp upper bound (ISO 8601)."),
             OpenApiParameter("ordering", OpenApiTypes.STR, description="Sort by initiated_at, callback_at, loi_seconds or status; prefix - for descending."),
         ],
-        responses={(200, "text/csv"): OpenApiTypes.BINARY},
+        responses={(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): OpenApiTypes.BINARY},
     )
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         local_now = timezone.localtime()
-        response = StreamingHttpResponse(
-            _attempt_csv_rows(queryset, request.user),
-            content_type="text/csv; charset=utf-8",
+        headers, rows, widths = _attempt_excel_rows(queryset, request.user)
+        return build_excel_response(
+            f"traffic-reports-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+            [ExcelSheet("Traffic Reports", headers, rows, widths)],
         )
-        response["Content-Disposition"] = f'attachment; filename="traffic-reports-{local_now:%Y%m%d-%H%M%S}-IST.csv"'
-        response["X-Content-Type-Options"] = "nosniff"
-        return response
 
 
 class DashboardAPIView(APIView):
@@ -1630,6 +1704,129 @@ def _csv_safe(value):
     else:
         value = str(value)
     return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
+def _excel_datetime(value):
+    if not value:
+        return ""
+    local_value = timezone.localtime(value) if timezone.is_aware(value) else value
+    return local_value.strftime("%d %b %Y %I:%M:%S %p IST")
+
+
+def _survey_excel_rows(queryset, request, columns):
+    headers_by_column = {
+        "project_id": ["Project ID"],
+        "survey": ["Survey ID", "Survey name", "Client", "Buyer ID"],
+        "market": ["Country code", "Country", "Language code", "Language"],
+        "completes": ["Sample size", "Completes", "Remaining", "Progress (%)"],
+        "cpi": ["CPI"],
+        "loi_ir": ["LOI (minutes)", "Incidence rate (%)", "Survey type"],
+        "entry_link": ["Entry link"],
+        "modified": ["Status", "Source created at", "Source modified at", "Record created at", "Record updated at"],
+    }
+    widths_by_column = {
+        "project_id": [19], "survey": [16, 32, 21, 15], "market": [13, 20, 14, 18],
+        "completes": [13, 12, 12, 14], "cpi": [11], "loi_ir": [15, 18, 14],
+        "entry_link": [48], "modified": [14, 22, 22, 22, 22],
+    }
+    export_columns = [column for column in columns if column in headers_by_column]
+    headers = [header for column in export_columns for header in headers_by_column[column]]
+    widths = [width for column in export_columns for width in widths_by_column[column]]
+
+    def rows():
+        serializer_context = {"request": request}
+        for survey in queryset.iterator(chunk_size=500):
+            data = SurveyListSerializer(survey, context=serializer_context).data
+            values_by_column = {
+                "project_id": [data.get("local_id")],
+                "survey": [
+                    data.get("source_id"), data.get("name"),
+                    data.get("client_name") or data.get("display_company_name") or data.get("company_name"),
+                    data.get("buyer_id"),
+                ],
+                "market": [data.get("country_code"), data.get("country"), data.get("language_code"), data.get("language")],
+                "completes": [data.get("sample_size"), data.get("completes"), data.get("remaining"), data.get("progress_percent")],
+                "cpi": [data.get("cpi")],
+                "loi_ir": [data.get("loi"), data.get("incidence_rate"), data.get("survey_type") or data.get("group_type")],
+                "entry_link": [data.get("start_link")],
+                "modified": [
+                    data.get("status"), data.get("source_created_at"), data.get("source_modified_at"),
+                    data.get("created_at"), data.get("updated_at"),
+                ],
+            }
+            yield [value for column in export_columns for value in values_by_column[column]]
+
+    return headers, rows(), widths
+
+
+def _attempt_excel_rows(queryset, requesting_user=None):
+    # These labels intentionally mirror the operational workbook requested by the client.
+    headers = [
+        "Project id", "Cleint survey id", "PID", "RID", "Status", "Status source",
+        "Client name", "Country", "Study type", "Actual LOI", "Current Client CPI",
+        "Client entry link CPI", "Vendor CPI", "Vendor name", "User name", "Device",
+        "OS", "Browser", "User agent", "Entry IP", "Exit IP", "Inisitate at",
+        "Presecreent at", "Redirect at", "entry date time", "Exit date time",
+    ]
+    widths = [
+        19, 18, 12, 14, 19, 18, 21, 18, 13, 12, 18, 20, 14, 20, 22, 13,
+        16, 18, 42, 16, 16, 22, 22, 22, 22, 22,
+    ]
+    hide_source_cpi = is_external_vendor_scope(requesting_user)
+    requesting_profile = getattr(requesting_user, "employee_profile", None) if requesting_user else None
+    requesting_role = getattr(requesting_profile, "role", None) if requesting_profile else None
+    visible_percent = (
+        requesting_role.cpi_visibility_percent
+        if requesting_profile and requesting_profile.account_type == "employee" and requesting_role and not requesting_user.is_superuser
+        else Decimal("100.00")
+    )
+
+    def visible_cpi(value):
+        if hide_source_cpi or value is None:
+            return None
+        return (Decimal(value) * visible_percent / Decimal("100.00")).quantize(Decimal("0.01"))
+
+    def rows():
+        for attempt in queryset.iterator(chunk_size=1000):
+            survey = attempt.survey
+            user = attempt.platform_user
+            supplier = attempt.vendor
+            client = attempt.client or survey.client
+            status_label = (
+                "Initiated"
+                if attempt.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}
+                else attempt.get_status_display()
+            )
+            yield [
+                survey.local_id,
+                survey.source_identifier,
+                attempt.user_id or (user.pk if user else ""),
+                attempt.rid,
+                status_label,
+                attempt.status_source,
+                client.name if client else survey.company_name,
+                survey.country or survey.country_code,
+                survey.survey_type or survey.group_type,
+                attempt.loi_seconds,
+                visible_cpi(survey.cpi),
+                visible_cpi(attempt.source_cpi_snapshot),
+                attempt.payable_cpi_snapshot,
+                (supplier.get_full_name() or supplier.username) if supplier else "",
+                (user.get_full_name() or user.username) if user else "Deleted user",
+                attempt.entry_device,
+                attempt.entry_os,
+                attempt.entry_browser,
+                attempt.entry_user_agent,
+                attempt.initiation_ip,
+                attempt.callback_ip,
+                _excel_datetime(attempt.initiated_at),
+                _excel_datetime(attempt.submitted_at),
+                _excel_datetime(attempt.redirected_at),
+                _excel_datetime(attempt.created_at),
+                _excel_datetime(attempt.callback_at or attempt.last_callback_at),
+            ]
+
+    return headers, rows(), widths
 
 
 def _survey_csv_rows(queryset, request, columns):

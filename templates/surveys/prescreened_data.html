@@ -1,4 +1,5 @@
 {% extends 'surveys/base.html' %}
+{% load static %}
 {% block title %}Prescreened Data · Exchange Hub{% endblock %}
 {% block content %}
 <section class="page-intro vault-intro">
@@ -7,6 +8,7 @@
     <h1>Prescreened Data</h1>
     <p>Explore every captured pre-screening submission and its exact question-and-answer snapshot.</p>
   </div>
+  {% if can_export_vault %}<a class="primary-button export-button" href="{% url 'prescreened-data-export' %}{% if page_query %}?{{ page_query }}{% endif %}"><span aria-hidden="true">↓</span> Export</a>{% endif %}
 </section>
 
 <section class="vault-overview" aria-label="Filtered pre-screening totals">
@@ -43,13 +45,30 @@
         {% if 'uid' in vault_columns %}<td><div class="vault-id"><strong>{{ submission.uid }}</strong><span>RID {{ submission.rid }}</span></div></td>{% endif %}
         {% if 'market' in vault_columns %}<td><div class="vault-market"><strong>{{ submission.country|default:submission.country_code|default:"Unknown country" }}</strong><span>{{ submission.country_code|default:"—" }} · {{ submission.language|default:submission.language_code|default:"Unknown language" }}</span></div></td>{% endif %}
         {% if 'profile' in vault_columns %}<td><div class="vault-profile-chips">{% if submission.respondent_age != None %}<span>Age <b>{{ submission.respondent_age }}</b></span>{% endif %}{% if submission.respondent_age_group %}<span>Group <b>{{ submission.respondent_age_group }}</b></span>{% endif %}{% if submission.respondent_gender %}<span>Gender <b>{{ submission.respondent_gender }}</b></span>{% endif %}{% if submission.respondent_ethnicity %}<span>Ethnicity <b>{{ submission.respondent_ethnicity }}</b></span>{% endif %}{% if submission.respondent_postal_code %}<span>Postal <b>{{ submission.respondent_postal_code }}</b></span>{% endif %}{% if not submission.respondent_age_group and not submission.respondent_gender and not submission.respondent_ethnicity and not submission.respondent_postal_code %}<em>No normalized profile values</em>{% endif %}</div></td>{% endif %}
-        {% if 'answers' in vault_columns %}<td><details class="vault-answers"><summary><span>View {{ submission.answer_count }} answer{{ submission.answer_count|pluralize }}</span><i>+</i></summary><div class="vault-answer-list">{% for answer in submission.question_answers.all %}<article><span>{{ answer.position|stringformat:"02d" }}</span><div><small>{{ answer.question_category|default:"Prescreener" }}{% if answer.question_type %} · {{ answer.question_type }}{% endif %}</small><strong>{{ answer.question_text|default:answer.question_key|default:"Question" }}</strong><p>{% if answer.answer_labels %}{{ answer.answer_labels|join:", " }}{% elif answer.answer_values %}{{ answer.answer_values|join:", " }}{% else %}No answer captured{% endif %}</p></div></article>{% empty %}<p class="vault-no-answers">No detailed answers were stored for this submission.</p>{% endfor %}</div></details></td>{% endif %}
+        {% if 'answers' in vault_columns %}<td><button class="vault-answer-trigger" type="button" data-vault-answer-target="vaultAnswers{{ forloop.counter }}"><span>View {{ submission.answer_count }} answer{{ submission.answer_count|pluralize }}</span><i>→</i></button></td>{% endif %}
         {% if 'captured' in vault_columns %}<td><time class="vault-time"><strong>{{ submission.submitted_at|date:"d M Y" }}</strong><span>{{ submission.submitted_at|date:"h:i:s A T" }}</span></time></td>{% endif %}
       </tr>{% empty %}<tr><td colspan="{{ vault_column_count }}"><div class="empty-state"><span>○</span><strong>No prescreened data found</strong><small>Change the filters or wait for a new pre-screener submission.</small></div></td></tr>{% endfor %}</tbody>
     </table>
   </div>
-  <div class="mobile-cards vault-mobile-cards">{% for submission in page_obj %}<article class="survey-card vault-mobile-card"><div class="card-top"><div><strong>{{ submission.uid }}</strong><span>RID {{ submission.rid }}</span></div><b>{{ submission.country_code|default:"—" }}</b></div><p>{{ submission.country|default:"Unknown country" }} · {{ submission.language|default:submission.language_code|default:"Unknown language" }}</p><div class="vault-profile-chips">{% if submission.respondent_age_group %}<span>Age <b>{{ submission.respondent_age_group }}</b></span>{% endif %}{% if submission.respondent_gender %}<span>Gender <b>{{ submission.respondent_gender }}</b></span>{% endif %}</div><details class="vault-answers"><summary><span>View {{ submission.answer_count }} answers</span><i>+</i></summary><div class="vault-answer-list">{% for answer in submission.question_answers.all %}<article><span>{{ answer.position|stringformat:"02d" }}</span><div><strong>{{ answer.question_text|default:answer.question_key }}</strong><p>{% if answer.answer_labels %}{{ answer.answer_labels|join:", " }}{% else %}{{ answer.answer_values|join:", " }}{% endif %}</p></div></article>{% endfor %}</div></details><time>{{ submission.submitted_at|date:"d M Y, h:i:s A T" }}</time></article>{% endfor %}</div>
+  <div class="mobile-cards vault-mobile-cards">{% for submission in page_obj %}<article class="survey-card vault-mobile-card"><div class="card-top"><div><strong>{{ submission.uid }}</strong><span>RID {{ submission.rid }}</span></div><b>{{ submission.country_code|default:"—" }}</b></div><p>{{ submission.country|default:"Unknown country" }} · {{ submission.language|default:submission.language_code|default:"Unknown language" }}</p><div class="vault-profile-chips">{% if submission.respondent_age_group %}<span>Age <b>{{ submission.respondent_age_group }}</b></span>{% endif %}{% if submission.respondent_gender %}<span>Gender <b>{{ submission.respondent_gender }}</b></span>{% endif %}</div><button class="vault-answer-trigger" type="button" data-vault-answer-target="vaultAnswers{{ forloop.counter }}"><span>View {{ submission.answer_count }} answers</span><i>→</i></button><time>{{ submission.submitted_at|date:"d M Y, h:i:s A T" }}</time></article>{% endfor %}</div>
   {% endif %}
   {% if page_obj %}<div class="panel-foot"><span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% if can_paginate_vault and page_obj.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Prescreened data pages">{% if page_obj.has_previous %}<a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1" aria-label="First page">«</a><a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" aria-label="Previous page">‹</a>{% endif %}<span>{{ page_obj.number }}</span>{% if page_obj.has_next %}<a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" aria-label="Next page">›</a><a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.paginator.num_pages }}" aria-label="Last page">»</a>{% endif %}</nav>{% endif %}</div>{% endif %}
 </section>
+{% if page_obj %}
+  {% for submission in page_obj %}<template id="vaultAnswers{{ forloop.counter }}">
+    <div class="vault-drawer-summary">
+      <div><span>Submission UID</span><strong>{{ submission.uid }}</strong></div>
+      <div><span>Respondent RID</span><strong>{{ submission.rid }}</strong></div>
+      <div><span>Market</span><strong>{{ submission.country|default:submission.country_code|default:"Unknown" }} · {{ submission.language|default:submission.language_code|default:"Unknown" }}</strong></div>
+      <div><span>Captured</span><strong>{{ submission.submitted_at|date:"d M Y, h:i:s A T" }}</strong></div>
+    </div>
+    <div class="vault-answer-list">{% for answer in submission.question_answers.all %}<article><span>{{ answer.position|stringformat:"02d" }}</span><div><small>{{ answer.question_category|default:"Prescreener" }}{% if answer.question_type %} · {{ answer.question_type }}{% endif %}</small><strong>{{ answer.question_text|default:answer.question_key|default:"Question" }}</strong><p>{% if answer.answer_labels %}{{ answer.answer_labels|join:", " }}{% elif answer.answer_values %}{{ answer.answer_values|join:", " }}{% else %}No answer captured{% endif %}</p>{% if answer.canonical_attribute %}<em>Reusable field · {{ answer.canonical_attribute }}</em>{% endif %}</div></article>{% empty %}<p class="vault-no-answers">No detailed answers were stored for this submission.</p>{% endfor %}</div>
+  </template>{% endfor %}
+  <div class="vault-answer-backdrop" id="vaultAnswerBackdrop" hidden></div>
+  <aside class="vault-answer-drawer" id="vaultAnswerDrawer" role="dialog" aria-modal="true" aria-labelledby="vaultAnswerTitle" hidden>
+    <header><div><p class="eyebrow">Pre-screening response</p><h2 id="vaultAnswerTitle">Questions &amp; answers</h2><span id="vaultAnswerCount"></span></div><button type="button" id="closeVaultAnswers" aria-label="Close answer details">×</button></header>
+    <div class="vault-answer-drawer-body" id="vaultAnswerDrawerBody"></div>
+  </aside>
+{% endif %}
 {% endblock %}
+{% block scripts %}<script src="{% static 'surveys/prescreened_data.js' %}?v=1" defer></script>{% endblock %}

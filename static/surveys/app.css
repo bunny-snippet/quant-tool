@@ -468,3 +468,32 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 @media(max-width:1050px){.vault-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-panel,.vault-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-panel .search-field,.vault-filters .search-field{grid-column:1/-1}}
 @media(max-width:900px){.vault-table-wrap{display:none}.vault-mobile-cards{display:grid}.vault-answer-list{width:100%}}
 @media(max-width:620px){.filter-panel,.vault-filters{grid-template-columns:1fr}.filter-panel .search-field,.vault-filters .search-field{grid-column:auto}.filter-panel .field{display:block!important}.vault-overview{grid-template-columns:1fr 1fr;gap:8px}.vault-overview article{min-height:84px;padding:12px}.vault-overview article>span{width:34px;height:34px;flex-basis:34px}.vault-overview strong{font-size:18px}.vault-overview em{display:none}.vault-apply,.vault-clear{width:100%}.vault-mobile-cards{padding:10px}.attempt-reason{-webkit-line-clamp:3}}
+
+/* 100% zoom report fit, stable summary order, and non-expanding vault details. */
+.page-studies .study-overview-compact{grid-template-columns:repeat(5,minmax(0,1fr))}
+.page-studies .study-overview-compact>.revenue,
+.page-studies .study-overview-compact>.study-summary-card{min-width:0}
+.page-studies .ir-metric{min-height:42px}.page-studies .ir-metric strong{font-size:20px}
+.page-prescreened-data .content,.page-studies .content,.page-termination-reasons .content{width:100%;min-width:0}
+@media(min-width:901px){.page-studies .studies-table{min-width:100%!important}.page-studies .studies-table-wrap{overflow-x:hidden!important;scrollbar-gutter:auto}}
+
+.vault-answer-trigger{width:max-content;max-width:100%;min-height:38px;border:1px solid #cfe5ec;border-radius:10px;padding:0 11px;background:#f1fbfd;color:#087f99;display:inline-flex;align-items:center;justify-content:space-between;gap:13px;font-size:10px;font-weight:800;cursor:pointer;transition:border-color .2s,background .2s,transform .2s}
+.vault-answer-trigger:hover{border-color:var(--cyan);background:var(--cyan-soft);transform:translateY(-1px)}.vault-answer-trigger i{font-style:normal;font-size:15px}
+.vault-answer-backdrop{position:fixed;z-index:80;inset:0;background:rgba(13,24,44,.3);backdrop-filter:blur(3px);opacity:0;transition:opacity .22s}.vault-answer-backdrop.open{opacity:1}
+.vault-answer-drawer{position:fixed;z-index:90;inset:0 0 0 auto;width:min(720px,94vw);display:flex;flex-direction:column;background:#f7f9fc;box-shadow:-24px 0 70px rgba(20,34,60,.22);transform:translateX(102%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}.vault-answer-drawer.open{transform:none}
+.vault-answer-drawer>header{min-height:92px;padding:18px 22px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px}.vault-answer-drawer h2{margin:0;color:var(--navy);font:800 23px "Manrope",sans-serif}.vault-answer-drawer header>div>span{display:block;margin-top:4px;color:var(--muted);font-size:10px}.vault-answer-drawer header button{width:40px;height:40px;border:0;border-radius:12px;background:#eef2f6;color:#53617a;font-size:24px;cursor:pointer}
+.vault-answer-drawer-body{flex:1;min-height:0;overflow-y:auto;padding:18px 20px 34px}.vault-drawer-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}.vault-drawer-summary>div{min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:#fff;display:flex;flex-direction:column}.vault-drawer-summary span{color:#8a97aa;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.55px}.vault-drawer-summary strong{margin-top:4px;color:var(--navy);font-size:11px;overflow-wrap:anywhere}
+.vault-answer-drawer .vault-answer-list{width:100%;margin:0;padding:0;border:0;background:transparent;box-shadow:none;gap:10px}.vault-answer-drawer .vault-answer-list article{padding:13px;border:1px solid var(--line);box-shadow:0 6px 20px rgba(27,44,72,.04)}.vault-answer-list article em{display:block;margin-top:7px;color:#8a96a8;font-size:8px;font-style:normal}.vault-drawer-open{overflow:hidden}
+
+.reason-table-outcome{display:flex;min-width:180px;max-width:300px;flex-direction:column;align-items:flex-start;gap:6px}.reason-table-outcome small{display:-webkit-box;max-width:100%;overflow:hidden;color:#77849a;font-size:9px;line-height:1.35;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}.reason-card-cause{margin:10px 0 0!important;padding:9px 10px;border-radius:9px;background:#f7f9fc;color:#65748b!important;font-size:10px!important;line-height:1.45}
+
+@media(max-width:1550px) and (min-width:901px){
+  .page-studies .study-overview-compact{gap:7px}
+  .page-studies .study-overview-compact>.revenue,.page-studies .study-overview-compact>.study-summary-card{padding-inline:9px}
+  .page-studies .study-summary-card header>span{width:29px;height:29px;flex-basis:29px}
+  .page-studies .study-summary-card header em{display:none!important}
+  .page-studies .summary-metrics{gap:4px}.page-studies .summary-metrics>span{padding-inline:5px}
+}
+@media(max-width:1180px) and (min-width:901px){.page-studies .study-overview-compact{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.page-studies .study-overview-compact{grid-template-columns:repeat(2,minmax(0,1fr))}.vault-answer-drawer{width:min(640px,100vw)}}
+@media(max-width:620px){.page-studies .study-overview-compact{grid-template-columns:1fr 1fr}.vault-drawer-summary{grid-template-columns:1fr}.vault-answer-drawer{width:100vw}.vault-answer-drawer-body{padding:13px}.vault-answer-drawer>header{padding-inline:16px}.vault-answer-trigger{width:100%;margin-top:11px}}
