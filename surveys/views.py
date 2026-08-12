@@ -2,6 +2,7 @@ import csv
 import ipaddress
 import json
 import logging
+from datetime import date
 from decimal import Decimal
 from urllib.parse import quote, urlencode
 
@@ -751,10 +752,14 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         lowered_type = question.question_type.lower()
         normalized_key = str(question.key or "").upper()
         normalized_text = display_text.lower()
-        is_age_question = (
-            normalized_key in {"AGE", "DOB", "BIRTHDAY", "RFG_BIRTHDAY"}
+        is_dob_question = (
+            normalized_key in {"DOB", "BIRTHDAY", "RFG_BIRTHDAY"}
             or "date of birth" in normalized_text
-            or "your age" in normalized_text
+            or "birthday" in normalized_text
+        )
+        is_age_question = (
+            normalized_key == "AGE"
+            or ("your age" in normalized_text and not is_dob_question)
         )
         options = []
         age_ranges = []
@@ -772,9 +777,7 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             if qualifying_options_only and allowed_values and value not in allowed_values:
                 continue
             options.append({"value": value, "label": label})
-        if is_age_question:
-            input_kind = "number"
-            display_text = "What is your age?"
+        if is_dob_question or is_age_question:
             for item in (question.raw_data or {}).get("targeting_age_ranges") or []:
                 if not isinstance(item, dict):
                     continue
@@ -785,11 +788,14 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                     })
                 except (KeyError, TypeError, ValueError):
                     continue
+        if is_dob_question:
+            input_kind = "date_mask"
+            display_text = "What is your date of birth?"
+        elif is_age_question:
+            input_kind = "number"
+            display_text = "What is your age?"
         elif "date" in lowered_type:
-            # Calendar controls are intentionally avoided across all providers.
-            # Non-age date datapoints remain plain text so their provider format
-            # is preserved instead of being silently converted into an age.
-            input_kind = "text"
+            input_kind = "date_mask"
         elif "multi" in lowered_type:
             input_kind = "checkbox"
         elif "single" in lowered_type and options:
@@ -800,6 +806,12 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             input_kind = "text"
         field_name = f"question_{question.pk}"
         selected_values = submitted_data.getlist(field_name) if submitted_data is not None else []
+        current_value = selected_values[0] if selected_values else ""
+        if input_kind == "date_mask" and current_value:
+            try:
+                current_value = date.fromisoformat(current_value).strftime("%d-%m-%Y")
+            except ValueError:
+                pass
         for option in options:
             option["selected"] = option["value"] in selected_values
         min_value = min((int(item["ageStart"]) for item in age_ranges), default=None)
@@ -813,19 +825,25 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             "display_text": display_text,
             "field_name": field_name,
             "input_kind": input_kind,
-            "type_label": "Age" if is_age_question else (question.question_type or "Question"),
+            "type_label": (
+                "Date of birth" if is_dob_question
+                else "Age" if is_age_question
+                else "Date" if input_kind == "date_mask"
+                else (question.question_type or "Question")
+            ),
             "options": options,
-            "current_value": selected_values[0] if selected_values else "",
+            "current_value": current_value,
             "min_value": min_value,
             "max_value": max_value,
             "input_label": "Age" if is_age_question else "Your answer",
             "placeholder": "Enter your age" if is_age_question else "Enter a number",
+            "is_dob_question": is_dob_question,
             "qualifying_options_only": bool(
                 qualifying_options_only and allowed_values
             ),
             "targeting_note": (
                 f"Qualifying age: {', '.join(age_range_labels)}"
-                if is_age_question and age_range_labels
+                if (is_age_question or is_dob_question) and age_range_labels
                 else "Only answers accepted by this survey are shown."
                 if qualifying_options_only and allowed_values else ""
             ),
@@ -840,7 +858,25 @@ def _collect_prescreener_answers(request, survey):
         survey, qualifying_options_only=False
     ):
         question = prepared["model"]
-        values = [value.strip() for value in request.POST.getlist(prepared["field_name"]) if value.strip()]
+        if prepared["input_kind"] == "date_mask":
+            raw_date = request.POST.get(prepared["field_name"], "").strip()
+            try:
+                parts = raw_date.split("-")
+                if len(parts) != 3:
+                    raise ValueError
+                if len(parts[0]) == 4:
+                    year, month, day = parts
+                else:
+                    day, month, year = parts
+                normalized_date = date(int(year), int(month), int(day)).isoformat()
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Enter a valid date in DD-MM-YYYY format for: {prepared['display_text']}"
+                )
+                continue
+            values = [normalized_date]
+        else:
+            values = [value.strip() for value in request.POST.getlist(prepared["field_name"]) if value.strip()]
         if not values:
             errors.append(f"Please answer: {prepared['display_text']}")
             continue

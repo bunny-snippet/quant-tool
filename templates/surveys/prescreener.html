@@ -38,6 +38,8 @@
         {% elif question.input_kind == "number" %}
           <label class="open-answer"><span>{{ question.input_label }}</span><input type="number" inputmode="numeric" name="{{ question.field_name }}" value="{{ question.current_value }}" {% if question.min_value != None %}min="{{ question.min_value }}"{% endif %} {% if question.max_value != None %}max="{{ question.max_value }}"{% endif %} placeholder="{{ question.placeholder }}" required></label>
           {% if question.min_value != None %}<small class="answer-hint">Accepted range: {{ question.min_value }}–{{ question.max_value }}</small>{% endif %}
+        {% elif question.input_kind == "date_mask" %}
+          <label class="open-answer date-mask-answer"><span>{% if question.is_dob_question %}Date of birth{% else %}Date{% endif %}</span><input type="text" inputmode="numeric" {% if question.is_dob_question %}autocomplete="bday"{% endif %} name="{{ question.field_name }}" value="{{ question.current_value }}" maxlength="10" placeholder="DD-MM-YYYY" aria-label="{{ question.display_text }}" data-date-mask required></label>
         {% else %}
           <label class="open-answer"><span>Your answer</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="Type your answer" required></label>
         {% endif %}
@@ -55,6 +57,19 @@
 </main>
 {% endblock %}
 {% block scripts %}
+<script>
+(() => {
+  const formatDate = (value) => {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+    const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)];
+    return parts.filter(Boolean).join('-');
+  };
+  document.querySelectorAll('[data-date-mask]').forEach((field) => {
+    field.value = formatDate(field.value);
+    field.addEventListener('input', () => { field.value = formatDate(field.value); });
+  });
+})();
+</script>
 {% if is_rfg %}
 <script src="https://hosting.researchforgood.com/js/df-fp.js"></script>
 <script>

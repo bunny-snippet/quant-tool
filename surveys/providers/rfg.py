@@ -199,7 +199,7 @@ class ResearchForGoodProvider(SurveyProvider):
                     if isinstance(item, dict) and str(item.get("choice", "")).isdigit()
                 ]
         questions = [
-            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your age?", question_type="number", category="Required profile", options=[], raw_data={"adapter_version": 3, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges, "respondent_input": "age"}),
+            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your date of birth?", question_type="date", category="Required profile", options=[], raw_data={"adapter_version": 3, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges, "respondent_input": "date_mask"}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-gender"), key="RFG_GENDER", text="What is your gender?", question_type="single", category="Required profile", options=[{"OptionId": "M", "OptionText": "Male"}, {"OptionId": "F", "OptionText": "Female"}], raw_data={"adapter_version": 2, "mandatory_link_parameter": "gender", "targeting_choices": gender_choices}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-postal"), key="RFG_POSTAL_CODE", text="What is your postal code?", question_type="text", category="Required profile", options=[], raw_data={"adapter_version": 2, "mandatory_link_parameter": "postalCode", "country": survey.country_code}),
         ]

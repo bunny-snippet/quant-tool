@@ -496,19 +496,31 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertContains(prescreener, "Male")
         self.assertNotContains(prescreener, "Female")
         self.assertContains(prescreener, "Only answers accepted by this survey are shown.")
-        self.assertContains(prescreener, "What is your age?")
+        self.assertContains(prescreener, "What is your date of birth?")
         self.assertContains(prescreener, "Qualifying age: 18–35")
-        self.assertContains(prescreener, 'type="number"', html=False)
-        self.assertContains(prescreener, 'min="18"', html=False)
-        self.assertContains(prescreener, 'max="35"', html=False)
+        self.assertContains(prescreener, 'placeholder="DD-MM-YYYY"', html=False)
+        self.assertContains(prescreener, f'name="question_{birthday.pk}"', html=False)
+        self.assertContains(prescreener, 'data-date-mask', html=False)
         self.assertNotContains(prescreener, 'type="date"', html=False)
         self.assertNotContains(prescreener, 'class="survey-context"', html=False)
         self.assertNotContains(prescreener, "About 18 min")
         self.assertNotContains(prescreener, "Continue to survey")
         self.assertContains(prescreener, ">Submit</button>", html=False)
+        invalid_date = self.client.post("/survey/start", {
+            "rid": attempt.rid,
+            f"question_{birthday.pk}": "31-02-2000",
+            f"question_{gender.pk}": "M",
+            f"question_{postal.pk}": "12345",
+            f"question_{income.pk}": "2",
+            "rfg_fingerprint": "0",
+        })
+        self.assertEqual(invalid_date.status_code, 200)
+        self.assertContains(invalid_date, "Enter a valid date")
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.INITIATED)
         response = self.client.post("/survey/start", {
             "rid": attempt.rid,
-            f"question_{birthday.pk}": "26",
+            f"question_{birthday.pk}": "01-01-2000",
             f"question_{gender.pk}": "M",
             f"question_{postal.pk}": "12345",
             f"question_{income.pk}": "1",
@@ -532,7 +544,7 @@ class ResearchForGoodIntegrationTests(TestCase):
         with patch.object(ResearchForGoodProvider, "duplicate_check", return_value=False):
             response = self.client.post("/survey/start", {
                 "rid": relaxed_attempt.rid,
-                f"question_{birthday.pk}": "26",
+                f"question_{birthday.pk}": "01-01-2000",
                 f"question_{gender.pk}": "M",
                 f"question_{postal.pk}": "12345",
                 f"question_{income.pk}": "1",
@@ -540,7 +552,9 @@ class ResearchForGoodIntegrationTests(TestCase):
             })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(urlsplit(response["Location"]).netloc, "survey.saysoforgood.com")
-        self.assertEqual(parse_qs(urlsplit(response["Location"]).query)["income"], ["1"])
+        outbound_query = parse_qs(urlsplit(response["Location"]).query)
+        self.assertEqual(outbound_query["income"], ["1"])
+        self.assertEqual(outbound_query["birthday"], ["2000-01-01"])
         relaxed_attempt.refresh_from_db()
         self.assertEqual(relaxed_attempt.status, SurveyAttempt.Status.REDIRECTED)
 
