@@ -1,30 +1,55 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
-{% block title %}Dashboard - Survey Workspace{% endblock %}
+{% block title %}Analytics Dashboard · Exchange Hub{% endblock %}
 {% block content %}
-<section class="page-intro dashboard-intro">
-  <div><p class="eyebrow">Operations command center</p><h1>Performance dashboard</h1><p>Live workspace intelligence across clients, teams and respondent journeys.</p></div>
-  <span class="dashboard-live"><i></i>Live analytics <small id="dashboardUpdatedAt">Connecting...</small></span>
+<section class="bi-command-bar">
+  <div class="bi-command-copy">
+    <p class="eyebrow">Analytics command center</p>
+    <h1>Performance intelligence</h1>
+    <p>Live, permission-scoped performance across respondent traffic, revenue, clients and teams.</p>
+  </div>
+  <div class="bi-command-actions">
+    <div class="bi-range-switch" role="group" aria-label="Analytics time range">
+      <button type="button" class="active" data-dashboard-range="24h" aria-pressed="true">24 hr</button>
+      <button type="button" data-dashboard-range="48h" aria-pressed="false">48 hr</button>
+      <button type="button" data-dashboard-range="72h" aria-pressed="false">72 hr</button>
+      <button type="button" data-dashboard-range="3m" aria-pressed="false">3 months</button>
+      <button type="button" data-dashboard-range="6m" aria-pressed="false">6 months</button>
+      <button type="button" data-dashboard-range="1y" aria-pressed="false">1 year</button>
+    </div>
+    <span class="dashboard-live"><i></i><span id="dashboardRangeCaption">Last 24 hours</span><small id="dashboardUpdatedAt">Connecting…</small></span>
+  </div>
 </section>
 
-{% if dashboard_cards %}<section class="dashboard-kpis" aria-label="Dashboard summary">
-  {% if 'hits' in dashboard_cards %}<article class="dashboard-kpi kpi-hits"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/></svg></span><div><small>Total hits</small><strong id="dashboardHits">—</strong><em>Respondent journeys</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'completes' in dashboard_cards %}<article class="dashboard-kpi kpi-completes"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><div><small>Completes</small><strong id="dashboardCompletes">—</strong><em>Successful outcomes</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'conversion_rate' in dashboard_cards %}<article class="dashboard-kpi kpi-conversion"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M7 17 17 7M7 8h.01M17 16h.01"/></svg></span><div><small>Conversion</small><strong id="dashboardConversion">—</strong><em>Completes per hit</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'incidence_rate' in dashboard_cards %}<article class="dashboard-kpi kpi-ir"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 15V9m4 6V6m4 9v-3"/></svg></span><div><small>Incidence rate</small><strong id="dashboardIR">—</strong><em>Survey completes vs terminates</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'active_users' in dashboard_cards %}<article class="dashboard-kpi kpi-users"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5M16 6a3 3 0 0 1 0 6m1 2c2.4.4 4 2.2 4 5"/></svg></span><div><small>Active users</small><strong id="dashboardActiveUsers">—</strong><em>Visible team members</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'average_loi_seconds' in dashboard_cards %}<article class="dashboard-kpi kpi-loi"><span class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg></span><div><small>Average LOI</small><strong id="dashboardAverageLoi">—</strong><em>Recorded duration</em></div><i class="kpi-glow"></i></article>{% endif %}
-  {% if 'revenue' in dashboard_cards %}<article class="dashboard-kpi kpi-revenue"><span class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M5 7h10a4 4 0 0 1 0 8H5M9 4v16m7-13 3-3m0 0v5m0-5h-5"/></svg></span><div><small>Total revenue</small><strong id="dashboardRevenue">—</strong><em>Hit-time CPI snapshots</em></div><span class="revenue-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><i class="kpi-glow"></i></article>{% endif %}
+{% if dashboard_cards %}<section class="bi-kpi-grid" aria-label="Selected-range performance summary">
+  {% if 'revenue' in dashboard_cards %}<article class="bi-kpi bi-kpi-featured"><span class="bi-kpi-icon"><svg viewBox="0 0 24 24"><path d="M4 18V8m5 10V5m5 13v-7m5 7V3"/></svg></span><div><small>Total revenue</small><strong id="dashboardRevenue">—</strong><em>Historical hit-time CPI</em></div><i class="bi-kpi-accent"></i></article>{% endif %}
+  {% if 'hits' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon cyan"><svg viewBox="0 0 24 24"><path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/></svg></span><div><small>Total entrants</small><strong id="dashboardHits">—</strong><em>Respondent journeys</em></div></article>{% endif %}
+  {% if 'completes' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><div><small>Completes</small><strong id="dashboardCompletes">—</strong><em>Successful outcomes</em></div></article>{% endif %}
+  {% if 'conversion_rate' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon blue"><svg viewBox="0 0 24 24"><path d="M7 17 17 7M7 8h.01M17 16h.01"/></svg></span><div><small>Conversion</small><strong id="dashboardConversion">—</strong><em>Completes per hit</em></div></article>{% endif %}
+  {% if 'average_cpi' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon amber"><svg viewBox="0 0 24 24"><path d="M5 7h10a4 4 0 0 1 0 8H5M9 4v16"/></svg></span><div><small>Average CPI</small><strong id="dashboardAverageCpi">—</strong><em>Completed entry CPI</em></div></article>{% endif %}
+  {% if 'rpc' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon purple"><svg viewBox="0 0 24 24"><path d="M4 17 9 12l3 3 7-9"/><path d="M15 6h4v4"/></svg></span><div><small>Revenue per hit</small><strong id="dashboardRpc">—</strong><em>RPC efficiency</em></div></article>{% endif %}
+  {% if 'average_loi_seconds' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg></span><div><small>Average LOI</small><strong id="dashboardAverageLoi">—</strong><em>Recorded duration</em></div></article>{% endif %}
+  {% if 'active_users' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon blue"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5M16 6a3 3 0 0 1 0 6m1 2c2.4.4 4 2.2 4 5"/></svg></span><div><small>Active users</small><strong id="dashboardActiveUsers">—</strong><em>Visible contributors</em></div></article>{% endif %}
+  {% if 'incidence_rate' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon purple"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 15V9m4 6V6m4 9v-3"/></svg></span><div><small>Incidence rate</small><strong id="dashboardIR">—</strong><em>Survey-qualified outcomes</em></div></article>{% endif %}
 </section>{% endif %}
 
-{% if dashboard_charts %}<section class="dashboard-grid">
-  {% if 'performance' in dashboard_charts %}<article class="dashboard-widget performance-widget"><header><div><span class="widget-kicker">Performance pulse</span><h2>Hits vs completes</h2><p>Last five days or six-month view</p></div><div class="chart-toggle" role="group" aria-label="Performance period"><button type="button" class="active" data-dashboard-period="daily">5 days</button><button type="button" data-dashboard-period="monthly">Monthly</button></div></header><div class="performance-legend"><span><i class="hits"></i>Hits</span><span><i class="completes"></i>Completes</span></div><div class="dashboard-chart-stage" id="performanceChart"><div class="dashboard-skeleton chart-skeleton"></div></div></article>{% endif %}
-  {% if 'client_share' in dashboard_charts %}<article class="dashboard-widget client-share-widget"><header><div><span class="widget-kicker">Client portfolio</span><h2>Complete contribution</h2><p>Share of overall completes</p></div></header><div class="client-share-body" id="clientShareChart"><div class="dashboard-skeleton donut-skeleton"></div></div></article>{% endif %}
-  {% if 'status' in dashboard_charts %}<article class="dashboard-widget compact-widget status-widget"><header><div><span class="widget-kicker">Journey outcomes</span><h2>Status mix</h2><p>Current result split</p></div></header><div class="horizontal-metrics" id="statusBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
-  {% if 'device' in dashboard_charts %}<article class="dashboard-widget compact-widget device-widget"><header><div><span class="widget-kicker">Audience devices</span><h2>Completed devices</h2><p>Where completes happened</p></div></header><div class="device-dashboard-grid" id="deviceBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
-  {% if 'top_users' in dashboard_charts %}<article class="dashboard-widget compact-widget performers-widget"><header><div><span class="widget-kicker">Team leaderboard</span><h2>Top performers</h2><p>Ranked by completes</p></div></header><div class="performer-list" id="dashboardTopUsers"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
+{% if dashboard_charts %}<section class="bi-analytics-grid">
+  {% if 'performance' in dashboard_charts %}<article class="bi-visual bi-volume-panel">
+    <header><div><span class="bi-visual-kicker">Traffic &amp; efficiency</span><h2>Entrants, completes and conversion</h2><p data-dashboard-bucket-label>2-hour intervals</p></div><div class="bi-legend"><span><i class="legend-hits"></i>Entrants</span><span><i class="legend-completes"></i>Completes</span><span><i class="legend-rate"></i>Conversion</span></div></header>
+    <div class="bi-chart-stage" id="volumeChart"><div class="dashboard-skeleton chart-skeleton"></div></div>
+  </article>{% endif %}
+
+  {% if 'performance' in dashboard_charts %}{% if 'revenue' in dashboard_cards or 'average_cpi' in dashboard_cards or 'rpc' in dashboard_cards %}<article class="bi-visual bi-finance-panel">
+    <header><div><span class="bi-visual-kicker">Commercial intelligence</span><h2>Revenue and RPC movement</h2><p data-dashboard-bucket-label>2-hour intervals</p></div><div class="bi-legend"><span id="financeBarLegend"><i class="legend-revenue"></i>Revenue</span><span id="financeLineLegend"><i class="legend-rpc"></i>RPC</span></div></header>
+    <div class="bi-chart-stage" id="financeChart"><div class="dashboard-skeleton chart-skeleton"></div></div>
+  </article>{% endif %}{% endif %}
+
+  {% if 'client_share' in dashboard_charts %}<article class="bi-visual bi-client-panel"><header><div><span class="bi-visual-kicker">Client portfolio</span><h2>Complete contribution</h2><p>Share of selected-range completes</p></div></header><div class="bi-client-body" id="clientShareChart"><div class="dashboard-skeleton donut-skeleton"></div></div></article>{% endif %}
+  {% if 'status' in dashboard_charts %}<article class="bi-visual bi-status-panel"><header><div><span class="bi-visual-kicker">Journey outcomes</span><h2>Status distribution</h2><p>Current result mix</p></div></header><div class="bi-status-list" id="statusBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
+  {% if 'device' in dashboard_charts %}<article class="bi-visual bi-device-panel"><header><div><span class="bi-visual-kicker">Audience devices</span><h2>Completed devices</h2><p>Where completes happened</p></div></header><div class="bi-device-body" id="deviceBreakdown"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
+  {% if 'top_users' in dashboard_charts %}<article class="bi-visual bi-performer-panel"><header><div><span class="bi-visual-kicker">Team performance</span><h2>Top performers</h2><p>Permission-scoped ranking by completes</p></div><span class="bi-ranking-note">Completes · Conversion</span></header><div class="bi-performer-list" id="dashboardTopUsers"><div class="dashboard-skeleton list-skeleton"></div></div></article>{% endif %}
 </section>{% endif %}
 
 {% if not dashboard_cards and not dashboard_charts %}<section class="dashboard-no-access"><span>◎</span><h2>No dashboard widgets assigned</h2><p>An administrator can enable cards and charts from Access Control.</p></section>{% endif %}
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=2" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=3" defer></script>{% endblock %}

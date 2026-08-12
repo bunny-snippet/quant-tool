@@ -343,19 +343,30 @@ class DashboardSummarySerializer(serializers.Serializer):
     active_users = serializers.IntegerField(min_value=0, allow_null=True)
     average_loi_seconds = serializers.IntegerField(min_value=0, allow_null=True)
     revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    average_cpi = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    rpc = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     revenue_currency = serializers.CharField(allow_null=True)
+
+
+class DashboardRangeSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    bucket_label = serializers.CharField()
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
 
 
 class DashboardPerformancePointSerializer(serializers.Serializer):
     key = serializers.CharField()
     label = serializers.CharField()
+    short_label = serializers.CharField()
     hits = serializers.IntegerField(min_value=0)
     completes = serializers.IntegerField(min_value=0)
-
-
-class DashboardPerformanceSerializer(serializers.Serializer):
-    daily = DashboardPerformancePointSerializer(many=True)
-    monthly = DashboardPerformancePointSerializer(many=True)
+    conversion_rate = serializers.FloatField(min_value=0)
+    incidence_rate = serializers.FloatField(min_value=0)
+    revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    average_cpi = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    rpc = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class DashboardClientShareSerializer(serializers.Serializer):
@@ -399,8 +410,9 @@ class DashboardRecentActivitySerializer(serializers.Serializer):
 
 
 class DashboardResponseSerializer(serializers.Serializer):
+    range = DashboardRangeSerializer()
     summary = DashboardSummarySerializer()
-    performance = DashboardPerformanceSerializer(allow_null=True)
+    performance = DashboardPerformancePointSerializer(many=True, allow_null=True)
     client_distribution = DashboardClientShareSerializer(many=True, allow_null=True)
     status_breakdown = DashboardStatusBreakdownSerializer(allow_null=True)
     device_breakdown = DashboardDeviceBreakdownSerializer(allow_null=True)

@@ -534,6 +534,20 @@ paths:
         hit-time CPI revenue, client completion share, performance, outcome/device
         breakdowns and top users.
       summary: Get permission-scoped dashboard analytics
+      parameters:
+      - in: query
+        name: range
+        schema:
+          type: string
+          enum:
+          - 1y
+          - 24h
+          - 3m
+          - 48h
+          - 6m
+          - 72h
+        description: 'Global analytics window: 24h, 48h, 72h, 3m, 6m or 1y. Defaults
+          to 24h.'
       tags:
       - Dashboard
       security:
@@ -4054,20 +4068,6 @@ components:
       - mobile
       - tablet
       - unclassified
-    DashboardPerformance:
-      type: object
-      properties:
-        daily:
-          type: array
-          items:
-            $ref: '#/components/schemas/DashboardPerformancePoint'
-        monthly:
-          type: array
-          items:
-            $ref: '#/components/schemas/DashboardPerformancePoint'
-      required:
-      - daily
-      - monthly
     DashboardPerformancePoint:
       type: object
       properties:
@@ -4075,25 +4075,80 @@ components:
           type: string
         label:
           type: string
+        short_label:
+          type: string
         hits:
           type: integer
           minimum: 0
         completes:
           type: integer
           minimum: 0
+        conversion_rate:
+          type: number
+          format: double
+          minimum: 0
+        incidence_rate:
+          type: number
+          format: double
+          minimum: 0
+        revenue:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        average_cpi:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        rpc:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
       required:
+      - average_cpi
       - completes
+      - conversion_rate
       - hits
+      - incidence_rate
       - key
       - label
+      - revenue
+      - rpc
+      - short_label
+    DashboardRange:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        bucket_label:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+      required:
+      - bucket_label
+      - end
+      - key
+      - label
+      - start
     DashboardResponse:
       type: object
       properties:
+        range:
+          $ref: '#/components/schemas/DashboardRange'
         summary:
           $ref: '#/components/schemas/DashboardSummary'
         performance:
-          allOf:
-          - $ref: '#/components/schemas/DashboardPerformance'
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardPerformancePoint'
           nullable: true
         client_distribution:
           type: array
@@ -4121,6 +4176,7 @@ components:
       - device_breakdown
       - generated_at
       - performance
+      - range
       - status_breakdown
       - summary
       - top_users
@@ -4182,11 +4238,22 @@ components:
           format: decimal
           pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
           nullable: true
+        average_cpi:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
+        rpc:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          nullable: true
         revenue_currency:
           type: string
           nullable: true
       required:
       - active_users
+      - average_cpi
       - average_loi_seconds
       - completes
       - conversion_rate
@@ -4194,6 +4261,7 @@ components:
       - incidence_rate
       - revenue
       - revenue_currency
+      - rpc
     DashboardTopUser:
       type: object
       properties:

@@ -42,7 +42,7 @@ from vendors.services import (
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 
 from .filters import SurveyAttemptFilter, SurveyFilter
-from .dashboard import build_dashboard_payload, dashboard_attempts
+from .dashboard import build_dashboard_payload, dashboard_attempts, dashboard_range_window
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncRun
@@ -136,6 +136,7 @@ DASHBOARD_CARD_PERMISSIONS = {
     "hits": "dashboard.card.hits", "completes": "dashboard.card.completes",
     "conversion_rate": "dashboard.card.conversion", "active_users": "dashboard.card.active_users",
     "average_loi_seconds": "dashboard.card.average_loi", "revenue": "dashboard.card.revenue",
+    "average_cpi": "dashboard.card.average_cpi", "rpc": "dashboard.card.rpc",
     "incidence_rate": "dashboard.card.ir",
 }
 
@@ -1612,12 +1613,19 @@ class DashboardAPIView(APIView):
             "Returns permission-scoped KPI totals, incidence rate, immutable hit-time CPI revenue, "
             "client completion share, performance, outcome/device breakdowns and top users."
         ),
-        parameters=[],
+        parameters=[
+            OpenApiParameter(
+                "range", OpenApiTypes.STR,
+                description="Global analytics window: 24h, 48h, 72h, 3m, 6m or 1y. Defaults to 24h.",
+                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+            ),
+        ],
         responses={200: DashboardResponseSerializer},
     )
     def get(self, request):
         try:
-            queryset = dashboard_attempts(request.user, {})
+            range_window = dashboard_range_window(request.query_params.get("range", "24h"))
+            queryset = dashboard_attempts(request.user, {}, range_window)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         codes = effective_permission_codes(request.user)
@@ -1626,6 +1634,7 @@ class DashboardAPIView(APIView):
             request.user,
             _component_access(codes, DASHBOARD_CARD_PERMISSIONS),
             _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
+            range_window,
         ))
 
 

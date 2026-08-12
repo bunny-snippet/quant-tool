@@ -1,14 +1,15 @@
 (() => {
   const byId = (id) => document.getElementById(id);
-  const filterPanel = document.querySelector('.dashboard-filters');
-  const state = { controller: null, timer: null, period: 'daily', performance: null };
-  const palette = ['#13b9da', '#3457d5', '#27b780', '#efad35', '#9a6de3', '#ee6572', '#55718f', '#22a5a1'];
-  const icon = {
-    desktop: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>',
-    mobile: '<svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>',
-    tablet: '<svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".7"/></svg>',
-    unknown: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 0 1 4.6 1c0 1.8-2.3 2-2.3 4m0 3h.01"/></svg>',
+  const ranges = new Set(['24h', '48h', '72h', '3m', '6m', '1y']);
+  const state = {
+    range: ranges.has(new URLSearchParams(location.search).get('range'))
+      ? new URLSearchParams(location.search).get('range') : '24h',
+    controller: null,
+    data: null,
+    resizeTimer: null,
   };
+  const colors = ['#15b8d8', '#4967d8', '#29ad7b', '#e6a43c', '#9165d5', '#e56472', '#57748f', '#1f9d9a'];
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function escapeHtml(value) {
     const node = document.createElement('div');
@@ -16,23 +17,18 @@
     return node.innerHTML;
   }
 
-  const number = (value) => Number(value || 0).toLocaleString('en-IN');
-  const selectedValues = (container) => [...container.querySelectorAll('input:checked')].map((input) => input.value);
+  const number = (value) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  const moneyNumber = (value) => Number(value || 0);
 
-  function animateNumber(element, target, formatter = number) {
-    if (!element) return;
-    const finalValue = Number(target || 0);
-    const duration = 720;
-    const startAt = performance.now();
-    const startValue = Number(element.dataset.value || 0);
-    element.dataset.value = String(finalValue);
-    function frame(now) {
-      const progress = Math.min(1, (now - startAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      element.textContent = formatter(startValue + (finalValue - startValue) * eased);
-      if (progress < 1) requestAnimationFrame(frame);
+  function formatCurrency(value, currency, compact = false) {
+    try {
+      return new Intl.NumberFormat('en-IN', {
+        style: 'currency', currency: currency || 'USD',
+        notation: compact ? 'compact' : 'standard', maximumFractionDigits: 2,
+      }).format(Number(value || 0));
+    } catch (_error) {
+      return `${currency || 'USD'} ${Number(value || 0).toFixed(2)}`;
     }
-    requestAnimationFrame(frame);
   }
 
   function formatLoi(seconds) {
@@ -42,160 +38,144 @@
     return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
   }
 
-  function formatCurrency(value, currency) {
-    try {
-      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 2 }).format(value);
-    } catch (_error) {
-      return `${currency || 'USD'} ${Number(value || 0).toFixed(2)}`;
-    }
-  }
-
-  function updateMultiLabel(container) {
-    const checked = [...container.querySelectorAll('input:checked')];
-    const type = container.dataset.dashboardFilter;
-    const fallback = {
-      client: 'All clients', country: 'All countries', branch: 'All branches',
-      sub_branch: 'All sub-branches', shift: 'All shifts', user: 'All users',
-    }[type] || 'All';
-    const label = checked.length === 0 ? fallback : checked.length === 1
-      ? checked[0].closest('label').innerText.trim() : `${checked.length} selected`;
-    container.querySelector('.multi-trigger span').textContent = label;
-    container.querySelector('.multi-trigger').classList.toggle('has-value', checked.length > 0);
-  }
-
-  function applyMenuVisibility(container) {
-    const needle = container.querySelector('[data-multi-search]')?.value.trim().toLocaleLowerCase() || '';
-    let visible = 0;
-    container.querySelectorAll('.multi-options label').forEach((option) => {
-      const show = option.dataset.parentHidden !== 'true' && (!needle || option.innerText.toLocaleLowerCase().includes(needle));
-      option.hidden = !show;
-      if (show) visible += 1;
-    });
-    const empty = container.querySelector('.multi-no-results');
-    if (empty) empty.hidden = visible > 0 || Boolean(container.querySelector('.filter-empty'));
-  }
-
-  function closeMenus(except = null) {
-    document.querySelectorAll('.dashboard-filters .multi-select.open').forEach((container) => {
-      if (container === except) return;
-      container.classList.remove('open');
-      container.querySelector('.multi-menu').hidden = true;
-      container.querySelector('.multi-trigger').setAttribute('aria-expanded', 'false');
-    });
-  }
-
-  function setParentVisibility(container, predicate) {
-    if (!container) return;
-    container.querySelectorAll('.multi-options label').forEach((option) => {
-      const show = predicate(option);
-      option.dataset.parentHidden = String(!show);
-      const input = option.querySelector('input');
-      if (!show && input.checked) input.checked = false;
-    });
-    applyMenuVisibility(container); updateMultiLabel(container);
-  }
-
-  function filterContainer(type) { return document.querySelector(`[data-dashboard-filter="${type}"]`); }
-
-  function updateHierarchy() {
-    const branches = new Set(filterContainer('branch') ? selectedValues(filterContainer('branch')) : []);
-    setParentVisibility(filterContainer('sub_branch'), (option) => !branches.size || branches.has(option.dataset.branchValue || ''));
-    const subBranches = new Set(filterContainer('sub_branch') ? selectedValues(filterContainer('sub_branch')) : []);
-    setParentVisibility(filterContainer('shift'), (option) => (
-      (!branches.size || branches.has(option.dataset.branchValue || ''))
-      && (!subBranches.size || subBranches.has(option.dataset.subBranchValue || ''))
-    ));
-    const shifts = new Set(filterContainer('shift') ? selectedValues(filterContainer('shift')) : []);
-    setParentVisibility(filterContainer('user'), (option) => (
-      (!branches.size || branches.has(option.dataset.branchValue || ''))
-      && (!subBranches.size || subBranches.has(option.dataset.subBranchValue || ''))
-      && (!shifts.size || shifts.has(option.dataset.shiftValue || ''))
-    ));
-  }
-
-  document.querySelectorAll('.dashboard-filters .multi-select').forEach((container) => {
-    const trigger = container.querySelector('.multi-trigger'); const menu = container.querySelector('.multi-menu');
-    trigger.addEventListener('click', () => {
-      const open = !container.classList.contains('open'); closeMenus(container);
-      container.classList.toggle('open', open); menu.hidden = !open; trigger.setAttribute('aria-expanded', String(open));
-      if (open) setTimeout(() => menu.querySelector('[data-multi-search]')?.focus(), 0);
-    });
-    menu.querySelector('[data-multi-search]')?.addEventListener('input', () => applyMenuVisibility(container));
-    menu.addEventListener('change', () => {
-      updateMultiLabel(container);
-      if (['branch', 'sub_branch', 'shift'].includes(container.dataset.dashboardFilter)) updateHierarchy();
-      scheduleLoad();
-    });
-    updateMultiLabel(container); applyMenuVisibility(container);
-  });
-  updateHierarchy();
-
-  function queryParams() {
-    const params = new URLSearchParams();
-    document.querySelectorAll('[data-dashboard-filter]').forEach((container) => {
-      const values = selectedValues(container);
-      if (values.length) params.set(container.dataset.dashboardFilter, values.join(','));
-    });
-    if (byId('dashboardFrom')?.value) params.set('initiated_from', byId('dashboardFrom').value);
-    if (byId('dashboardTo')?.value) params.set('initiated_to', byId('dashboardTo').value);
-    return params;
+  function animateNumber(element, target, formatter = number) {
+    if (!element || target == null) return;
+    const finalValue = Number(target || 0);
+    const startValue = Number(element.dataset.value || 0);
+    element.dataset.value = String(finalValue);
+    if (reducedMotion) { element.textContent = formatter(finalValue); return; }
+    const started = performance.now();
+    const frame = (now) => {
+      const progress = Math.min(1, (now - started) / 760);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      element.textContent = formatter(startValue + (finalValue - startValue) * eased);
+      if (progress < 1) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
   }
 
   function updateSummary(summary) {
+    const currency = summary.revenue_currency || 'USD';
+    animateNumber(byId('dashboardRevenue'), summary.revenue, (value) => formatCurrency(value, currency));
     animateNumber(byId('dashboardHits'), summary.hits);
     animateNumber(byId('dashboardCompletes'), summary.completes);
     animateNumber(byId('dashboardConversion'), summary.conversion_rate, (value) => `${value.toFixed(1)}%`);
-    animateNumber(byId('dashboardIR'), summary.incidence_rate, (value) => `${value.toFixed(1)}%`);
+    animateNumber(byId('dashboardAverageCpi'), summary.average_cpi, (value) => formatCurrency(value, currency));
+    animateNumber(byId('dashboardRpc'), summary.rpc, (value) => formatCurrency(value, currency));
+    animateNumber(byId('dashboardAverageLoi'), summary.average_loi_seconds, formatLoi);
     animateNumber(byId('dashboardActiveUsers'), summary.active_users);
-    animateNumber(byId('dashboardAverageLoi'), summary.average_loi_seconds, (value) => formatLoi(value));
-    animateNumber(byId('dashboardRevenue'), summary.revenue, (value) => formatCurrency(value, summary.revenue_currency));
-    document.querySelectorAll('.dashboard-kpi').forEach((card, index) => {
-      card.classList.remove('metric-ready');
-      setTimeout(() => card.classList.add('metric-ready'), index * 70);
+    animateNumber(byId('dashboardIR'), summary.incidence_rate, (value) => `${value.toFixed(1)}%`);
+    document.querySelectorAll('.bi-kpi').forEach((card, index) => {
+      card.classList.remove('bi-kpi-ready');
+      setTimeout(() => card.classList.add('bi-kpi-ready'), reducedMotion ? 0 : index * 45);
     });
   }
 
-  function linePath(points) {
-    if (!points.length) return '';
-    return points.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+  function svgLine(points) {
+    return points.map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
   }
 
-  function renderPerformance() {
-    const host = byId('performanceChart'); if (!host || !state.performance) return;
-    const rows = state.performance[state.period] || [];
-    if (!rows.length) { host.innerHTML = '<div class="dashboard-empty">No performance data available.</div>'; return; }
-    const width = 720; const height = 250; const left = 42; const right = 18; const top = 18; const bottom = 42;
-    const chartWidth = width - left - right; const chartHeight = height - top - bottom;
-    const maximum = Math.max(1, ...rows.flatMap((row) => [Number(row.hits), Number(row.completes)]));
-    const x = (index) => left + (rows.length === 1 ? chartWidth / 2 : index * chartWidth / (rows.length - 1));
-    const y = (value) => top + chartHeight - (Number(value) / maximum * chartHeight);
-    const hitPoints = rows.map((row, index) => ({ x: x(index), y: y(row.hits), value: row.hits }));
-    const completePoints = rows.map((row, index) => ({ x: x(index), y: y(row.completes), value: row.completes }));
-    const grid = [0, .25, .5, .75, 1].map((ratio) => {
-      const gridY = top + chartHeight - ratio * chartHeight;
-      return `<line x1="${left}" y1="${gridY}" x2="${width - right}" y2="${gridY}"/><text x="${left - 10}" y="${gridY + 4}" text-anchor="end">${number(maximum * ratio)}</text>`;
+  function axisGrid({ width, height, left, right, top, bottom, maximum, formatter = number }) {
+    const plotHeight = height - top - bottom;
+    return [0, .25, .5, .75, 1].map((ratio) => {
+      const y = top + plotHeight - ratio * plotHeight;
+      return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"/><text x="${left - 9}" y="${y + 4}" text-anchor="end">${escapeHtml(formatter(maximum * ratio))}</text>`;
     }).join('');
-    const labels = rows.map((row, index) => `<text class="x-label" x="${x(index)}" y="${height - 14}" text-anchor="middle">${escapeHtml(row.label)}</text>`).join('');
-    const dots = (points, rowsForDots, className) => points.map((point, index) => `<g class="chart-point ${className}" style="--delay:${index * 70}ms"><circle cx="${point.x}" cy="${point.y}" r="4"><title>${escapeHtml(rowsForDots[index].label)}: ${number(point.value)}</title></circle><text x="${point.x}" y="${point.y - 10}" text-anchor="middle">${number(point.value)}</text></g>`).join('');
-    host.innerHTML = `<svg class="performance-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Hits and completes performance graph"><g class="chart-grid">${grid}</g>${labels}<path class="chart-line hits-line" d="${linePath(hitPoints)}"/><path class="chart-line completes-line" d="${linePath(completePoints)}"/>${dots(hitPoints, rows, 'hit-point')}${dots(completePoints, rows, 'complete-point')}</svg>`;
-    requestAnimationFrame(() => host.querySelectorAll('.chart-line').forEach((path) => {
-      const length = path.getTotalLength(); path.style.strokeDasharray = length; path.style.strokeDashoffset = length;
-      requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
-    }));
+  }
+
+  function labelStride(rows, host) {
+    const target = host.clientWidth < 520 ? 4 : host.clientWidth < 760 ? 6 : 8;
+    return Math.max(1, Math.ceil(rows.length / target));
+  }
+
+  function animateChart(host) {
+    if (reducedMotion) return;
+    requestAnimationFrame(() => {
+      host.querySelectorAll('.bi-chart-line').forEach((path) => {
+        const length = path.getTotalLength();
+        path.style.strokeDasharray = length;
+        path.style.strokeDashoffset = length;
+        requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
+      });
+    });
+  }
+
+  function renderVolume(rows) {
+    const host = byId('volumeChart'); if (!host) return;
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No traffic data is available for this range.</div>'; return; }
+    const width = 860; const height = 300; const left = 52; const right = 48; const top = 24; const bottom = 42;
+    const plotWidth = width - left - right; const plotHeight = height - top - bottom;
+    const maximum = Math.max(1, ...rows.flatMap((row) => [Number(row.hits), Number(row.completes)]));
+    const group = plotWidth / rows.length; const barWidth = Math.max(4, Math.min(18, group * .28));
+    const x = (index) => left + group * index + group / 2;
+    const y = (value) => top + plotHeight - Number(value || 0) / maximum * plotHeight;
+    const rateY = (value) => top + plotHeight - Math.min(100, Number(value || 0)) / 100 * plotHeight;
+    const stride = labelStride(rows, host);
+    const bars = rows.map((row, index) => {
+      const hitY = y(row.hits); const completeY = y(row.completes);
+      return `<g class="bi-bar-group" style="--delay:${index * 40}ms"><rect class="bi-volume-hit" x="${x(index) - barWidth - 1}" y="${hitY}" width="${barWidth}" height="${top + plotHeight - hitY}"><title>${escapeHtml(row.label)} · Entrants ${number(row.hits)}</title></rect><rect class="bi-volume-complete" x="${x(index) + 1}" y="${completeY}" width="${barWidth}" height="${top + plotHeight - completeY}"><title>${escapeHtml(row.label)} · Completes ${number(row.completes)}</title></rect></g>`;
+    }).join('');
+    const ratePoints = rows.map((row, index) => ({ x: x(index), y: rateY(row.conversion_rate), value: row.conversion_rate }));
+    const rateDots = ratePoints.map((point, index) => `<circle class="bi-rate-dot" cx="${point.x}" cy="${point.y}" r="3.5"><title>${escapeHtml(rows[index].label)} · Conversion ${Number(point.value).toFixed(1)}%</title></circle>`).join('');
+    const labels = rows.map((row, index) => index % stride === 0 || index === rows.length - 1
+      ? `<text class="bi-x-label" x="${x(index)}" y="${height - 15}" text-anchor="middle">${escapeHtml(row.short_label)}</text>` : '').join('');
+    const rightAxis = [0, 50, 100].map((value) => `<text class="bi-right-axis" x="${width - right + 9}" y="${rateY(value) + 4}">${value}%</text>`).join('');
+    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Entrants, completes and conversion over ${escapeHtml(state.data.range.label)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum })}</g>${rightAxis}${bars}<path class="bi-chart-line bi-conversion-line" d="${svgLine(ratePoints)}"/>${rateDots}${labels}</svg>`;
+    animateChart(host);
+  }
+
+  function renderFinance(rows, currency) {
+    const host = byId('financeChart'); if (!host) return;
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No financial data is available for this range.</div>'; return; }
+    const hasRevenue = rows.some((row) => row.revenue != null);
+    const lineKey = rows.some((row) => row.rpc != null) ? 'rpc' : 'average_cpi';
+    const lineLabel = lineKey === 'rpc' ? 'RPC' : 'Average CPI';
+    const hasLine = rows.some((row) => row[lineKey] != null);
+    byId('financeBarLegend')?.toggleAttribute('hidden', !hasRevenue);
+    const lineLegend = byId('financeLineLegend');
+    if (lineLegend) {
+      lineLegend.hidden = !hasLine;
+      lineLegend.lastChild.textContent = lineLabel;
+    }
+    const width = 620; const height = 300; const left = 58; const right = 48; const top = 24; const bottom = 42;
+    const plotWidth = width - left - right; const plotHeight = height - top - bottom;
+    const maxRevenue = Math.max(1, ...rows.map((row) => Number(row.revenue || 0)));
+    const maxLine = Math.max(1, ...rows.map((row) => Number(row[lineKey] || 0)));
+    const group = plotWidth / rows.length; const barWidth = Math.max(5, Math.min(25, group * .5));
+    const x = (index) => left + group * index + group / 2;
+    const revenueY = (value) => top + plotHeight - Number(value || 0) / maxRevenue * plotHeight;
+    const lineY = (value) => top + plotHeight - Number(value || 0) / maxLine * plotHeight;
+    const stride = labelStride(rows, host);
+    const bars = hasRevenue ? rows.map((row, index) => {
+      const y = revenueY(row.revenue);
+      return `<rect class="bi-finance-bar" style="--delay:${index * 40}ms" x="${x(index) - barWidth / 2}" y="${y}" width="${barWidth}" height="${top + plotHeight - y}"><title>${escapeHtml(row.label)} · Revenue ${escapeHtml(formatCurrency(row.revenue, currency))}</title></rect>`;
+    }).join('') : '';
+    const linePoints = hasLine
+      ? rows.map((row, index) => ({ x: x(index), y: lineY(row[lineKey]), value: row[lineKey] }))
+      : [];
+    const dots = linePoints.map((point, index) => `<circle class="bi-rpc-dot" cx="${point.x}" cy="${point.y}" r="3.5"><title>${escapeHtml(rows[index].label)} · ${lineLabel} ${escapeHtml(formatCurrency(point.value, currency))}</title></circle>`).join('');
+    const labels = rows.map((row, index) => index % stride === 0 || index === rows.length - 1
+      ? `<text class="bi-x-label" x="${x(index)}" y="${height - 15}" text-anchor="middle">${escapeHtml(row.short_label)}</text>` : '').join('');
+    const rightAxis = hasLine
+      ? [0, .5, 1].map((ratio) => `<text class="bi-right-axis" x="${width - right + 8}" y="${lineY(maxLine * ratio) + 4}">${escapeHtml(formatCurrency(maxLine * ratio, currency, true))}</text>`).join('')
+      : '';
+    const line = hasLine ? `<path class="bi-chart-line bi-rpc-line" d="${svgLine(linePoints)}"/>${dots}` : '';
+    const accessibleLabel = hasLine ? `Revenue and ${lineLabel}` : 'Revenue';
+    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${accessibleLabel} over ${escapeHtml(state.data.range.label)}"><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum: maxRevenue, formatter: (value) => formatCurrency(value, currency, true) })}</g>${rightAxis}${bars}${line}${labels}</svg>`;
+    animateChart(host);
   }
 
   function renderClients(rows) {
     const host = byId('clientShareChart'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No completed client activity matches these filters.</div>'; return; }
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No completed client activity matches this range.</div>'; return; }
     let cursor = 0;
     const segments = rows.map((row, index) => {
       const start = cursor; cursor += Number(row.share_percent || 0);
-      return `${palette[index % palette.length]} ${start}% ${cursor}%`;
+      return `${colors[index % colors.length]} ${start}% ${cursor}%`;
     });
     if (cursor < 100) segments.push(`#edf2f6 ${cursor}% 100%`);
     const total = rows.reduce((sum, row) => sum + Number(row.completes || 0), 0);
-    const legend = rows.map((row, index) => `<li style="--index:${index}"><i style="background:${palette[index % palette.length]}"></i><span><b>${escapeHtml(row.name)}</b><small>${number(row.completes)} completes</small></span><strong>${Number(row.share_percent).toFixed(1)}%</strong></li>`).join('');
-    host.innerHTML = `<div class="client-donut" style="--donut:${segments.join(',')}"><span><b>${number(total)}</b><small>Completes</small></span></div><ol class="client-share-list">${legend}</ol>`;
+    host.innerHTML = `<div class="bi-client-donut" style="--segments:${segments.join(',')}"><span><b>${number(total)}</b><small>Completes</small></span></div><ol class="bi-client-list">${rows.map((row, index) => `<li style="--index:${index}"><i style="--series:${colors[index % colors.length]}"></i><span><b>${escapeHtml(row.name)}</b><small>${number(row.completes)} completes</small></span><strong>${Number(row.share_percent || 0).toFixed(1)}%</strong></li>`).join('')}</ol>`;
   }
 
   function renderStatus(data) {
@@ -205,45 +185,50 @@
       ['terminated', 'Terminated', data.terminated], ['quota', 'Quota full', data.quota],
       ['security', 'Quality / security', data.security],
     ];
-    const maximum = Math.max(1, ...rows.map((row) => Number(row[2])));
-    host.innerHTML = rows.map(([type, label, value], index) => `<div class="horizontal-metric ${type}" style="--index:${index}"><span><i></i>${label}</span><div><b style="--width:${Number(value) / maximum * 100}%"></b></div><strong>${number(value)}</strong></div>`).join('');
+    const total = Math.max(1, rows.reduce((sum, row) => sum + Number(row[2] || 0), 0));
+    host.innerHTML = rows.map(([type, label, value], index) => `<div class="bi-status-row ${type}" style="--index:${index}"><span><i></i>${label}</span><div><b style="--progress:${Number(value || 0) / total * 100}%"></b></div><strong>${number(value)}</strong><em>${(Number(value || 0) / total * 100).toFixed(1)}%</em></div>`).join('');
   }
 
   function renderDevices(data) {
     const host = byId('deviceBreakdown'); if (!host || !data) return;
-    const rows = [['desktop', 'Desktop'], ['mobile', 'Mobile'], ['tablet', 'Tablet'], ['unclassified', 'Other']];
+    const rows = [
+      ['desktop', 'Desktop', '#15b8d8'], ['mobile', 'Mobile', '#4967d8'],
+      ['tablet', 'Tablet', '#9165d5'], ['unclassified', 'Other', '#d8e0e8'],
+    ];
     const total = rows.reduce((sum, [key]) => sum + Number(data[key] || 0), 0);
-    host.innerHTML = rows.map(([key, label], index) => {
-      const value = Number(data[key] || 0); const percent = total ? value / total * 100 : 0;
-      return `<div class="device-dashboard-card" style="--index:${index}"><span>${icon[key === 'unclassified' ? 'unknown' : key]}</span><div><small>${label}</small><strong>${number(value)}</strong><em>${percent.toFixed(1)}% of completes</em></div><i style="--progress:${percent}%"></i></div>`;
-    }).join('');
+    let cursor = 0;
+    const segments = rows.map(([key, _label, color]) => {
+      const start = cursor; cursor += total ? Number(data[key] || 0) / total * 100 : 0;
+      return `${color} ${start}% ${cursor}%`;
+    });
+    if (!total) segments.push('#edf2f6 0 100%');
+    host.innerHTML = `<div class="bi-device-ring" style="--segments:${segments.join(',')}"><span><b>${number(total)}</b><small>Completes</small></span></div><div class="bi-device-list">${rows.map(([key, label, color], index) => `<div style="--index:${index}"><i style="--series:${color}"></i><span>${label}</span><strong>${number(data[key])}</strong><small>${total ? (Number(data[key] || 0) / total * 100).toFixed(1) : '0.0'}%</small></div>`).join('')}</div>`;
   }
 
   function renderTopUsers(rows) {
     const host = byId('dashboardTopUsers'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No user activity matches these filters.</div>'; return; }
-    const maximum = Math.max(1, ...rows.map((row) => Number(row.completes)));
-    host.innerHTML = rows.map((row, index) => `<div class="performer-row" style="--index:${index}"><span class="performer-rank">${index + 1}</span><span class="performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div class="performer-copy"><b>${escapeHtml(row.name)}</b><span><i style="--progress:${Number(row.completes) / maximum * 100}%"></i></span><small>${number(row.hits)} hits · ${Number(row.conversion_rate).toFixed(1)}% conversion</small></div><strong>${number(row.completes)}</strong></div>`).join('');
-  }
-
-  function renderRecent(rows) {
-    const host = byId('dashboardRecentActivity'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No respondent journeys match these filters.</div>'; return; }
-    const formatter = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    host.innerHTML = rows.map((row, index) => `<article class="activity-row" style="--index:${index}"><i class="activity-status status-${escapeHtml(row.status)}"></i><div><strong>${escapeHtml(row.user_name)}</strong><span>${escapeHtml(row.client_name)} · ${escapeHtml(row.project_id)}</span></div><code>${escapeHtml(row.rid)}</code><span class="activity-result status-${escapeHtml(row.status)}">${escapeHtml(row.status_label)}</span><time>${formatter.format(new Date(row.initiated_at))}<small>IST</small></time></article>`).join('');
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No user activity matches this range.</div>'; return; }
+    const maximum = Math.max(1, ...rows.map((row) => Number(row.completes || 0)));
+    host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b><small>${number(row.hits)} hits · ${Number(row.conversion_rate || 0).toFixed(1)}% conversion</small><span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
   }
 
   function render(data) {
+    state.data = data;
     updateSummary(data.summary || {});
-    state.performance = data.performance; renderPerformance();
-    renderClients(data.client_distribution); renderStatus(data.status_breakdown);
-    renderDevices(data.device_breakdown); renderTopUsers(data.top_users);
+    document.querySelectorAll('[data-dashboard-bucket-label]').forEach((node) => { node.textContent = data.range.bucket_label; });
+    const caption = byId('dashboardRangeCaption'); if (caption) caption.textContent = data.range.label;
+    renderVolume(data.performance);
+    renderFinance(data.performance, data.summary?.revenue_currency || 'USD');
+    renderClients(data.client_distribution);
+    renderStatus(data.status_breakdown);
+    renderDevices(data.device_breakdown);
+    renderTopUsers(data.top_users);
     const updated = byId('dashboardUpdatedAt');
-    if (updated) updated.textContent = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(data.generated_at)) + ' IST';
+    if (updated) updated.textContent = `${new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(data.generated_at))} IST`;
   }
 
   function showError(message) {
-    document.querySelectorAll('.dashboard-chart-stage,.client-share-body,.horizontal-metrics,.device-dashboard-grid,.performer-list,.dashboard-activity-list').forEach((host) => {
+    document.querySelectorAll('.bi-chart-stage,.bi-client-body,.bi-status-list,.bi-device-body,.bi-performer-list').forEach((host) => {
       host.innerHTML = `<div class="dashboard-error"><strong>Could not load analytics</strong><span>${escapeHtml(message)}</span><button type="button" data-dashboard-retry>Try again</button></div>`;
     });
     document.querySelectorAll('[data-dashboard-retry]').forEach((button) => button.addEventListener('click', loadDashboard));
@@ -251,35 +236,46 @@
 
   async function loadDashboard() {
     state.controller?.abort(); state.controller = new AbortController();
-    document.body.classList.add('dashboard-loading');
+    document.body.classList.add('dashboard-refreshing');
+    document.querySelectorAll('[data-dashboard-range]').forEach((button) => { button.disabled = true; });
     try {
-      const response = await fetch(`/api/v1/dashboard/?${queryParams()}`, { signal: state.controller.signal });
+      const response = await fetch(`/api/v1/dashboard/?range=${encodeURIComponent(state.range)}`, {
+        signal: state.controller.signal, credentials: 'same-origin',
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
       render(data);
     } catch (error) {
       if (error.name !== 'AbortError') showError(error.message);
     } finally {
-      document.body.classList.remove('dashboard-loading');
+      document.body.classList.remove('dashboard-refreshing');
+      document.querySelectorAll('[data-dashboard-range]').forEach((button) => { button.disabled = false; });
     }
   }
 
-  function scheduleLoad() { clearTimeout(state.timer); state.timer = setTimeout(loadDashboard, 280); }
-  [byId('dashboardFrom'), byId('dashboardTo')].filter(Boolean).forEach((input) => input.addEventListener('change', scheduleLoad));
-  byId('clearDashboardFilters')?.addEventListener('click', () => {
-    document.querySelectorAll('.dashboard-filters input[type="checkbox"]').forEach((input) => { input.checked = false; });
-    document.querySelectorAll('.dashboard-filters [data-multi-search]').forEach((input) => { input.value = ''; });
-    if (byId('dashboardFrom')) byId('dashboardFrom').value = '';
-    if (byId('dashboardTo')) byId('dashboardTo').value = '';
-    document.querySelectorAll('.dashboard-filters .multi-select').forEach((container) => { updateMultiLabel(container); applyMenuVisibility(container); });
-    updateHierarchy(); closeMenus(); loadDashboard();
+  document.querySelectorAll('[data-dashboard-range]').forEach((button) => {
+    const selected = button.dataset.dashboardRange === state.range;
+    button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected));
+    button.addEventListener('click', () => {
+      if (button.dataset.dashboardRange === state.range) return;
+      state.range = button.dataset.dashboardRange;
+      document.querySelectorAll('[data-dashboard-range]').forEach((item) => {
+        const active = item === button;
+        item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));
+      });
+      const url = new URL(location.href); url.searchParams.set('range', state.range); history.replaceState({}, '', url);
+      loadDashboard();
+    });
   });
-  document.querySelectorAll('[data-dashboard-period]').forEach((button) => button.addEventListener('click', () => {
-    state.period = button.dataset.dashboardPeriod;
-    document.querySelectorAll('[data-dashboard-period]').forEach((item) => item.classList.toggle('active', item === button));
-    renderPerformance();
-  }));
-  document.addEventListener('click', (event) => { if (!event.target.closest('.dashboard-filters .multi-select')) closeMenus(); });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenus(); });
+
+  const resizeObserver = new ResizeObserver(() => {
+    clearTimeout(state.resizeTimer);
+    state.resizeTimer = setTimeout(() => {
+      if (!state.data) return;
+      renderVolume(state.data.performance);
+      renderFinance(state.data.performance, state.data.summary?.revenue_currency || 'USD');
+    }, 120);
+  });
+  document.querySelectorAll('.bi-chart-stage').forEach((host) => resizeObserver.observe(host));
   loadDashboard();
 })();

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Avg, Count, Max, Q, Sum
@@ -15,9 +15,17 @@ from .models import SurveyAttempt
 
 COMPLETED = SurveyAttempt.Status.COMPLETED
 INITIATED = (SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED)
+DASHBOARD_RANGE_LABELS = {
+    "24h": "Last 24 hours",
+    "48h": "Last 48 hours",
+    "72h": "Last 72 hours",
+    "3m": "Last 3 months",
+    "6m": "Last 6 months",
+    "1y": "Last 1 year",
+}
 
 
-def dashboard_attempts(user, params):
+def dashboard_attempts(user, params, range_window=None):
     """Apply the same hierarchy and respondent scope used by Studies."""
 
     queryset = SurveyAttempt.objects.select_related(
@@ -29,7 +37,13 @@ def dashboard_attempts(user, params):
     if not filterset.is_valid():
         message = next(iter(filterset.errors.values()))[0]
         raise ValueError(str(message))
-    return filterset.qs
+    queryset = filterset.qs
+    if range_window:
+        queryset = queryset.filter(
+            initiated_at__gte=range_window["start"],
+            initiated_at__lte=range_window["end"],
+        )
+    return queryset
 
 
 def _visible_revenue(user, value):
@@ -55,55 +69,108 @@ def _month_shift(value, offset):
     )
 
 
-def _aware_day_bounds(day):
-    zone = timezone.get_current_timezone()
-    return (
-        timezone.make_aware(datetime.combine(day, time.min), zone),
-        timezone.make_aware(datetime.combine(day, time.max), zone),
-    )
+def dashboard_range_window(range_key, now=None):
+    """Return one analytics window and its chart buckets in the active timezone."""
+
+    key = str(range_key or "24h").strip().lower()
+    if key not in DASHBOARD_RANGE_LABELS:
+        raise ValueError("Range must be one of: 24h, 48h, 72h, 3m, 6m, 1y.")
+    end = now or timezone.now()
+    if timezone.is_naive(end):
+        end = timezone.make_aware(end, timezone.get_current_timezone())
+    local_end = timezone.localtime(end)
+    buckets = []
+    bucket_label = ""
+
+    if key in {"24h", "48h", "72h"}:
+        hours = int(key[:-1])
+        bucket_hours = hours // 12
+        start = end - timedelta(hours=hours)
+        for index in range(12):
+            lower = start + timedelta(hours=index * bucket_hours)
+            upper = min(end, lower + timedelta(hours=bucket_hours))
+            buckets.append({
+                "key": lower.isoformat(),
+                "label": timezone.localtime(lower).strftime("%d %b %I %p"),
+                "short_label": timezone.localtime(lower).strftime("%I %p").lstrip("0"),
+                "lower": lower,
+                "upper": upper,
+            })
+        bucket_label = f"{bucket_hours}-hour intervals"
+    elif key == "3m":
+        start = end - timedelta(weeks=13)
+        for index in range(13):
+            lower = start + timedelta(weeks=index)
+            upper = min(end, lower + timedelta(weeks=1))
+            buckets.append({
+                "key": lower.date().isoformat(),
+                "label": timezone.localtime(lower).strftime("%d %b"),
+                "short_label": timezone.localtime(lower).strftime("%d %b"),
+                "lower": lower,
+                "upper": upper,
+            })
+        bucket_label = "Weekly intervals"
+    else:
+        month_count = 6 if key == "6m" else 12
+        current_month = local_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = _month_shift(current_month, -(month_count - 1))
+        for index in range(month_count):
+            lower = _month_shift(start, index)
+            upper = min(end, _month_shift(lower, 1))
+            buckets.append({
+                "key": lower.strftime("%Y-%m"),
+                "label": lower.strftime("%b %Y"),
+                "short_label": lower.strftime("%b"),
+                "lower": lower,
+                "upper": upper,
+            })
+        bucket_label = "Monthly intervals"
+
+    return {
+        "key": key,
+        "label": DASHBOARD_RANGE_LABELS[key],
+        "bucket_label": bucket_label,
+        "start": start,
+        "end": end,
+        "buckets": buckets,
+    }
 
 
-def _performance_series(queryset):
-    today = timezone.localdate()
-    daily_days = [today - timedelta(days=offset) for offset in range(4, -1, -1)]
-    daily_expressions = {}
-    for index, day in enumerate(daily_days):
-        lower, upper = _aware_day_bounds(day)
-        window = Q(initiated_at__gte=lower, initiated_at__lte=upper)
-        daily_expressions[f"daily_hits_{index}"] = Count("id", filter=window)
-        daily_expressions[f"daily_completes_{index}"] = Count("id", filter=window & Q(status=COMPLETED))
-    daily_totals = queryset.aggregate(**daily_expressions)
-    daily = [
-        {
-            "key": day.isoformat(),
-            "label": day.strftime("%d %b"),
-            "hits": daily_totals[f"daily_hits_{index}"],
-            "completes": daily_totals[f"daily_completes_{index}"],
-        }
-        for index, day in enumerate(daily_days)
-    ]
-
-    current_month = today.replace(day=1)
-    month_starts = [_month_shift(current_month, offset) for offset in range(-5, 1)]
-    monthly_expressions = {}
-    for index, month_start in enumerate(month_starts):
-        next_month = _month_shift(month_start, 1)
-        lower, _unused = _aware_day_bounds(month_start)
-        upper, _unused = _aware_day_bounds(next_month)
-        window = Q(initiated_at__gte=lower, initiated_at__lt=upper)
-        monthly_expressions[f"month_hits_{index}"] = Count("id", filter=window)
-        monthly_expressions[f"month_completes_{index}"] = Count("id", filter=window & Q(status=COMPLETED))
-    monthly_totals = queryset.aggregate(**monthly_expressions)
-    monthly = [
-        {
-            "key": month_start.strftime("%Y-%m"),
-            "label": month_start.strftime("%b %Y"),
-            "hits": monthly_totals[f"month_hits_{index}"],
-            "completes": monthly_totals[f"month_completes_{index}"],
-        }
-        for index, month_start in enumerate(month_starts)
-    ]
-    return {"daily": daily, "monthly": monthly}
+def _performance_series(queryset, range_window):
+    expressions = {}
+    for index, bucket in enumerate(range_window["buckets"]):
+        window = Q(initiated_at__gte=bucket["lower"], initiated_at__lt=bucket["upper"])
+        completed = window & Q(status=COMPLETED)
+        survey_terminated = window & Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
+            status_source="local_prescreener"
+        )
+        expressions[f"hits_{index}"] = Count("id", filter=window)
+        expressions[f"completes_{index}"] = Count("id", filter=completed)
+        expressions[f"terminated_{index}"] = Count("id", filter=survey_terminated)
+        expressions[f"revenue_{index}"] = Sum(
+            "source_cpi_snapshot", filter=completed, default=Decimal("0.00")
+        )
+    totals = queryset.aggregate(**expressions)
+    points = []
+    for index, bucket in enumerate(range_window["buckets"]):
+        hits = totals[f"hits_{index}"]
+        completes = totals[f"completes_{index}"]
+        terminated = totals[f"terminated_{index}"]
+        revenue = totals[f"revenue_{index}"] or Decimal("0.00")
+        ir_denominator = completes + terminated
+        points.append({
+            "key": bucket["key"],
+            "label": bucket["label"],
+            "short_label": bucket["short_label"],
+            "hits": hits,
+            "completes": completes,
+            "conversion_rate": round(completes / hits * 100, 2) if hits else 0.0,
+            "incidence_rate": round(completes / ir_denominator * 100, 2) if ir_denominator else 0.0,
+            "revenue": revenue,
+            "average_cpi": (revenue / completes).quantize(Decimal("0.01")) if completes else Decimal("0.00"),
+            "rpc": (revenue / hits).quantize(Decimal("0.01")) if hits else Decimal("0.00"),
+        })
+    return points
 
 
 def _client_distribution(queryset):
@@ -175,7 +242,8 @@ def _recent_activity(queryset):
     return result
 
 
-def build_dashboard_payload(queryset, user, card_access, chart_access):
+def build_dashboard_payload(queryset, user, card_access, chart_access, range_window=None):
+    range_window = range_window or dashboard_range_window("24h")
     completed_filter = Q(status=COMPLETED)
     survey_termination_filter = Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
         status_source="local_prescreener"
@@ -199,6 +267,7 @@ def build_dashboard_payload(queryset, user, card_access, chart_access):
     conversion = round(totals["completes"] / totals["hits"] * 100, 2) if totals["hits"] else 0.0
     ir_denominator = totals["completes"] + totals["survey_terminated"]
     incidence_rate = round(totals["completes"] / ir_denominator * 100, 2) if ir_denominator else 0.0
+    visible_revenue = _visible_revenue(user, totals["revenue"])
     summary_values = {
         "hits": totals["hits"],
         "completes": totals["completes"],
@@ -206,18 +275,48 @@ def build_dashboard_payload(queryset, user, card_access, chart_access):
         "incidence_rate": incidence_rate,
         "active_users": totals["active_users"],
         "average_loi_seconds": round(totals["average_loi"] or 0),
-        "revenue": _visible_revenue(user, totals["revenue"]),
+        "revenue": visible_revenue,
+        "average_cpi": (
+            visible_revenue / totals["completes"]
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if totals["completes"] else Decimal("0.00"),
+        "rpc": (
+            visible_revenue / totals["hits"]
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if totals["hits"] else Decimal("0.00"),
         "revenue_currency": totals["currency"] or "USD",
     }
     summary = {
         key: value if card_access.get(key, False) else None
         for key, value in summary_values.items()
     }
-    summary["revenue_currency"] = summary_values["revenue_currency"] if card_access.get("revenue") else None
+    summary["revenue_currency"] = (
+        summary_values["revenue_currency"]
+        if any(card_access.get(key) for key in ("revenue", "average_cpi", "rpc"))
+        else None
+    )
     completed_classified = totals["desktop"] + totals["mobile"] + totals["tablet"]
+    performance = _performance_series(queryset, range_window) if chart_access.get("performance") else None
+    if performance is not None:
+        for point in performance:
+            point_revenue = _visible_revenue(user, point["revenue"])
+            point["revenue"] = point_revenue if card_access.get("revenue") else None
+            point["average_cpi"] = (
+                (point_revenue / point["completes"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if point["completes"] else Decimal("0.00")
+            ) if card_access.get("average_cpi") else None
+            point["rpc"] = (
+                (point_revenue / point["hits"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if point["hits"] else Decimal("0.00")
+            ) if card_access.get("rpc") else None
     return {
+        "range": {
+            "key": range_window["key"],
+            "label": range_window["label"],
+            "bucket_label": range_window["bucket_label"],
+            "start": range_window["start"],
+            "end": range_window["end"],
+        },
         "summary": summary,
-        "performance": _performance_series(queryset) if chart_access.get("performance") else None,
+        "performance": performance,
         "client_distribution": _client_distribution(queryset) if chart_access.get("client_share") else None,
         "status_breakdown": {
             "initiated": totals["initiated"], "completed": totals["completes"],

@@ -396,8 +396,10 @@ class SurveyAPITests(TestCase):
         self.assertNotContains(projects, 'id="cpiFilterTrigger"')
         self.assertNotContains(projects, "Quest")
         dashboard = self.client.get(reverse("dashboard"))
-        self.assertContains(dashboard, "Performance dashboard")
-        self.assertContains(dashboard, 'id="performanceChart"')
+        self.assertContains(dashboard, "Performance intelligence")
+        self.assertContains(dashboard, 'id="volumeChart"')
+        self.assertContains(dashboard, 'data-dashboard-range="24h"')
+        self.assertContains(dashboard, 'data-dashboard-range="1y"')
 
         profile = self.user.employee_profile
         profile.role = Role.objects.get(slug="admin")
@@ -1473,18 +1475,27 @@ class DashboardAnalyticsTests(TestCase):
         page = self.client.get(reverse("dashboard"))
 
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "Performance dashboard")
-        self.assertContains(page, 'id="performanceChart"')
+        self.assertContains(page, "Performance intelligence")
+        self.assertContains(page, 'id="volumeChart"')
+        self.assertContains(page, 'id="financeChart"')
         self.assertContains(page, 'id="clientShareChart"')
+        self.assertContains(page, 'data-dashboard-range="24h"')
+        self.assertContains(page, 'data-dashboard-range="48h"')
+        self.assertContains(page, 'data-dashboard-range="72h"')
+        self.assertContains(page, 'data-dashboard-range="3m"')
+        self.assertContains(page, 'data-dashboard-range="6m"')
+        self.assertContains(page, 'data-dashboard-range="1y"')
         self.assertNotContains(page, 'data-dashboard-filter="branch"')
         self.assertNotContains(page, "Recent activity")
         self.assertContains(page, 'id="dashboardIR"')
-        self.assertContains(page, "Hit-time CPI snapshots")
+        self.assertContains(page, "Historical hit-time CPI")
 
     def test_dashboard_api_returns_overall_kpis_client_share_and_time_series(self):
         response = self.api.get(reverse("dashboard-api"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["range"]["key"], "24h")
+        self.assertEqual(response.data["range"]["bucket_label"], "2-hour intervals")
         self.assertEqual(response.data["summary"]["hits"], 2)
         self.assertEqual(response.data["summary"]["completes"], 1)
         self.assertEqual(response.data["summary"]["conversion_rate"], 50.0)
@@ -1492,15 +1503,54 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["summary"]["active_users"], 2)
         self.assertEqual(response.data["summary"]["average_loi_seconds"], 90)
         self.assertEqual(str(response.data["summary"]["revenue"]), "4.00")
+        self.assertEqual(str(response.data["summary"]["average_cpi"]), "4.00")
+        self.assertEqual(str(response.data["summary"]["rpc"]), "2.00")
         self.assertEqual(response.data["status_breakdown"]["terminated"], 1)
         self.assertEqual(response.data["device_breakdown"]["desktop"], 1)
         self.assertEqual(response.data["client_distribution"][0]["name"], "Client Alpha")
         self.assertEqual(response.data["client_distribution"][0]["share_percent"], 100.0)
-        self.assertEqual(len(response.data["performance"]["daily"]), 5)
-        self.assertEqual(len(response.data["performance"]["monthly"]), 6)
-        self.assertEqual(sum(point["hits"] for point in response.data["performance"]["daily"]), 2)
+        self.assertEqual(len(response.data["performance"]), 12)
+        self.assertEqual(sum(point["hits"] for point in response.data["performance"]), 2)
         self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
         self.assertNotIn("recent_activity", response.data)
+
+    def test_dashboard_supports_every_global_analytics_range(self):
+        expected = {
+            "24h": (12, "2-hour intervals"),
+            "48h": (12, "4-hour intervals"),
+            "72h": (12, "6-hour intervals"),
+            "3m": (13, "Weekly intervals"),
+            "6m": (6, "Monthly intervals"),
+            "1y": (12, "Monthly intervals"),
+        }
+        for range_key, (point_count, bucket_label) in expected.items():
+            with self.subTest(range_key=range_key):
+                response = self.api.get(reverse("dashboard-api"), {"range": range_key})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["range"]["key"], range_key)
+                self.assertEqual(response.data["range"]["bucket_label"], bucket_label)
+                self.assertEqual(len(response.data["performance"]), point_count)
+                self.assertEqual(sum(point["hits"] for point in response.data["performance"]), 2)
+
+        invalid = self.api.get(reverse("dashboard-api"), {"range": "forever"})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("Range must be one of", invalid.data["detail"])
+
+    def test_dashboard_range_excludes_activity_outside_selected_window(self):
+        SurveyAttempt.objects.create(
+            rid="OldDa5h7Yr", survey=self.survey_a, platform_user=self.employee,
+            user_id=str(self.employee.pk), status=SurveyAttempt.Status.COMPLETED,
+            source_cpi_snapshot="10.00", cpi_currency_snapshot="USD",
+            initiated_at=timezone.now() - timedelta(days=40),
+        )
+
+        recent = self.api.get(reverse("dashboard-api"), {"range": "24h"})
+        quarterly = self.api.get(reverse("dashboard-api"), {"range": "3m"})
+
+        self.assertEqual(recent.data["summary"]["hits"], 2)
+        self.assertEqual(quarterly.data["summary"]["hits"], 3)
+        self.assertEqual(quarterly.data["summary"]["completes"], 2)
+        self.assertEqual(str(quarterly.data["summary"]["revenue"]), "14.00")
 
     def test_dashboard_is_unfiltered_and_employee_visibility_is_enforced(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})
@@ -1515,6 +1565,11 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(own.data["summary"]["hits"], 1)
         self.assertEqual(own.data["summary"]["completes"], 1)
         self.assertIsNone(own.data["summary"]["revenue"])
+        self.assertIsNone(own.data["summary"]["average_cpi"])
+        self.assertIsNone(own.data["summary"]["rpc"])
+        self.assertTrue(all(point["revenue"] is None for point in own.data["performance"]))
+        self.assertTrue(all(point["average_cpi"] is None for point in own.data["performance"]))
+        self.assertTrue(all(point["rpc"] is None for point in own.data["performance"]))
         self.assertIsNone(own.data["top_users"])
         self.assertNotIn("recent_activity", own.data)
         self.assertEqual(scoped.get(reverse("dashboard-api"), {"branch": "1"}).status_code, 200)
