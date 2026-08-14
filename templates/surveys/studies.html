@@ -144,7 +144,7 @@
         {% if 'survey_id' in study_columns %}<th class="study-col-survey">Survey ID</th>{% endif %}
         {% if 'country' in study_columns %}<th class="study-col-country">Country</th>{% endif %}
         {% if 'cpi' in study_columns %}<th class="study-col-cpi">CPI</th>{% endif %}
-        {% if 'respondent_id' in study_columns %}<th class="study-col-rid">Respondent ID</th>{% endif %}
+        {% if 'respondent_id' in study_columns %}<th class="study-col-rid">RID / UID</th>{% endif %}
         {% if 'user' in study_columns %}<th class="study-col-user">Name</th>{% endif %}
         {% if 'device' in study_columns %}<th class="study-col-device">Device</th>{% endif %}
         {% if 'ip' in study_columns %}<th class="study-col-ip">IP address</th>{% endif %}
@@ -168,4 +168,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=18" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=19" defer></script>{% endblock %}

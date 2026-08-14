@@ -59,7 +59,7 @@
 {% if page_obj %}
   {% for submission in page_obj %}<template id="vaultAnswers{{ forloop.counter }}">
     <div class="vault-drawer-summary">
-      <div><span>Submission UID</span><strong>{{ submission.uid }}</strong></div>
+      <div><span> User ID</span><strong>{{ submission.uid }}</strong></div>
       <div><span>Country</span><strong>{{ submission.country|default:submission.country_code|default:"Unknown" }}</strong></div>
       <div><span>Language</span><strong>{{ submission.language|default:submission.language_code|default:"Unknown" }}</strong></div>
       <div><span>Registered at</span><strong>{{ submission.submitted_at|date:"d M Y, h:i:s A T" }}</strong></div>

@@ -290,6 +290,7 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .studies-table .study-survey-id,
 .studies-table .respondent-id{font-size:10px}
 .studies-table .study-secondary{margin-top:4px;font-size:8px}
+.study-card-head>div small{max-width:220px;margin-top:3px;color:#7f8da2;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:900px){
   .studies-table-wrap{display:none}
   .studies-cards{display:grid}

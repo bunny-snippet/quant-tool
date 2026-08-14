@@ -650,7 +650,8 @@ class StudiesTrackingTests(TestCase):
             "entry_os": "Windows 10",
         }
         self.complete = SurveyAttempt.objects.create(
-            rid="Aa1Bb2Cc3D", platform_user=self.kanik, user_id=str(self.kanik.pk),
+            rid="Aa1Bb2Cc3D", prescreener_uid="Ab12-Cd34-Ef56-Gh78",
+            platform_user=self.kanik, user_id=str(self.kanik.pk),
             status=SurveyAttempt.Status.COMPLETED, loi_seconds=82, callback_at=timezone.now(),
             source_cpi_snapshot="2.50", payable_cpi_snapshot="2.50", cpi_currency_snapshot="USD", **common,
         )
@@ -683,6 +684,7 @@ class StudiesTrackingTests(TestCase):
         self.assertContains(page, "Idle Studies")
         self.assertContains(page, "Canada · CA")
         self.assertContains(page, '<th class="study-col-cpi">CPI</th>', html=True)
+        self.assertContains(page, '<th class="study-col-rid">RID / UID</th>', html=True)
         self.assertContains(page, 'data-multi-filter="branch"')
         self.assertContains(page, 'data-multi-filter="sub_branch"')
         self.assertContains(page, 'data-multi-filter="shift"')
@@ -708,6 +710,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(response.data["count"], 1)
         result = response.data["results"][0]
         self.assertEqual(result["rid"], self.complete.rid)
+        self.assertEqual(result["prescreener_uid"], self.complete.prescreener_uid)
         self.assertEqual(result["user_name"], "Kanik Sharma")
         self.assertEqual(result["entry_ip"], "10.0.0.1")
         self.assertEqual(result["exit_ip"], "20.0.0.1")
@@ -725,6 +728,13 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(response.data["summary"]["completed_devices"]["mobile"], 0)
         self.assertEqual(float(response.data["summary"]["total_revenue"]), 2.50)
         self.assertEqual(response.data["summary"]["revenue_currency"], "USD")
+
+        uid_search = self.api.get(
+            reverse("survey-attempt-list"), {"search": self.complete.prescreener_uid}
+        )
+        self.assertEqual(uid_search.status_code, 200)
+        self.assertEqual(uid_search.data["count"], 1)
+        self.assertEqual(uid_search.data["results"][0]["rid"], self.complete.rid)
 
     def test_client_buyer_and_project_deep_link_filters(self):
         response = self.api.get(reverse("survey-attempt-list"), {

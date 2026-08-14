@@ -1572,7 +1572,7 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = SurveyAttemptFilter
     search_fields = [
-        "rid", "user_id", "survey__local_id", "=survey__source_key", "=survey__source_id", "survey__name", "survey__company_name",
+        "rid", "prescreener_uid", "user_id", "survey__local_id", "=survey__source_key", "=survey__source_id", "survey__name", "survey__company_name",
         "platform_user__username", "platform_user__first_name", "platform_user__last_name", "platform_user__email",
         "initiation_ip", "callback_ip", "entry_browser", "entry_device", "entry_os",
     ]
