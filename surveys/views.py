@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from django.core.paginator import Paginator
 from django.shortcuts import render
@@ -53,6 +54,14 @@ from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncRun
 from .outcomes import provider_outcome
+from .report_pricing import (
+    apply_percentage,
+    can_view_report_commercials,
+    role_visibility_percent,
+    supplier_cpi_for_admin,
+    supplier_label_for_admin,
+    viewer_attempt_cpi,
+)
 from .serializers import (
     SurveyDetailSerializer,
     DashboardResponseSerializer,
@@ -1596,17 +1605,26 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             mobile=Count("id", filter=completed_filter & (Q(entry_device__icontains="mobile") | Q(entry_device__icontains="phone"))),
             tablet=Count("id", filter=completed_filter & (Q(entry_device__icontains="tablet") | Q(entry_device__iexact="tab"))),
             total_revenue=Sum("source_cpi_snapshot", filter=completed_filter, default=Decimal("0.00")),
+            supplier_revenue=Sum(
+                Coalesce("payable_cpi_snapshot", "source_cpi_snapshot"),
+                filter=completed_filter,
+                default=Decimal("0.00"),
+            ),
             revenue_currency=Max("cpi_currency_snapshot", filter=completed_filter),
         )
         completed = summary["completed"]
         ir_denominator = completed + summary["survey_terminated"]
         classified = summary["desktop"] + summary["mobile"] + summary["tablet"]
-        profile = getattr(self.request.user, "employee_profile", None)
-        role = getattr(profile, "role", None) if profile else None
-        if profile and profile.account_type == "employee" and role and not self.request.user.is_superuser:
-            summary["total_revenue"] = (
-                summary["total_revenue"] * role.cpi_visibility_percent / Decimal("100.00")
-            ).quantize(Decimal("0.01"))
+        if not can_view_report_commercials(self.request.user):
+            revenue = (
+                summary["supplier_revenue"]
+                if is_external_vendor_scope(self.request.user)
+                else summary["total_revenue"]
+            )
+            summary["total_revenue"] = apply_percentage(
+                revenue,
+                role_visibility_percent(self.request.user),
+            )
         card_access = _component_access(
             effective_permission_codes(self.request.user), STUDY_CARD_PERMISSIONS
         )
@@ -1655,6 +1673,8 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         queryset = SurveyAttempt.objects.select_related(
             "survey", "survey__client", "survey__integration", "platform_user", "platform_user__employee_profile", "platform_user__employee_profile__role",
+            "platform_user__employee_profile__organization_unit", "platform_user__employee_profile__organization_unit__parent",
+            "platform_user__employee_profile__organization_unit__parent__parent",
             "vendor", "vendor__employee_profile", "client", "client_allocation", "survey_allocation",
         ).all()
         if self.request.user.is_superuser:
@@ -1952,44 +1972,40 @@ def _survey_excel_rows(queryset, request, columns):
 
 
 def _attempt_excel_rows(queryset, requesting_user=None):
-    # These labels intentionally mirror the operational workbook requested by the client.
-    headers = [
+    """Build Traffic Report rows without leaking upstream commercial data."""
+
+    commercial_admin = can_view_report_commercials(requesting_user)
+    leading_headers = [
         "Project id", "Cleint survey id", "PID", "RID", "Status", "Status source",
         "Client name", "Country", "Study type", "Actual LOI", "Current Client CPI",
-        "Client entry link CPI", "Vendor CPI", "Vendor name", "User name", "Device",
+        "Client entry link CPI",
+    ]
+    commercial_headers = ["Vendor CPI", "Vendor name"] if commercial_admin else []
+    trailing_headers = [
+        "User name", "Device",
         "OS", "Browser", "User agent", "Entry IP", "Exit IP", "Inisitate at",
         "Presecreent at", "Redirect at", "entry date time", "Exit date time",
     ]
-    widths = [
-        19, 18, 12, 14, 19, 18, 21, 18, 13, 12, 18, 20, 14, 20, 22, 13,
+    headers = leading_headers + commercial_headers + trailing_headers
+    leading_widths = [19, 18, 12, 14, 19, 18, 21, 18, 13, 12, 18, 20]
+    commercial_widths = [14, 20] if commercial_admin else []
+    trailing_widths = [
+        22, 13,
         16, 18, 42, 16, 16, 22, 22, 22, 22, 22,
     ]
-    hide_source_cpi = is_external_vendor_scope(requesting_user)
-    requesting_profile = getattr(requesting_user, "employee_profile", None) if requesting_user else None
-    requesting_role = getattr(requesting_profile, "role", None) if requesting_profile else None
-    visible_percent = (
-        requesting_role.cpi_visibility_percent
-        if requesting_profile and requesting_profile.account_type == "employee" and requesting_role and not requesting_user.is_superuser
-        else Decimal("100.00")
-    )
-
-    def visible_cpi(value):
-        if hide_source_cpi or value is None:
-            return None
-        return (Decimal(value) * visible_percent / Decimal("100.00")).quantize(Decimal("0.01"))
+    widths = leading_widths + commercial_widths + trailing_widths
 
     def rows():
         for attempt in queryset.iterator(chunk_size=1000):
             survey = attempt.survey
             user = attempt.platform_user
-            supplier = attempt.vendor
             client = attempt.client or survey.client
             status_label = (
                 "Initiated"
                 if attempt.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}
                 else attempt.get_status_display()
             )
-            yield [
+            leading_values = [
                 survey.local_id,
                 survey.source_identifier,
                 attempt.user_id or (user.pk if user else ""),
@@ -2000,10 +2016,15 @@ def _attempt_excel_rows(queryset, requesting_user=None):
                 survey.country or survey.country_code,
                 survey.survey_type or survey.group_type,
                 attempt.loi_seconds,
-                visible_cpi(survey.cpi),
-                visible_cpi(attempt.source_cpi_snapshot),
-                attempt.payable_cpi_snapshot,
-                (supplier.get_full_name() or supplier.username) if supplier else "",
+                viewer_attempt_cpi(attempt, requesting_user, current=True),
+                viewer_attempt_cpi(attempt, requesting_user),
+            ]
+            commercial_values = (
+                [supplier_cpi_for_admin(attempt), supplier_label_for_admin(attempt)]
+                if commercial_admin
+                else []
+            )
+            trailing_values = [
                 (user.get_full_name() or user.username) if user else "Deleted user",
                 attempt.entry_device,
                 attempt.entry_os,
@@ -2017,6 +2038,7 @@ def _attempt_excel_rows(queryset, requesting_user=None):
                 _excel_datetime(attempt.created_at),
                 _excel_datetime(attempt.callback_at or attempt.last_callback_at),
             ]
+            yield leading_values + commercial_values + trailing_values
 
     return headers, rows(), widths
 

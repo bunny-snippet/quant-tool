@@ -1,17 +1,16 @@
 from urllib.parse import urlencode
-from decimal import Decimal, ROUND_HALF_UP
-
 from django.conf import settings
 from django.urls import reverse
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from accounts.access import has_function_access
-from vendors.access import is_external_vendor_scope, vendor_scope_user_id
+from vendors.access import vendor_scope_user_id
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
 from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
 from .outcomes import provider_outcome
+from .report_pricing import viewer_attempt_cpi
 from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
 
@@ -495,16 +494,7 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True))
     def get_source_cpi_snapshot(self, obj):
         request = self.context.get("request")
-        if request and is_external_vendor_scope(request.user):
-            return None
-        value = obj.source_cpi_snapshot
-        profile = getattr(request.user, "employee_profile", None) if request else None
-        role = getattr(profile, "role", None) if profile else None
-        if value is not None and profile and profile.account_type == "employee" and role and not request.user.is_superuser:
-            return (Decimal(value) * role.cpi_visibility_percent / Decimal("100.00")).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-        return value
+        return viewer_attempt_cpi(obj, request.user) if request else obj.source_cpi_snapshot
 
     def get_status_label(self, obj) -> str:
         if obj.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}:

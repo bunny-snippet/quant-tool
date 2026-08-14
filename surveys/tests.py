@@ -860,6 +860,128 @@ class StudiesTrackingTests(TestCase):
         self.assertNotIn("Outbound supplier URL", rows[0])
         self.assertNotIn("Ee4Ff5Gg6H", str(rows))
 
+    def test_traffic_export_separates_admin_commercials_from_team_lead_cpi(self):
+        role = Role.objects.get(slug="team-lead")
+        role.cpi_visibility_percent = "70.00"
+        role.save(update_fields=["cpi_visibility_percent"])
+        branch = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            unit_type=OrganizationUnit.UnitType.BRANCH,
+            name="Delhi",
+            code="traffic-export-delhi",
+            created_by=self.owner,
+        )
+        sub_branch = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            parent=branch,
+            unit_type=OrganizationUnit.UnitType.SUB_BRANCH,
+            name="Operations",
+            code="traffic-export-operations",
+            created_by=self.owner,
+        )
+        shift = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            parent=sub_branch,
+            unit_type=OrganizationUnit.UnitType.SHIFT,
+            name="Morning",
+            code="traffic-export-morning",
+            created_by=self.owner,
+        )
+        EmployeeProfile.objects.filter(user=self.kanik).update(
+            role=role,
+            organization_unit=shift,
+        )
+        UserFunctionOverride.objects.create(
+            user=self.kanik,
+            function=AccessFunction.objects.get(code="attempts.export"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        self.kanik = get_user_model().objects.get(pk=self.kanik.pk)
+
+        scoped_api = APIClient()
+        scoped_api.force_authenticate(self.kanik)
+        scoped_rows = xlsx_rows(scoped_api.get(reverse("survey-attempt-export")))
+        self.assertNotIn("Vendor CPI", scoped_rows[0])
+        self.assertNotIn("Vendor name", scoped_rows[0])
+        self.assertEqual(
+            scoped_rows[1][scoped_rows[0].index("Current Client CPI")],
+            "1.75",
+        )
+        self.assertEqual(
+            scoped_rows[1][scoped_rows[0].index("Client entry link CPI")],
+            "1.75",
+        )
+
+        admin_rows = xlsx_rows(self.api.get(reverse("survey-attempt-export"), {
+            "search": self.complete.rid,
+        }))
+        self.assertEqual(
+            admin_rows[1][admin_rows[0].index("Current Client CPI")],
+            "2.50",
+        )
+        self.assertEqual(
+            admin_rows[1][admin_rows[0].index("Client entry link CPI")],
+            "2.50",
+        )
+        self.assertEqual(admin_rows[1][admin_rows[0].index("Vendor CPI")], "1.75")
+        self.assertEqual(admin_rows[1][admin_rows[0].index("Vendor name")], "Operations")
+
+    def test_external_supplier_export_hides_admin_commercial_columns(self):
+        external = get_user_model().objects.create_user(
+            username="external-supplier",
+            first_name="External",
+            last_name="Supply",
+        )
+        EmployeeProfile.objects.filter(user=external).update(
+            account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+            role=Role.objects.get(slug="external-vendor"),
+            created_by=self.owner,
+        )
+        UserFunctionOverride.objects.create(
+            user=external,
+            function=AccessFunction.objects.get(code="attempts.export"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        external_attempt = SurveyAttempt.objects.create(
+            rid="Xx1Ee2Vv3D",
+            survey=self.survey,
+            platform_user=external,
+            vendor=external,
+            user_id=str(external.pk),
+            status=SurveyAttempt.Status.COMPLETED,
+            source_cpi_snapshot="2.50",
+            cpi_cut_percent_snapshot="30.00",
+            payable_cpi_snapshot="1.75",
+            cpi_currency_snapshot="USD",
+        )
+
+        external_api = APIClient()
+        external_api.force_authenticate(external)
+        external_rows = xlsx_rows(external_api.get(reverse("survey-attempt-export")))
+        self.assertNotIn("Vendor CPI", external_rows[0])
+        self.assertNotIn("Vendor name", external_rows[0])
+        self.assertEqual(
+            external_rows[1][external_rows[0].index("Current Client CPI")],
+            "1.75",
+        )
+        self.assertEqual(
+            external_rows[1][external_rows[0].index("Client entry link CPI")],
+            "1.75",
+        )
+
+        admin_rows = xlsx_rows(self.api.get(reverse("survey-attempt-export"), {
+            "search": external_attempt.rid,
+        }))
+        self.assertEqual(
+            admin_rows[1][admin_rows[0].index("Current Client CPI")],
+            "2.50",
+        )
+        self.assertEqual(admin_rows[1][admin_rows[0].index("Vendor CPI")], "1.75")
+        self.assertEqual(
+            admin_rows[1][admin_rows[0].index("Vendor name")],
+            "External Supply",
+        )
+
     def test_view_permission_is_scoped_and_does_not_grant_csv_export(self):
         viewer = get_user_model().objects.create_user(username="viewer", first_name="Scoped")
         UserFunctionOverride.objects.create(
