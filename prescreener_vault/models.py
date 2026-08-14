@@ -18,6 +18,11 @@ class PrescreenerSubmission(models.Model):
     profile_dimensions = models.JSONField(default=dict, blank=True)
     raw_answers = models.JSONField(default=dict, blank=True)
     answer_count = models.PositiveSmallIntegerField(default=0)
+    usage_count = models.PositiveIntegerField(
+        default=1,
+        db_index=True,
+        help_text="Total visits: one original submission plus approved profile reuses.",
+    )
     submitted_at = models.DateTimeField(db_index=True)
     captured_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

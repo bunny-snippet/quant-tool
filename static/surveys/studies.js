@@ -1,3 +1,5 @@
+/* Traffic Report hierarchy filters, KPI animation and responsive attempt rows. */
+
 (() => {
   const byId = (id) => document.getElementById(id);
   const columns = new Set(JSON.parse(byId('studyColumnAccess')?.textContent || '[]'));

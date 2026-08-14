@@ -323,8 +323,45 @@ input { font: inherit; }
 .status-facts dd { margin: 5px 0 0; color: var(--navy); font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
 .status-note { margin: 23px 0 0; color: #9aa5b5; font-size: 11px; }
 
+/* Animated provider callback result */
+.status-page{--status-accent:var(--cyan);--status-strong:var(--cyan-dark);--status-soft:var(--cyan-soft);--status-glow:rgba(22,185,220,.2)}
+.status-page.status-success{--status-accent:#20b77f;--status-strong:#12855e;--status-soft:#e8f8f1;--status-glow:rgba(32,183,127,.24)}
+.status-page.status-warning{--status-accent:#e3a12b;--status-strong:#a56c0c;--status-soft:#fff6df;--status-glow:rgba(227,161,43,.22)}
+.status-page.status-danger{--status-accent:#d65362;--status-strong:#aa3545;--status-soft:#fff0f2;--status-glow:rgba(214,83,98,.2)}
+.status-page .status-shell{position:relative;overflow:hidden;background:radial-gradient(circle at 50% -15%,var(--status-soft) 0,transparent 43%),linear-gradient(145deg,#f8fbfd 0,#f3f7fb 100%)}
+.status-backdrop{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.status-backdrop span{position:absolute;border-radius:50%;background:var(--status-soft);filter:blur(2px);opacity:.68;animation:status-orb 9s ease-in-out infinite}
+.status-backdrop span:nth-child(1){width:320px;height:320px;left:-115px;top:-95px}
+.status-backdrop span:nth-child(2){width:220px;height:220px;right:-65px;bottom:-70px;animation-delay:-3s}
+.status-backdrop span:nth-child(3){width:82px;height:82px;right:13%;top:15%;opacity:.44;animation-delay:-6s}
+.status-page .status-card{position:relative;overflow:hidden;border-color:rgba(216,226,237,.92);border-radius:26px;background:rgba(255,255,255,.94);box-shadow:0 28px 80px rgba(27,44,73,.13),0 0 0 10px rgba(255,255,255,.34);backdrop-filter:blur(14px);animation:status-card-in .6s cubic-bezier(.2,.8,.2,1) both}
+.status-page .status-card:before{content:"";position:absolute;inset:0 0 auto;height:5px;background:linear-gradient(90deg,transparent,var(--status-accent) 18% 82%,transparent)}
+.status-page .status-visual{width:98px;height:98px;border-radius:31px;background:var(--status-soft);color:var(--status-strong);box-shadow:0 15px 35px var(--status-glow);animation:status-icon-pop .65s .12s cubic-bezier(.2,1.45,.45,1) both}
+.status-page .status-visual svg{width:62px;height:62px;overflow:visible;fill:none;stroke:currentColor;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.status-page .status-visual svg circle,.status-page .status-visual svg>path:first-of-type{stroke-dasharray:180;stroke-dashoffset:180;animation:status-draw 1s .35s ease forwards}
+.status-page .status-visual svg>path+path{stroke-dasharray:80;stroke-dashoffset:80;animation:status-draw .65s .85s ease forwards}
+.status-page .status-ring{position:absolute;inset:-9px;border:1px solid var(--status-accent);border-radius:36px;opacity:.24;animation:pulse-ring 2.2s ease-out infinite}
+.status-page .status-ring.secondary{inset:-18px;border-radius:41px;animation-delay:.6s}
+.status-recorded{width:max-content;max-width:100%;display:inline-flex;align-items:center;gap:7px;margin:0 auto 22px;padding:7px 11px;border-radius:999px;background:var(--status-soft);color:var(--status-strong);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.55px;animation:status-fade-up .45s .55s ease both}
+.status-recorded span{width:7px;height:7px;border-radius:50%;background:var(--status-accent);box-shadow:0 0 0 4px var(--status-glow);animation:status-dot 1.8s ease-in-out infinite}
+.status-page .status-facts{border-radius:17px;box-shadow:0 9px 28px rgba(31,49,78,.05);animation:status-fade-up .5s .7s ease both}
+.status-page .status-facts div{padding:15px 17px;background:linear-gradient(145deg,#fff,#f8fafc)}
+.status-celebration{position:absolute;z-index:2;inset:0;pointer-events:none}
+.status-celebration b{position:absolute;left:50%;top:96px;width:6px;height:12px;border-radius:2px;background:#20b77f;opacity:0;animation:confetti-fall 1.25s .5s ease-out both}
+.status-celebration b:nth-child(2n){background:#19b9dc}.status-celebration b:nth-child(3n){background:#f1b33d}.status-celebration b:nth-child(4n){background:#8b6fda}
+.status-celebration b:nth-child(1){--x:-145px;--r:120deg}.status-celebration b:nth-child(2){--x:-118px;--r:220deg}.status-celebration b:nth-child(3){--x:-88px;--r:80deg}.status-celebration b:nth-child(4){--x:-55px;--r:190deg}.status-celebration b:nth-child(5){--x:-27px;--r:310deg}.status-celebration b:nth-child(6){--x:20px;--r:170deg}.status-celebration b:nth-child(7){--x:48px;--r:260deg}.status-celebration b:nth-child(8){--x:78px;--r:90deg}.status-celebration b:nth-child(9){--x:105px;--r:230deg}.status-celebration b:nth-child(10){--x:138px;--r:140deg}.status-celebration b:nth-child(11){--x:-165px;--r:280deg}.status-celebration b:nth-child(12){--x:165px;--r:200deg}
+
 @keyframes pulse-ring { 0% { transform: scale(.82); opacity: .25; } 70%, 100% { transform: scale(1.18); opacity: 0; } }
 @keyframes card-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes status-card-in{from{opacity:0;transform:translateY(22px) scale(.975)}to{opacity:1;transform:none}}
+@keyframes status-icon-pop{from{opacity:0;transform:scale(.5) rotate(-8deg)}to{opacity:1;transform:none}}
+@keyframes status-draw{to{stroke-dashoffset:0}}
+@keyframes status-fade-up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes status-dot{50%{transform:scale(.72);opacity:.65}}
+@keyframes status-orb{50%{transform:translate3d(0,18px,0) scale(1.04)}}
+@keyframes confetti-fall{0%{opacity:0;transform:translate(0,0) rotate(0)}15%{opacity:1}100%{opacity:0;transform:translate(var(--x),145px) rotate(var(--r))}}
+
+@media(prefers-reduced-motion:reduce){.status-page .status-card,.status-page .status-visual,.status-page .status-recorded,.status-page .status-facts,.status-page .status-ring,.status-page .status-backdrop span,.status-page .status-celebration b,.status-page .status-visual svg *{animation:none!important}.status-page .status-visual svg *{stroke-dashoffset:0!important}}
 
 @media (max-width: 700px) {
   .flow-header { min-height: 68px; padding-inline: 14px; }
@@ -345,6 +382,8 @@ input { font: inherit; }
   .form-actions button { width: 100%; }
   .status-shell { padding: 14px; }
   .status-card { border-radius: 19px; }
+  .status-page .status-card { padding: 32px 18px; border-radius: 21px; box-shadow: 0 18px 48px rgba(27,44,73,.12); }
+  .status-page .status-visual{width:86px;height:86px;border-radius:27px}.status-page .status-visual svg{width:54px;height:54px}.status-page .status-celebration b{top:75px}
   .status-facts { grid-template-columns: 1fr; }
   .status-facts div,
   .status-facts div:nth-child(2n),

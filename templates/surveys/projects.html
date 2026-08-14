@@ -38,7 +38,7 @@
     <label id="statusLabel">Status</label>
     <div class="multi-select" data-multi-filter="status">
       <button class="multi-trigger" type="button" aria-labelledby="statusLabel" aria-expanded="false"><span>All statuses</span><i>⌄</i></button>
-      <div class="multi-menu" hidden><label><input type="checkbox" value="live"><span>Live</span></label><label><input type="checkbox" value="closed"><span>Closed</span></label></div>
+      <div class="multi-menu" hidden><div class="multi-options"><label><input type="checkbox" value="live"><span>Live</span></label><label><input type="checkbox" value="closed"><span>Closed</span></label></div></div>
     </div>
   </div>
   {% endif %}
@@ -166,4 +166,4 @@
   <div class="drawer-content" id="drawerContent"></div>
 </aside>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=21" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=22" defer></script>{% endblock %}

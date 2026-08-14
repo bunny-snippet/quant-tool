@@ -1,3 +1,5 @@
+/* Dashboard data loading, scoped graph controls, animated KPIs and SVG charts. */
+
 (() => {
   const byId = (id) => document.getElementById(id);
   const ranges = new Set(['24h', '48h', '72h', '3m', '6m', '1y']);

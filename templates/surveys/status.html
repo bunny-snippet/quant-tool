@@ -3,11 +3,25 @@
 {% block body_class %}status-page status-{{ tone }}{% endblock %}
 {% block content %}
 <main class="status-shell">
+  <div class="status-backdrop" aria-hidden="true"><span></span><span></span><span></span></div>
   <section class="status-card">
-    <div class="status-visual" aria-hidden="true"><span></span><i>{% if tone == 'success' %}✓{% elif tone == 'warning' %}!{% elif tone == 'danger' %}×{% else %}i{% endif %}</i></div>
+    {% if tone == 'success' %}<div class="status-celebration" aria-hidden="true">{% for item in "123456789012" %}<b></b>{% endfor %}</div>{% endif %}
+    <div class="status-visual" aria-hidden="true">
+      <span class="status-ring"></span><span class="status-ring secondary"></span>
+      {% if tone == 'success' %}
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="22"></circle><path d="M21 32.5l7 7L44 24"></path></svg>
+      {% elif tone == 'warning' %}
+        <svg viewBox="0 0 64 64"><path d="M32 10L57 53H7L32 10Z"></path><path d="M32 24v13"></path><path d="M32 45h.01"></path></svg>
+      {% elif tone == 'danger' %}
+        <svg viewBox="0 0 64 64"><path d="M32 8l22 8v15c0 13-8.7 21.8-22 26-13.3-4.2-22-13-22-26V16l22-8Z"></path><path d="M24 24l16 16M40 24L24 40"></path></svg>
+      {% else %}
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="23"></circle><path d="M32 29v17"></path><path d="M32 20h.01"></path></svg>
+      {% endif %}
+    </div>
     <p class="flow-eyebrow">Survey status</p>
     <h1>{{ title }}</h1>
     <p class="status-message">{{ message }}</p>
+    <div class="status-recorded"><span></span>Result recorded</div>
     <dl class="status-facts">
       <div><dt>Status</dt><dd>{{ status_label }}</dd></div>
       <div><dt>RID</dt><dd>{{ rid }}</dd></div>
@@ -19,4 +33,3 @@
   </section>
 </main>
 {% endblock %}
-

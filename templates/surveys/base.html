@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=35">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=37">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="page-{{ active_page|default:'workspace' }}">
@@ -20,7 +20,6 @@
         <span class="brand-mark"><span></span><span></span><span></span></span>
         <span class="brand-copy"><strong>Exchange Hub</strong><small>Inventory workspace</small></span>
       </a>
-
       <nav class="nav-list">
         {% if 'dashboard.view' in access_codes %}<a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
           <span class="nav-icon">⌁</span><span>Dashboard</span>
@@ -39,7 +38,7 @@
           {% if reason_filters.client %}{% for client in term_reason_clients %}<a class="nav-child-link {% if client_filter == client.survey__client_id|stringformat:'s' %}active{% endif %}" href="{% url 'termination-reasons' %}?client={{ client.survey__client_id }}"><i></i>{{ client.survey__client__name }}</a>{% endfor %}{% endif %}
         </div>{% endif %}{% endif %}
         {% if 'prescreener_data.view' in access_codes %}<a class="nav-item {% if active_page == 'prescreened-data' %}active{% endif %}" href="{% url 'prescreened-data' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Prescreened Data</span>
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Panelist Data</span>
         </a>{% endif %}
         {% if 'user_hits.view' in access_codes %}<a class="nav-item {% if active_page == 'user-hits' %}active{% endif %}" href="{% url 'user-hits' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>User Hits</span>
@@ -82,7 +81,7 @@
     </main>
   </div>
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-  <script src="{% static 'surveys/app.js' %}?v=6" defer></script>
+  <script src="{% static 'surveys/app.js' %}?v=7" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

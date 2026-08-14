@@ -32,16 +32,16 @@ def _clean_token(value) -> str:
 def _canonical_attribute(question_key, question_text, question_category="") -> str:
     source = " ".join(
         (_clean_token(question_key), _clean_token(question_text), _clean_token(question_category))
-    )
-    if re.search(r"\b(date_of_birth|birth_date|birthday|dob)\b", source):
+    ).replace("_", " ")
+    if re.search(r"\b(date of birth|birth date|birthday|dob)\b", source):
         return "date_of_birth"
-    if re.search(r"\b(age|years_old)\b", source):
+    if re.search(r"\b(age|years old)\b", source):
         return "age"
     if re.search(r"\b(gender|sex)\b", source):
         return "gender"
     if re.search(r"\b(ethnicity|ethnic|race)\b", source):
         return "ethnicity"
-    if re.search(r"\b(postal|postcode|zip|pincode|pin_code)\b", source):
+    if re.search(r"\b(postal|postcode|zip|pincode|pin code)\b", source):
         return "postal_code"
     if re.search(r"\b(country|nation)\b", source):
         return "country"
@@ -77,9 +77,14 @@ def _age_from_value(value, submitted_at) -> int | None:
         return age if 0 <= age <= 125 else None
     except (TypeError, ValueError):
         pass
-    try:
-        born = datetime.strptime(text, "%Y-%m-%d").date()
-    except (TypeError, ValueError):
+    born = None
+    for date_format in ("%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            born = datetime.strptime(text, date_format).date()
+            break
+        except (TypeError, ValueError):
+            continue
+    if born is None:
         return None
     reference = timezone.localtime(submitted_at).date() if submitted_at else date.today()
     age = reference.year - born.year - ((reference.month, reference.day) < (born.month, born.day))

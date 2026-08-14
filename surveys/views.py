@@ -231,8 +231,9 @@ PRESCREENER_DATA_COLUMN_PERMISSIONS = {
     "uid": "prescreener_data.column.uid",
     "market": "prescreener_data.column.market",
     "profile": "prescreener_data.column.profile",
-    "answers": "prescreener_data.column.answers",
     "captured": "prescreener_data.column.captured",
+    "usage_count": "prescreener_data.column.usage_count",
+    "answers": "prescreener_data.column.answers",
 }
 
 UNSUCCESSFUL_STATUS_LABELS = {
@@ -400,7 +401,7 @@ def user_hits_page(request):
 
 @function_permission_required("prescreener_data.view")
 def prescreener_data_page(request):
-    """Read-only, permission-scoped browser for the isolated pre-screener vault."""
+    """Read-only, permission-scoped Panelist Data browser for the isolated vault."""
 
     codes = effective_permission_codes(request.user)
     filters_access = _component_access(codes, PRESCREENER_DATA_FILTER_PERMISSIONS)
@@ -433,7 +434,7 @@ def prescreener_data_page(request):
             }
             queryset = base.prefetch_related("question_answers")
             if selected["search"]:
-                queryset = queryset.filter(Q(uid__icontains=selected["search"]) | Q(rid__icontains=selected["search"]))
+                queryset = queryset.filter(uid__icontains=selected["search"])
             if selected["country"]:
                 queryset = queryset.filter(country_code__iexact=selected["country"])
             if selected["language"]:
@@ -493,7 +494,7 @@ def prescreener_data_export(request):
 
     queryset = PrescreenerSubmission.objects.using("prescreener_vault").all()
     if selected["search"]:
-        queryset = queryset.filter(Q(uid__icontains=selected["search"]) | Q(rid__icontains=selected["search"]))
+        queryset = queryset.filter(uid__icontains=selected["search"])
     if selected["country"]:
         queryset = queryset.filter(country_code__iexact=selected["country"])
     if selected["language"]:
@@ -511,7 +512,7 @@ def prescreener_data_export(request):
                 submission.language, submission.language_code, submission.respondent_age,
                 submission.respondent_age_group, submission.respondent_gender,
                 submission.respondent_ethnicity, submission.respondent_postal_code,
-                submission.answer_count, _excel_datetime(submission.submitted_at),
+                submission.usage_count, _excel_datetime(submission.submitted_at),
                 _excel_datetime(submission.captured_at),
             ]
 
@@ -529,11 +530,11 @@ def prescreener_data_export(request):
 
     local_now = timezone.localtime()
     return build_excel_response(
-        f"prescreened-data-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+        f"panelist-data-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
         [
             ExcelSheet(
                 "Submissions",
-                ["UID", "RID", "Country", "Country code", "Language", "Language code", "Age", "Age group", "Gender", "Ethnicity", "ZIP / postal code", "Answer count", "Submitted at (IST)", "Captured at (IST)"],
+                ["UID", "RID", "Country", "Country code", "Language", "Language code", "Age", "Age group", "Gender", "Ethnicity", "ZIP / postal code", "Visits", "Registered at (IST)", "Captured at (IST)"],
                 submission_rows(),
                 [22, 14, 20, 13, 17, 14, 9, 13, 14, 24, 18, 13, 22, 22],
             ),

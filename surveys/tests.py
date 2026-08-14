@@ -382,7 +382,7 @@ class SurveyAPITests(TestCase):
         self.survey.refresh_from_db()
         self.assertIsNotNone(self.survey.quota_synced_at)
 
-    def test_projects_and_dashboard_render(self):
+    def test_projects_render_and_employee_dashboard_is_restricted(self):
         projects = self.client.get(reverse("projects"))
         self.assertContains(projects, "Survey inventory")
         self.assertContains(projects, "Pre-screening questions")
@@ -396,10 +396,7 @@ class SurveyAPITests(TestCase):
         self.assertNotContains(projects, 'id="cpiFilterTrigger"')
         self.assertNotContains(projects, "Quest")
         dashboard = self.client.get(reverse("dashboard"))
-        self.assertContains(dashboard, "Performance intelligence")
-        self.assertContains(dashboard, 'id="volumeChart"')
-        self.assertContains(dashboard, 'data-dashboard-range="24h"')
-        self.assertContains(dashboard, 'data-dashboard-range="1y"')
+        self.assertEqual(dashboard.status_code, 403)
 
         profile = self.user.employee_profile
         profile.role = Role.objects.get(slug="admin")

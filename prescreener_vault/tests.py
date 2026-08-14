@@ -89,6 +89,7 @@ class PrescreenerVaultFlowTests(TestCase):
         self.assertEqual(submission.respondent_age_group, "18-24")
         self.assertEqual(submission.respondent_gender, "male")
         self.assertEqual(submission.answer_count, 2)
+        self.assertEqual(submission.usage_count, 1)
         gender = PrescreenerAnswer.objects.using(DATABASE_ALIAS).get(
             submission=submission, question_key="GENDER"
         )
@@ -119,13 +120,28 @@ class PrescreenerVaultFlowTests(TestCase):
             "country": "US", "age_group": "18-24", "gender": "male",
         })
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Prescreened Data")
-        self.assertContains(response, attempt.rid)
+        self.assertContains(response, "Panelist Data")
+        self.assertContains(response, "Country / Language")
+        self.assertContains(response, "Profile Specs")
+        self.assertContains(response, "Registered at")
+        self.assertContains(response, "Visits")
+        self.assertContains(response, "Profile Information")
+        self.assertContains(response, "Profile details")
+        self.assertNotContains(response, attempt.rid)
         self.assertContains(response, "What is your age?")
         self.assertContains(response, "Male")
         self.assertContains(response, "All countries")
         self.assertContains(response, "vault-answer-drawer")
         self.assertNotContains(response, "<details")
+
+        rid_search = self.client.get(reverse("prescreened-data"), {"search": attempt.rid})
+        self.assertContains(rid_search, "No profiles available")
+        uid_search = self.client.get(reverse("prescreened-data"), {
+            "search": PrescreenerSubmission.objects.using(DATABASE_ALIAS).get(
+                rid=attempt.rid
+            ).uid,
+        })
+        self.assertContains(uid_search, "Profile details")
 
         exported = self.client.get(reverse("prescreened-data-export"), {
             "country": "US", "age_group": "18-24", "gender": "male",
@@ -140,6 +156,8 @@ class PrescreenerVaultFlowTests(TestCase):
         submission_text = " ".join(submissions.itertext())
         answer_text = " ".join(answers.itertext())
         self.assertIn(attempt.rid, submission_text)
+        self.assertNotIn("Answer count", submission_text)
+        self.assertIn("Visits", submission_text)
         self.assertIn("What is your age?", answer_text)
         self.assertIn("Male", answer_text)
 

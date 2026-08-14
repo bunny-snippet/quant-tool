@@ -1,3 +1,5 @@
+/* User Hits hierarchy filters, summaries, pagination and device breakdowns. */
+
 (() => {
   const byId = (id) => document.getElementById(id);
   const columns = new Set(JSON.parse(byId('hitColumnAccess')?.textContent || '[]'));
