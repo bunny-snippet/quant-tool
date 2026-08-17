@@ -9,7 +9,7 @@ from urllib.parse import quote, urlencode
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import Count, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from django.core.paginator import Paginator
@@ -35,6 +35,7 @@ from accounts.access import (
 )
 from vendors.services import (
     AllocationUnavailable,
+    annotate_survey_pricing_for_user,
     finalize_attempt_capacity,
     reserve_attempt_capacity,
     resolve_vendor_survey_context,
@@ -78,11 +79,19 @@ from .serializers import (
 from .pagination import SurveyPagination
 from prescreener_vault.services import (
     PrescreenerVaultError,
+    answers_with_entry_postal_code,
     capture_prescreener_submission,
     operational_answer_value,
+    wrong_target_country_answers,
 )
 from prescreener_vault.models import PrescreenerSubmission
 from .providers import ProviderError, get_provider
+from .geolocation import (
+    geolocation_client_data,
+    is_wrong_target_country,
+    resolve_entry_geolocation,
+    survey_target_country_code,
+)
 from .rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 from .rfg_text import clean_rfg_display_text
 from .services import reconcile_attempt_status, replace_survey_quotas, replace_survey_targeting, sync_surveys
@@ -294,7 +303,10 @@ def dashboard_page(request):
 @function_permission_required("projects.view")
 def projects_page(request):
     codes = effective_permission_codes(request.user)
-    visible_surveys = scope_surveys_for_user(Survey.objects.all(), request.user)
+    visible_surveys = annotate_survey_pricing_for_user(
+        scope_surveys_for_user(Survey.objects.all(), request.user),
+        request.user,
+    )
     countries = visible_surveys.exclude(country_code="").values_list("country_code", "country").distinct().order_by("country_code")
     is_client_scoped_panel = bool(
         vendor_scope_user_id(request.user) or organization_client_ids_for_user(request.user) is not None
@@ -321,7 +333,10 @@ def projects_page(request):
     can_sort_cpi = project_filters["cpi"]
     cpi_min, cpi_max = 0, 100
     if can_sort_cpi:
-        cpi_bounds = visible_surveys.aggregate(minimum=Min("cpi"), maximum=Max("cpi"))
+        cpi_bounds = visible_surveys.aggregate(
+            minimum=Min("visible_cpi"),
+            maximum=Max("visible_cpi"),
+        )
         cpi_min = cpi_bounds["minimum"] or 0
         cpi_max = cpi_bounds["maximum"] or 100
         if cpi_max <= cpi_min:
@@ -974,6 +989,52 @@ def _finish_local_rfg_attempt(attempt, answers, request, *, result, reason):
     return locked
 
 
+def _finish_wrong_target_country_attempt(attempt, request, location):
+    """Record a local S4 before any prescreener question or provider redirect."""
+    now = timezone.now()
+    expected = survey_target_country_code(attempt.survey)
+    actual = str((location or {}).get("country_code") or "").upper()
+    vault_answers = wrong_target_country_answers(attempt, location)
+    if settings.PRESCREENER_VAULT_ENABLED:
+        try:
+            capture_prescreener_submission(attempt, vault_answers, submitted_at=now)
+        except PrescreenerVaultError:
+            logger.exception("Wrong-target-country vault capture failed for rid=%s", attempt.rid)
+    with transaction.atomic():
+        locked = SurveyAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if locked.status != SurveyAttempt.Status.INITIATED:
+            return locked
+        client_data = {**get_request_client_data(request), **geolocation_client_data(location)}
+        locked.answers = operational_answer_value(vault_answers)
+        locked.submitted_at = now
+        locked.callback_at = now
+        locked.last_callback_at = now
+        locked.callback_ip = get_request_ip(request) or locked.initiation_ip
+        locked.exit_user_agent = client_data.get("user_agent", "")
+        locked.exit_browser = client_data.get("browser", "")
+        locked.exit_device = client_data.get("device", "")
+        locked.exit_os = client_data.get("os", "")
+        locked.exit_client_data = client_data
+        locked.status = SurveyAttempt.Status.QUALITY_TERMINATED
+        locked.status_source = "local_country_guard"
+        locked.loi_seconds = locked.calculate_loi_seconds(now)
+        locked.upstream_transaction_data = {
+            **(locked.upstream_transaction_data or {}),
+            "local_country_guard": {
+                "status": "Wrong target country", "reason": "Wrong target country",
+                "expected_country": expected, "detected_country": actual,
+                "geo_source": str((location or {}).get("source") or ""),
+            },
+        }
+        locked.save(update_fields=[
+            "answers", "submitted_at", "callback_at", "last_callback_at", "callback_ip",
+            "exit_user_agent", "exit_browser", "exit_device", "exit_os", "exit_client_data",
+            "status", "status_source", "loi_seconds", "upstream_transaction_data", "updated_at",
+        ])
+        finalize_attempt_capacity(locked)
+    return locked
+
+
 @require_http_methods(["GET", "POST"])
 def survey_start(request):
     if request.method == "GET" and not request.GET.get("rid"):
@@ -1052,6 +1113,11 @@ def survey_start(request):
                 "The provider entry link is temporarily unavailable. Please try again shortly.",
                 status_code=503,
             )
+        entry_location = resolve_entry_geolocation(request)
+        entry_client_data = {
+            **get_request_client_data(request),
+            **geolocation_client_data(entry_location),
+        }
         try:
             with transaction.atomic():
                 allocation_context = resolve_vendor_survey_context(
@@ -1064,7 +1130,7 @@ def survey_start(request):
                     survey,
                     platform_user,
                     get_request_ip(request),
-                    client_data=get_request_client_data(request),
+                    client_data=entry_client_data,
                 )
                 if allocation_context:
                     reserve_attempt_capacity(
@@ -1091,12 +1157,34 @@ def survey_start(request):
         return _invalid_survey_link(request, status_code=404)
     attempt = backfill_attempt_entry_audit(attempt, request)
 
+    entry_location = {
+        "ip": attempt.initiation_ip or "",
+        "country_code": (attempt.entry_client_data or {}).get("geo_country_code", ""),
+        "country": (attempt.entry_client_data or {}).get("geo_country", ""),
+        "postal_code": (attempt.entry_client_data or {}).get("geo_postal_code", ""),
+        "source": (attempt.entry_client_data or {}).get("geo_source", ""),
+    }
+    if not entry_location["country_code"] and request.method == "GET":
+        entry_location = resolve_entry_geolocation(request)
+        geo_updates = geolocation_client_data(entry_location)
+        if geo_updates:
+            merged_client_data = {**(attempt.entry_client_data or {}), **geo_updates}
+            SurveyAttempt.objects.filter(pk=attempt.pk).update(entry_client_data=merged_client_data)
+            attempt.entry_client_data = merged_client_data
+    if attempt.status == SurveyAttempt.Status.INITIATED and is_wrong_target_country(attempt.survey, entry_location):
+        attempt = _finish_wrong_target_country_attempt(attempt, request, entry_location)
+        return HttpResponseRedirect(
+            f"{reverse('survey-status')}?{urlencode({'status': '4', 'rid': attempt.rid})}"
+        )
+
     if request.method == "POST":
         answers, errors = _collect_prescreener_answers(request, attempt.survey)
         if not errors:
             try:
                 if settings.PRESCREENER_VAULT_ENABLED:
-                    capture_prescreener_submission(attempt, answers)
+                    capture_prescreener_submission(
+                        attempt, answers_with_entry_postal_code(attempt, answers)
+                    )
                 provider = None
                 if attempt.survey.integration_id and attempt.survey.integration.provider_code == "rfg":
                     provider = get_provider(attempt.survey.integration)
@@ -1403,7 +1491,25 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [HasFunctionPermission]
 
     def get_queryset(self):
-        return scope_surveys_for_user(super().get_queryset(), self.request.user)
+        queryset = annotate_survey_pricing_for_user(
+            scope_surveys_for_user(super().get_queryset(), self.request.user),
+            self.request.user,
+        )
+        completed_attempts = (
+            SurveyAttempt.objects.filter(
+                survey_id=OuterRef("pk"),
+                status=SurveyAttempt.Status.COMPLETED,
+            )
+            .values("survey_id")
+            .annotate(total=Count("pk"))
+            .values("total")[:1]
+        )
+        return queryset.annotate(
+            platform_completes=Coalesce(
+                Subquery(completed_attempts, output_field=IntegerField()),
+                Value(0),
+            )
+        )
 
     def get_required_function_permission(self):
         if self.action == "export":
@@ -1424,7 +1530,15 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         cpi_filtering = any(self.request.query_params.get(name) not in {None, ""} for name in ("min_cpi", "max_cpi"))
         if (cpi_ordering or cpi_filtering) and not has_function_access(self.request.user, "projects.filter.cpi"):
             raise PermissionDenied("Your account cannot filter or sort projects by CPI.")
-        return super().filter_queryset(queryset)
+        queryset = super().filter_queryset(queryset)
+        if cpi_ordering:
+            direction = "-" if self.request.query_params.get("ordering", "").startswith("-") else ""
+            queryset = queryset.order_by(
+                f"{direction}visible_cpi",
+                "-source_modified_at",
+                "-created_at",
+            )
+        return queryset
 
     def get_serializer_class(self):
         return SurveyDetailSerializer if self.action == "retrieve" else SurveyListSerializer
@@ -1447,9 +1561,9 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
             OpenApiParameter("created_to", OpenApiTypes.DATETIME, description="Source-created timestamp upper bound."),
             OpenApiParameter("modified_from", OpenApiTypes.DATETIME, description="Source-modified timestamp lower bound."),
             OpenApiParameter("modified_to", OpenApiTypes.DATETIME, description="Source-modified timestamp upper bound."),
-            OpenApiParameter("min_cpi", OpenApiTypes.NUMBER, description="Minimum CPI, inclusive."),
-            OpenApiParameter("max_cpi", OpenApiTypes.NUMBER, description="Maximum CPI, inclusive."),
-            OpenApiParameter("ordering", OpenApiTypes.STR, description="Current Projects ordering, including cpi or -cpi."),
+            OpenApiParameter("min_cpi", OpenApiTypes.NUMBER, description="Minimum viewer-visible CPI after configured cuts, inclusive."),
+            OpenApiParameter("max_cpi", OpenApiTypes.NUMBER, description="Maximum viewer-visible CPI after configured cuts, inclusive."),
+            OpenApiParameter("ordering", OpenApiTypes.STR, description="Current Projects ordering, including viewer-visible cpi or -cpi."),
         ],
         responses={(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): OpenApiTypes.BINARY},
     )
@@ -1733,6 +1847,8 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         local_now = timezone.localtime()
         headers, rows, widths = _attempt_excel_rows(queryset, request.user)
+        if not headers:
+            raise PermissionDenied("No Traffic Report columns are assigned to your account.")
         return build_excel_response(
             f"traffic-reports-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
             [ExcelSheet("Traffic Reports", headers, rows, widths)],
@@ -1975,25 +2091,29 @@ def _attempt_excel_rows(queryset, requesting_user=None):
     """Build Traffic Report rows without leaking upstream commercial data."""
 
     commercial_admin = can_view_report_commercials(requesting_user)
-    leading_headers = [
-        "Project id", "Cleint survey id", "PID", "RID", "Status", "Status source",
-        "Client name", "Country", "Study type", "Actual LOI", "Current Client CPI",
-        "Client entry link CPI",
-    ]
-    commercial_headers = ["Vendor CPI", "Vendor name"] if commercial_admin else []
-    trailing_headers = [
-        "User name", "Device",
-        "OS", "Browser", "User agent", "Entry IP", "Exit IP", "Inisitate at",
-        "Presecreent at", "Redirect at", "entry date time", "Exit date time",
-    ]
-    headers = leading_headers + commercial_headers + trailing_headers
-    leading_widths = [19, 18, 12, 14, 19, 18, 21, 18, 13, 12, 18, 20]
-    commercial_widths = [14, 20] if commercial_admin else []
-    trailing_widths = [
-        22, 13,
-        16, 18, 42, 16, 16, 22, 22, 22, 22, 22,
-    ]
-    widths = leading_widths + commercial_widths + trailing_widths
+    permitted = set(_permitted_columns(
+        effective_permission_codes(requesting_user), STUDY_COLUMN_PERMISSIONS
+    ))
+    specs = {
+        "project_id": (["Project id", "Client name"], [19, 21]),
+        "survey_id": (["Cleint survey id"], [18]),
+        "respondent_id": (["RID"], [14]),
+        "status": (["Status", "Status source"], [19, 18]),
+        "country": (["Country"], [18]),
+        "cpi": (
+            ["Current Client CPI", "Client entry link CPI"] + (["Vendor CPI", "Vendor name"] if commercial_admin else []),
+            [18, 20] + ([14, 20] if commercial_admin else []),
+        ),
+        "user": (["User name"], [22]),
+        "device": (["Device", "OS", "Browser", "User agent"], [13, 16, 18, 42]),
+        "ip": (["Entry IP", "Exit IP"], [16, 16]),
+        "loi": (["Actual LOI (minutes)"], [19]),
+        "start": (["Inisitate at", "Presecreent at", "Redirect at", "entry date time"], [22, 22, 22, 22]),
+        "end": (["Exit date time"], [22]),
+    }
+    ordered_columns = [column for column in STUDY_COLUMN_PERMISSIONS if column in permitted]
+    headers = [header for column in ordered_columns for header in specs[column][0]]
+    widths = [width for column in ordered_columns for width in specs[column][1]]
 
     def rows():
         for attempt in queryset.iterator(chunk_size=1000):
@@ -2005,40 +2125,28 @@ def _attempt_excel_rows(queryset, requesting_user=None):
                 if attempt.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}
                 else attempt.get_status_display()
             )
-            leading_values = [
-                survey.local_id,
-                survey.source_identifier,
-                attempt.user_id or (user.pk if user else ""),
-                attempt.rid,
-                status_label,
-                attempt.status_source,
-                client.name if client else survey.company_name,
-                survey.country or survey.country_code,
-                survey.survey_type or survey.group_type,
-                attempt.loi_seconds,
-                viewer_attempt_cpi(attempt, requesting_user, current=True),
-                viewer_attempt_cpi(attempt, requesting_user),
-            ]
-            commercial_values = (
-                [supplier_cpi_for_admin(attempt), supplier_label_for_admin(attempt)]
-                if commercial_admin
-                else []
-            )
-            trailing_values = [
-                (user.get_full_name() or user.username) if user else "Deleted user",
-                attempt.entry_device,
-                attempt.entry_os,
-                attempt.entry_browser,
-                attempt.entry_user_agent,
-                attempt.initiation_ip,
-                attempt.callback_ip,
-                _excel_datetime(attempt.initiated_at),
-                _excel_datetime(attempt.submitted_at),
-                _excel_datetime(attempt.redirected_at),
-                _excel_datetime(attempt.created_at),
-                _excel_datetime(attempt.callback_at or attempt.last_callback_at),
-            ]
-            yield leading_values + commercial_values + trailing_values
+            values_by_column = {
+                "project_id": [survey.local_id, client.name if client else survey.company_name],
+                "survey_id": [survey.source_identifier],
+                "respondent_id": [attempt.rid],
+                "status": [status_label, attempt.status_source],
+                "country": [survey.country or survey.country_code],
+                "cpi": [
+                    viewer_attempt_cpi(attempt, requesting_user, current=True),
+                    viewer_attempt_cpi(attempt, requesting_user),
+                    *([supplier_cpi_for_admin(attempt), supplier_label_for_admin(attempt)] if commercial_admin else []),
+                ],
+                "user": [(user.get_full_name() or user.username) if user else "Deleted user"],
+                "device": [attempt.entry_device, attempt.entry_os, attempt.entry_browser, attempt.entry_user_agent],
+                "ip": [attempt.initiation_ip, attempt.callback_ip],
+                "loi": [round((attempt.loi_seconds or 0) / 60, 2)],
+                "start": [
+                    _excel_datetime(attempt.initiated_at), _excel_datetime(attempt.submitted_at),
+                    _excel_datetime(attempt.redirected_at), _excel_datetime(attempt.created_at),
+                ],
+                "end": [_excel_datetime(attempt.callback_at or attempt.last_callback_at)],
+            }
+            yield [value for column in ordered_columns for value in values_by_column[column]]
 
     return headers, rows(), widths
 

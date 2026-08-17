@@ -4,6 +4,7 @@ drf-spectacular==0.28.0
 django-filter==25.1
 celery[redis]==5.5.3
 requests==2.32.4
+geoip2>=4.8,<6
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 whitenoise==6.9.0

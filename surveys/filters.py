@@ -21,8 +21,8 @@ class SurveyFilter(django_filters.FilterSet):
     created_to = django_filters.IsoDateTimeFilter(field_name="source_created_at", lookup_expr="lte")
     modified_from = django_filters.IsoDateTimeFilter(field_name="source_modified_at", lookup_expr="gte")
     modified_to = django_filters.IsoDateTimeFilter(field_name="source_modified_at", lookup_expr="lte")
-    min_cpi = django_filters.NumberFilter(field_name="cpi", lookup_expr="gte")
-    max_cpi = django_filters.NumberFilter(field_name="cpi", lookup_expr="lte")
+    min_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="gte")
+    max_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="lte")
 
     class Meta:
         model = Survey

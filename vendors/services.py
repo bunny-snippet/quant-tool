@@ -4,7 +4,19 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, F, Prefetch, Q
+from django.db.models import (
+    Count,
+    DecimalField,
+    Exists,
+    ExpressionWrapper,
+    F,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Value,
+)
+from django.db.models.functions import Coalesce, Round
 from django.utils import timezone
 
 from accounts.models import EmployeeProfile
@@ -31,7 +43,7 @@ class AllocationUnavailable(ValueError):
 class VendorSurveyContext:
     vendor_id: int
     client_allocation: VendorClientAllocation
-    survey_allocation: VendorSurveyAllocation
+    survey_allocation: VendorSurveyAllocation | None
     cpi_cut_percent: Decimal
     payable_cpi: Decimal | None
 
@@ -165,7 +177,7 @@ def organization_client_ids_for_user(user) -> set[int] | None:
 
 
 def scope_surveys_for_user(queryset, user):
-    """Expose only explicitly allocated projects with client and project capacity."""
+    """Expose every project under a client grant; project rules are overrides."""
 
     vendor_id = vendor_scope_user_id(user)
     organization_client_ids = organization_client_ids_for_user(user)
@@ -174,7 +186,7 @@ def scope_surveys_for_user(queryset, user):
             return queryset
         return queryset.filter(client_id__in=organization_client_ids).distinct()
     now = timezone.now()
-    client_allocations = (
+    client_allocations = list(
         VendorClientAllocation.objects.filter(
             vendor_id=vendor_id,
             vendor__is_active=True,
@@ -186,16 +198,34 @@ def scope_surveys_for_user(queryset, user):
         .filter(_available_quantity_q())
         .select_related("vendor", "vendor__employee_profile", "vendor__vendor_commercial_profile", "client")
     )
+    if not client_allocations:
+        return queryset.none()
+    allocation_ids = [row.pk for row in client_allocations]
+    client_ids = [row.client_id for row in client_allocations]
+    all_project_rules = VendorSurveyAllocation.objects.filter(
+        client_allocation_id__in=allocation_ids, survey_id=OuterRef("pk")
+    )
     available_rules = (
-        VendorSurveyAllocation.objects.filter(client_allocation__in=client_allocations, is_active=True)
+        VendorSurveyAllocation.objects.filter(client_allocation_id__in=allocation_ids, is_active=True)
         .filter(_active_window_q(now))
         .filter(_available_quantity_q())
         .select_related("client_allocation", "client_allocation__vendor", "client_allocation__vendor__employee_profile")
     )
     scoped = (
-        queryset.filter(vendor_allocations__in=available_rules, remaining__gt=0)
+        queryset.filter(client_id__in=client_ids, remaining__gt=0)
+        .annotate(
+            request_has_project_rule=Exists(all_project_rules),
+            request_has_available_project_rule=Exists(available_rules.filter(survey_id=OuterRef("pk"))),
+        )
+        .filter(Q(request_has_project_rule=False) | Q(request_has_available_project_rule=True))
         .prefetch_related(
-            Prefetch("client__vendor_allocations", queryset=client_allocations, to_attr="request_vendor_allocations"),
+            Prefetch(
+                "client__vendor_allocations",
+                queryset=VendorClientAllocation.objects.filter(pk__in=allocation_ids).select_related(
+                    "vendor", "vendor__employee_profile", "vendor__vendor_commercial_profile", "client"
+                ),
+                to_attr="request_vendor_allocations",
+            ),
             Prefetch("vendor_allocations", queryset=available_rules, to_attr="request_vendor_survey_allocations"),
         )
         .distinct()
@@ -206,7 +236,7 @@ def scope_surveys_for_user(queryset, user):
 
 
 def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True, for_update=False):
-    """Resolve the supplier's active client grant and mandatory project allocation."""
+    """Resolve the supplier client grant and optional per-project override."""
 
     organization_client_ids = organization_client_ids_for_user(user)
     if organization_client_ids is not None and survey.client_id not in organization_client_ids:
@@ -240,17 +270,15 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
         client_allocation=client_allocation,
         survey=survey,
     ).first()
-    if not survey_allocation:
-        raise AllocationUnavailable("This project is not allocated to the supplier.")
-    if not _is_active_now(survey_allocation, now):
+    if survey_allocation and not _is_active_now(survey_allocation, now):
         raise AllocationUnavailable("This project is disabled or outside its allocation dates.")
-    if require_capacity and survey_allocation.remaining_quantity < 1:
+    if require_capacity and survey_allocation and survey_allocation.remaining_quantity < 1:
         raise AllocationUnavailable("Project complete cap is exhausted.")
     if require_capacity and survey.remaining < 1:
         raise AllocationUnavailable("Upstream survey quantity is exhausted.")
 
     account_type = client_allocation.vendor.employee_profile.account_type
-    cut = survey_allocation.effective_cpi_cut_percent
+    cut = survey_allocation.effective_cpi_cut_percent if survey_allocation else client_allocation.effective_cpi_cut_percent
     if account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR:
         cut = Decimal("0.00")
     return VendorSurveyContext(
@@ -298,6 +326,107 @@ def survey_pricing_for_user(user, survey: Survey) -> tuple[Decimal | None, Decim
     return apply_employee_role_percentage(context.payable_cpi, context.cpi_cut_percent)
 
 
+def annotate_survey_pricing_for_user(queryset, user, *, alias="visible_cpi"):
+    """Annotate the exact rounded CPI displayed/exported for this viewer."""
+
+    money_field = DecimalField(max_digits=18, decimal_places=2)
+    calculation_field = DecimalField(max_digits=20, decimal_places=8)
+    cut_field = DecimalField(max_digits=7, decimal_places=4)
+    hundred = Value(Decimal("100.00"), output_field=cut_field)
+    zero_cut = Value(Decimal("0.00"), output_field=cut_field)
+
+    profile = EmployeeProfile.objects.select_related("role").filter(user=user).first()
+    role_percent = Decimal("100.00")
+    if (
+        not getattr(user, "is_superuser", False)
+        and profile
+        and profile.account_type == EmployeeProfile.AccountType.EMPLOYEE
+        and profile.role_id
+    ):
+        role_percent = min(
+            Decimal("100.00"),
+            max(Decimal("0.00"), Decimal(profile.role.cpi_visibility_percent)),
+        )
+
+    vendor_id = vendor_scope_user_id(user)
+    cut_expression = zero_cut
+    if vendor_id:
+        vendor_profile = EmployeeProfile.objects.filter(user_id=vendor_id).first()
+        if vendor_profile and vendor_profile.account_type != EmployeeProfile.AccountType.INTERNAL_VENDOR:
+            now = timezone.now()
+            client_cuts = (
+                VendorClientAllocation.objects.filter(
+                    vendor_id=vendor_id,
+                    vendor__is_active=True,
+                    vendor__vendor_commercial_profile__is_active=True,
+                    client_id=OuterRef("client_id"),
+                    client__is_active=True,
+                    is_active=True,
+                )
+                .filter(_active_window_q(now))
+                .filter(_available_quantity_q())
+                .annotate(
+                    resolved_cut=Coalesce(
+                        "cpi_cut_override_percent",
+                        "vendor__vendor_commercial_profile__default_cpi_cut_percent",
+                        zero_cut,
+                        output_field=cut_field,
+                    )
+                )
+                .values("resolved_cut")[:1]
+            )
+            project_cuts = (
+                VendorSurveyAllocation.objects.filter(
+                    client_allocation__vendor_id=vendor_id,
+                    client_allocation__vendor__is_active=True,
+                    client_allocation__vendor__vendor_commercial_profile__is_active=True,
+                    client_allocation__client_id=OuterRef("client_id"),
+                    client_allocation__client__is_active=True,
+                    client_allocation__is_active=True,
+                    survey_id=OuterRef("pk"),
+                    is_active=True,
+                )
+                .filter(_active_window_q(now))
+                .filter(_available_quantity_q())
+                .filter(_active_window_q(now, "client_allocation__"))
+                .filter(_available_quantity_q("client_allocation__"))
+                .annotate(
+                    resolved_cut=Coalesce(
+                        "cpi_cut_override_percent",
+                        "client_allocation__cpi_cut_override_percent",
+                        "client_allocation__vendor__vendor_commercial_profile__default_cpi_cut_percent",
+                        zero_cut,
+                        output_field=cut_field,
+                    )
+                )
+                .values("resolved_cut")[:1]
+            )
+            cut_expression = Coalesce(
+                Subquery(project_cuts, output_field=cut_field),
+                Subquery(client_cuts, output_field=cut_field),
+                zero_cut,
+                output_field=cut_field,
+            )
+
+    after_allocation_cut = ExpressionWrapper(
+        F("cpi") * (hundred - cut_expression) / hundred,
+        output_field=calculation_field,
+    )
+    visible_expression = ExpressionWrapper(
+        after_allocation_cut * Value(role_percent, output_field=cut_field) / hundred,
+        output_field=calculation_field,
+    )
+    return queryset.annotate(
+        **{
+            alias: Round(
+                visible_expression,
+                precision=2,
+                output_field=money_field,
+            )
+        }
+    )
+
+
 @transaction.atomic
 def reserve_attempt_capacity(
     attempt: SurveyAttempt,
@@ -317,9 +446,7 @@ def reserve_attempt_capacity(
     if existing:
         return existing
 
-    if survey_allocation is None:
-        raise AllocationUnavailable("An explicit project allocation is required.")
-    if client_allocation is None:
+    if client_allocation is None and survey_allocation is not None:
         client_allocation = survey_allocation.client_allocation
     if client_allocation is None:
         raise AllocationUnavailable("A client allocation is required.")
@@ -342,23 +469,23 @@ def reserve_attempt_capacity(
         raise AllocationUnavailable("Supplier or client access is inactive.")
     if not commercial_profile or not commercial_profile.is_active:
         raise AllocationUnavailable("Supplier commercial access is inactive.")
-    if attempt.survey_id != locked_survey_allocation.survey_id:
+    if locked_survey_allocation and attempt.survey_id != locked_survey_allocation.survey_id:
         raise AllocationUnavailable("Attempt survey does not match the assigned survey.")
     if attempt.survey.client_id != client_allocation.client_id:
         raise AllocationUnavailable("Survey is not mapped to the allocation's client.")
     if not _is_active_now(client_allocation, now):
         raise AllocationUnavailable("Client allocation is inactive or outside its active dates.")
-    if not _is_active_now(locked_survey_allocation, now):
+    if locked_survey_allocation and not _is_active_now(locked_survey_allocation, now):
         raise AllocationUnavailable("Project allocation is inactive or outside its active dates.")
     if client_allocation.remaining_quantity < 1:
         raise AllocationUnavailable("Client quantity is exhausted.")
-    if locked_survey_allocation.remaining_quantity < 1:
+    if locked_survey_allocation and locked_survey_allocation.remaining_quantity < 1:
         raise AllocationUnavailable("Project complete cap is exhausted.")
     if attempt.survey.remaining < 1:
         raise AllocationUnavailable("Upstream survey quantity is exhausted.")
 
     vendor_profile = client_allocation.vendor.employee_profile
-    cut = locked_survey_allocation.effective_cpi_cut_percent
+    cut = locked_survey_allocation.effective_cpi_cut_percent if locked_survey_allocation else client_allocation.effective_cpi_cut_percent
     if vendor_profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR:
         cut = Decimal("0.00")
     source_cpi = attempt.survey.cpi
@@ -366,8 +493,9 @@ def reserve_attempt_capacity(
 
     client_allocation.reserved_quantity += 1
     client_allocation.save(update_fields=["reserved_quantity", "updated_at"])
-    locked_survey_allocation.reserved_quantity += 1
-    locked_survey_allocation.save(update_fields=["reserved_quantity", "updated_at"])
+    if locked_survey_allocation:
+        locked_survey_allocation.reserved_quantity += 1
+        locked_survey_allocation.save(update_fields=["reserved_quantity", "updated_at"])
 
     SurveyAttempt.objects.filter(pk=attempt.pk).update(
         vendor=client_allocation.vendor,

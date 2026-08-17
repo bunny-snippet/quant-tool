@@ -98,6 +98,57 @@ class PrescreenerVaultFlowTests(TestCase):
         self.assertEqual(gender.answer_labels, ["Male"])
         self.assertEqual(gender.upstream_values, ["1"])
 
+    @patch("surveys.views.resolve_entry_geolocation")
+    def test_wrong_entry_country_is_s4_before_prescreener_and_audited(self, geo_lookup):
+        geo_lookup.return_value = {
+            "ip": "8.8.8.8", "country_code": "IN", "country": "India",
+            "postal_code": "110001", "source": "test",
+        }
+        attempt = self._attempt()
+
+        response = self.client.get(reverse("survey-start"), {"rid": attempt.rid})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("status=4", response["Location"])
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(attempt.status_source, "local_country_guard")
+        self.assertEqual(
+            attempt.upstream_transaction_data["local_country_guard"]["reason"],
+            "Wrong target country",
+        )
+        submission = PrescreenerSubmission.objects.using(DATABASE_ALIAS).get(rid=attempt.rid)
+        self.assertEqual(submission.respondent_postal_code, "110001")
+        self.assertTrue(
+            PrescreenerAnswer.objects.using(DATABASE_ALIAS).filter(
+                submission=submission,
+                question_text="Entry validation result",
+                answer_labels=["Wrong target country"],
+            ).exists()
+        )
+
+    def test_entry_ip_postal_is_added_to_vault_without_a_prescreener_question(self):
+        attempt = create_attempt(
+            self.survey,
+            self.user,
+            "8.8.8.8",
+            client_data={"geo_country_code": "US", "geo_postal_code": "90210"},
+        )
+
+        response = self._submit(attempt)
+
+        self.assertEqual(response.status_code, 302)
+        submission = PrescreenerSubmission.objects.using(DATABASE_ALIAS).get(rid=attempt.rid)
+        self.assertEqual(submission.respondent_postal_code, "90210")
+        self.assertEqual(submission.answer_count, 3)
+        self.assertTrue(
+            PrescreenerAnswer.objects.using(DATABASE_ALIAS).filter(
+                submission=submission,
+                question_key="postal_code",
+                question_text="Postal code (derived from entry IP)",
+            ).exists()
+        )
+
     def test_same_profile_answers_on_new_links_create_distinct_uid_rows(self):
         first = self._attempt()
         second = self._attempt()

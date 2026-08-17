@@ -177,6 +177,7 @@ class SurveyListSerializer(serializers.ModelSerializer):
     display_company_name = serializers.SerializerMethodField()
     country_label = serializers.SerializerMethodField()
     progress_percent = serializers.SerializerMethodField()
+    completes = serializers.SerializerMethodField()
     source_created_display = serializers.SerializerMethodField()
     source_modified_display = serializers.SerializerMethodField()
     start_link = serializers.SerializerMethodField()
@@ -214,7 +215,13 @@ class SurveyListSerializer(serializers.ModelSerializer):
         return obj.company_name
 
     def get_progress_percent(self, obj) -> float:
-        return round((obj.completes / obj.sample_size) * 100, 1) if obj.sample_size else 0
+        completes = self.get_completes(obj)
+        return round((completes / obj.sample_size) * 100, 1) if obj.sample_size else 0
+
+    def get_completes(self, obj) -> int:
+        """Return combined platform completes for every user on this survey."""
+
+        return int(getattr(obj, "platform_completes", obj.completes) or 0)
 
     def get_source_created_display(self, obj) -> str | None:
         return obj.raw_data.get("createdDate") or None

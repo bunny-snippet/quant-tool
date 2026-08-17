@@ -89,12 +89,21 @@
       <input type="hidden" name="record_id">
       <div class="vendor-form-grid">
         <label><span>Supplier</span><select name="client_vendor" required></select></label>
-        <label><span>Client</span><select name="client" required></select></label>
+        <label class="wide"><span>Clients</span>
+          <div class="vendor-client-picker" id="vendorClientPicker">
+            <button type="button" class="vendor-client-picker-trigger" aria-expanded="false"><span>Select one or more clients</span><b>⌄</b></button>
+            <div class="vendor-client-picker-menu" hidden>
+              <input type="search" placeholder="Search clients..." aria-label="Search clients">
+              <div class="vendor-client-picker-options"></div>
+            </div>
+          </div>
+          <select name="client" multiple hidden></select>
+        </label>
         <label><span>Total complete limit</span><input name="client_quantity_limit" type="number" min="0" step="1" required></label>
         <label><span>CPI cut override (%)</span><input name="client_cpi_cut" type="number" min="0" max="100" step="0.01" placeholder="Use supplier default"></label>
         <label><span>Starts at</span><input name="client_starts_at" type="datetime-local"></label>
         <label><span>Ends at</span><input name="client_ends_at" type="datetime-local"></label>
-        <p class="vendor-form-note wide">This is the total complete ceiling across explicitly allocated projects. Projects are added separately in Survey allocations.</p>
+        <p class="vendor-form-note wide">Each selected client exposes all of its live projects automatically. This limit is shared across every project of that client; Survey allocations are optional per-project overrides.</p>
       </div>
       <label class="vendor-active-toggle"><input name="is_active" type="checkbox" checked><span>Active</span><small>Inactive client grants hide every allocated project.</small></label>
       <div class="vendor-form-error" data-vendor-form-error hidden></div>
@@ -141,4 +150,4 @@
   </form>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=8" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=9" defer></script>{% endblock %}

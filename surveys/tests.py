@@ -2,6 +2,7 @@ import csv
 import os
 import zipfile
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 from io import BytesIO, StringIO
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
@@ -334,6 +335,94 @@ class SurveyAPITests(TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["local_id"] for item in response.data["results"]], [higher.local_id])
+
+    def test_cpi_filter_sort_and_export_use_role_adjusted_price(self):
+        role = Role.objects.get(slug="team-lead")
+        role.cpi_visibility_percent = Decimal("50.00")
+        role.save(update_fields=["cpi_visibility_percent"])
+        EmployeeProfile.objects.filter(user=self.user).update(role=role)
+        self.user._state.fields_cache.pop("employee_profile", None)
+        UserFunctionOverride.objects.create(
+            user=self.user,
+            function=AccessFunction.objects.get(code="projects.filter.cpi"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        self.survey.cpi = Decimal("2.00")
+        self.survey.save(update_fields=["cpi"])
+        five_dollar_visible = Survey.objects.create(
+            source_id=9888,
+            name="Visible at five",
+            cpi=Decimal("10.00"),
+        )
+        Survey.objects.create(
+            source_id=9889,
+            name="Visible above range",
+            cpi=Decimal("20.00"),
+        )
+
+        params = {"min_cpi": "1.00", "max_cpi": "5.00", "ordering": "-cpi"}
+        response = self.api.get(reverse("survey-list"), params)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["local_id"] for item in response.data["results"]],
+            [five_dollar_visible.local_id, self.survey.local_id],
+        )
+        self.assertEqual(
+            [Decimal(str(item["cpi"])) for item in response.data["results"]],
+            [Decimal("5.00"), Decimal("1.00")],
+        )
+
+        export_rows = xlsx_rows(self.api.get(reverse("survey-export"), params))
+        cpi_index = export_rows[0].index("CPI")
+        survey_id_index = export_rows[0].index("Survey ID")
+        exported = {
+            str(row[survey_id_index]): Decimal(str(row[cpi_index]))
+            for row in export_rows[1:]
+        }
+        self.assertEqual(exported, {
+            str(five_dollar_visible.source_id): Decimal("5.00"),
+            str(self.survey.source_id): Decimal("1.00"),
+        })
+
+    def test_project_completes_are_combined_across_all_users(self):
+        second_user = get_user_model().objects.create_user(username="second-panelist")
+        for index in range(7):
+            SurveyAttempt.objects.create(
+                rid=f"A{index:09d}",
+                survey=self.survey,
+                platform_user=self.user,
+                user_id=str(self.user.pk),
+                status=SurveyAttempt.Status.COMPLETED,
+            )
+        for index in range(5):
+            SurveyAttempt.objects.create(
+                rid=f"B{index:09d}",
+                survey=self.survey,
+                platform_user=second_user,
+                user_id=str(second_user.pk),
+                status=SurveyAttempt.Status.COMPLETED,
+            )
+        SurveyAttempt.objects.create(
+            rid="C000000000",
+            survey=self.survey,
+            platform_user=second_user,
+            user_id=str(second_user.pk),
+            status=SurveyAttempt.Status.TERMINATED,
+        )
+        self.survey.completes = 999
+        self.survey.save(update_fields=["completes"])
+
+        response = self.api.get(reverse("survey-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["completes"], 12)
+        self.assertEqual(response.data["results"][0]["progress_percent"], 24.0)
+        export_rows = xlsx_rows(self.api.get(reverse("survey-export")))
+        self.assertEqual(
+            Decimal(str(export_rows[1][export_rows[0].index("Completes")])),
+            Decimal("12"),
+        )
 
     def test_project_export_uses_filters_and_column_permissions(self):
         UserFunctionOverride.objects.create(
@@ -848,17 +937,47 @@ class StudiesTrackingTests(TestCase):
         self.assertIn(".xlsx", response["Content-Disposition"])
         rows = xlsx_rows(response)
         self.assertEqual(rows[0], [
-            "Project id", "Cleint survey id", "PID", "RID", "Status", "Status source",
-            "Client name", "Country", "Study type", "Actual LOI", "Current Client CPI",
-            "Client entry link CPI", "Vendor CPI", "Vendor name", "User name", "Device",
-            "OS", "Browser", "User agent", "Entry IP", "Exit IP", "Inisitate at",
-            "Presecreent at", "Redirect at", "entry date time", "Exit date time",
+            "Project id", "Client name", "Cleint survey id", "Country",
+            "Current Client CPI", "Client entry link CPI", "Vendor CPI", "Vendor name",
+            "RID", "User name", "Device", "OS", "Browser", "User agent",
+            "Entry IP", "Exit IP", "Actual LOI (minutes)", "Status", "Status source",
+            "Inisitate at", "Presecreent at", "Redirect at", "entry date time",
+            "Exit date time",
         ])
         self.assertIn("Kanik Sharma", rows[1])
         self.assertIn(self.complete.rid, rows[1])
         self.assertNotIn("Pre-screener answers", rows[0])
         self.assertNotIn("Outbound supplier URL", rows[0])
         self.assertNotIn("Ee4Ff5Gg6H", str(rows))
+        self.assertEqual(
+            rows[1][rows[0].index("Actual LOI (minutes)")],
+            "1.37",
+        )
+
+    def test_traffic_export_omits_columns_denied_to_the_user(self):
+        UserFunctionOverride.objects.create(
+            user=self.kanik,
+            function=AccessFunction.objects.get(code="attempts.export"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        UserFunctionOverride.objects.create(
+            user=self.kanik,
+            function=AccessFunction.objects.get(code="studies.column.ip"),
+            effect=UserFunctionOverride.Effect.DENY,
+        )
+        UserFunctionOverride.objects.create(
+            user=self.kanik,
+            function=AccessFunction.objects.get(code="studies.column.respondent_id"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        scoped_api = APIClient()
+        scoped_api.force_authenticate(self.kanik)
+
+        rows = xlsx_rows(scoped_api.get(reverse("survey-attempt-export")))
+
+        self.assertNotIn("Entry IP", rows[0])
+        self.assertNotIn("Exit IP", rows[0])
+        self.assertIn("RID", rows[0])
 
     def test_traffic_export_separates_admin_commercials_from_team_lead_cpi(self):
         role = Role.objects.get(slug="team-lead")
@@ -940,6 +1059,11 @@ class StudiesTrackingTests(TestCase):
         UserFunctionOverride.objects.create(
             user=external,
             function=AccessFunction.objects.get(code="attempts.export"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        UserFunctionOverride.objects.create(
+            user=external,
+            function=AccessFunction.objects.get(code="studies.column.cpi"),
             effect=UserFunctionOverride.Effect.ALLOW,
         )
         external_attempt = SurveyAttempt.objects.create(

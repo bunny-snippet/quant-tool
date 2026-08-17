@@ -158,6 +158,56 @@ def _question_snapshots(attempt, answers):
     return snapshots, dimensions, age, _age_group(age), gender, ethnicity, postal_code
 
 
+def answers_with_entry_postal_code(attempt, answers):
+    """Add an IP-derived postal value to Panelist Data, never to the form/provider."""
+    enriched = copy.deepcopy(answers or {})
+    *_, postal_code = _question_snapshots(attempt, enriched)
+    geo_postal = str((attempt.entry_client_data or {}).get("geo_postal_code") or "").strip()
+    if postal_code or not geo_postal:
+        return enriched
+    enriched["system_ip_postal"] = {
+        "question_id": "system_ip_postal", "question_key": "postal_code",
+        "question_text": "Postal code (derived from entry IP)",
+        "values": [geo_postal], "upstream_values": [geo_postal],
+    }
+    return enriched
+
+
+def wrong_target_country_answers(attempt, location):
+    """Build vault-only audit answers for an entry-country rejection."""
+    actual_code = str((location or {}).get("country_code") or "").upper()
+    actual_name = str((location or {}).get("country") or "").strip()
+    expected_code = str(attempt.survey.country_code or "").upper()
+    expected_name = str(attempt.survey.country or "").strip()
+    actual = " · ".join(value for value in (actual_code, actual_name) if value)
+    expected = " · ".join(value for value in (expected_code, expected_name) if value)
+    answers = {
+        "system_target_validation": {
+            "question_id": "system_target_validation", "question_key": "entry_validation",
+            "question_text": "Entry validation result", "values": ["Wrong target country"],
+            "upstream_values": ["Wrong target country"],
+        },
+        "system_detected_market": {
+            "question_id": "system_detected_market", "question_key": "detected_market",
+            "question_text": "Detected entry market", "values": [actual or "Unknown"],
+            "upstream_values": [actual_code or actual or "Unknown"],
+        },
+        "system_target_market": {
+            "question_id": "system_target_market", "question_key": "target_market",
+            "question_text": "Required survey market", "values": [expected or "Unknown"],
+            "upstream_values": [expected_code or expected or "Unknown"],
+        },
+    }
+    geo_postal = str((location or {}).get("postal_code") or "").strip()
+    if geo_postal:
+        answers["system_ip_postal"] = {
+            "question_id": "system_ip_postal", "question_key": "postal_code",
+            "question_text": "Postal code (derived from entry IP)",
+            "values": [geo_postal], "upstream_values": [geo_postal],
+        }
+    return answers
+
+
 def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
     """Persist one immutable, idempotent RID/UID submission in the vault."""
     if not settings.PRESCREENER_VAULT_ENABLED:

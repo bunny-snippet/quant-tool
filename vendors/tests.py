@@ -189,7 +189,7 @@ class VendorFoundationTests(TestCase):
         with self.assertRaisesMessage(AllocationUnavailable, "Project complete cap is exhausted"):
             reserve_attempt_capacity(self.attempt("Ua7Hh8Ii9J"), self.external_survey_allocation)
 
-    def test_client_grant_requires_explicit_project_allocation(self):
+    def test_client_grant_exposes_all_projects_and_uses_shared_capacity(self):
         unallocated_survey = Survey.objects.create(
             client=self.client_record,
             source_id=88002,
@@ -221,7 +221,7 @@ class VendorFoundationTests(TestCase):
         listing = api.get(reverse("survey-list"))
         self.assertEqual(listing.status_code, 200)
         rows = {item["source_id"]: item for item in listing.data["results"]}
-        self.assertEqual(set(rows), {88001})
+        self.assertEqual(set(rows), {88001, 88002})
 
         start = self.client.get(
             reverse("survey-start"),
@@ -232,8 +232,17 @@ class VendorFoundationTests(TestCase):
                 "code": unallocated_survey.local_id,
             },
         )
-        self.assertEqual(start.status_code, 400)
-        self.assertFalse(SurveyAttempt.objects.filter(survey=unallocated_survey).exists())
+        self.assertEqual(start.status_code, 302)
+        created_attempt = SurveyAttempt.objects.get(survey=unallocated_survey)
+        reservation = created_attempt.allocation_reservation
+        self.assertEqual(reservation.client_allocation, self.external_client_allocation)
+        self.assertIsNone(reservation.survey_allocation)
+
+        created_attempt.status = SurveyAttempt.Status.COMPLETED
+        created_attempt.save(update_fields=["status"])
+        finalize_attempt_capacity(created_attempt)
+        self.external_client_allocation.refresh_from_db()
+        self.assertEqual(self.external_client_allocation.consumed_quantity, 1)
 
     def test_superuser_can_manage_foundation_api_and_employee_cannot(self):
         owner_api = APIClient()
@@ -308,7 +317,7 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(self.external_client_allocation.reserved_quantity, 0)
         self.assertEqual(self.external_survey_allocation.reserved_quantity, 0)
 
-    def test_inactive_project_allocation_hides_project_without_client_fallback(self):
+    def test_inactive_project_override_hides_only_that_project(self):
         second = Survey.objects.create(
             client=self.client_record,
             source_id=88004,
@@ -327,7 +336,7 @@ class VendorFoundationTests(TestCase):
         api = APIClient()
         api.force_authenticate(self.external)
         ids = {row["source_id"] for row in api.get(reverse("survey-list")).data["results"]}
-        self.assertEqual(ids, set())
+        self.assertEqual(ids, {88004})
 
     def test_allocation_manager_can_open_workspace_and_use_safe_options(self):
         for code in ("allocations.view", "vendors.tab.clients", "vendors.column.client.client"):
@@ -419,6 +428,21 @@ class VendorFoundationTests(TestCase):
 
         filtered = vendor_api.get(reverse("survey-list"), {"client_name": second_client.name}, HTTP_X_API_KEY=raw_key)
         self.assertEqual([row["source_id"] for row in filtered.data["results"]], [second_survey.source_id])
+        UserFunctionOverride.objects.create(
+            user=self.external,
+            function=AccessFunction.objects.get(code="projects.filter.cpi"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        visible_cpi_filtered = vendor_api.get(
+            reverse("survey-list"),
+            {"min_cpi": "5.50", "max_cpi": "7.50", "ordering": "-cpi"},
+            HTTP_X_API_KEY=raw_key,
+        )
+        self.assertEqual(visible_cpi_filtered.status_code, 200)
+        self.assertEqual(
+            [row["source_id"] for row in visible_cpi_filtered.data["results"]],
+            [self.survey.source_id],
+        )
         key_record = VendorAPIKey.objects.get(pk=issued.data["id"])
         self.assertIsNotNone(key_record.last_used_at)
 

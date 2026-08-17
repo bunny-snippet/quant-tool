@@ -31,6 +31,7 @@
     vendors: [], profiles: [], clients: [], clientAllocations: [], surveyAllocations: [], apiKeys: [],
     selectedSurvey: null, searchTimer: null,
   };
+  const clientPicker = document.querySelector('#vendorClientPicker');
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -262,11 +263,42 @@
     return `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
   }
 
+  function selectedClientIds() {
+    return [...field('client', 'client').selectedOptions].map((item) => Number(item.value));
+  }
+
+  function updateClientPickerLabel() {
+    const selected = selectedClientIds();
+    const label = clientPicker.querySelector('.vendor-client-picker-trigger span');
+    if (!selected.length) label.textContent = 'Select one or more clients';
+    else if (selected.length === 1) label.textContent = state.clients.find((item) => Number(item.id) === selected[0])?.name || '1 client selected';
+    else label.textContent = `${selected.length} clients selected`;
+  }
+
+  function renderClientPickerOptions(needle = '') {
+    const selected = new Set(selectedClientIds());
+    const normalized = needle.trim().toLowerCase();
+    const visible = state.clients.filter((client) => !normalized || client.name.toLowerCase().includes(normalized));
+    clientPicker.querySelector('.vendor-client-picker-options').innerHTML = visible.length ? visible.map((client) => (
+      `<label><input type="checkbox" value="${client.id}"${selected.has(Number(client.id)) ? ' checked' : ''}><span>${escapeHtml(client.name)}</span></label>`
+    )).join('') : '<div class="vendor-empty">No matching clients</div>';
+  }
+
+  function setClientSelection(ids, disabled = false) {
+    const selected = new Set((ids || []).map(Number));
+    [...field('client', 'client').options].forEach((item) => { item.selected = selected.has(Number(item.value)); });
+    clientPicker.classList.toggle('disabled', disabled);
+    clientPicker.querySelector('.vendor-client-picker-trigger').disabled = disabled;
+    renderClientPickerOptions();
+    updateClientPickerLabel();
+  }
+
   function hydrateSelects() {
     const vendorOptions = state.vendors.map((vendor) => option(vendor.id, `${vendor.full_name} — ${accountLabel(vendor.account_type)}`)).join('');
     field('policy_vendor', 'policy').innerHTML = vendorOptions;
     field('client_vendor', 'client').innerHTML = `<option value="">Select supplier</option>${vendorOptions}`;
-    field('client', 'client').innerHTML = `<option value="">Select client</option>${state.clients.map((client) => option(client.id, client.name)).join('')}`;
+    field('client', 'client').innerHTML = state.clients.map((client) => option(client.id, client.name)).join('');
+    renderClientPickerOptions(); updateClientPickerLabel();
     field('client_allocation', 'survey').innerHTML = `<option value="">Select supplier and client</option>${state.clientAllocations.map((row) => option(row.id, `${row.vendor_name} — ${row.client_name}`)).join('')}`;
     field('api_vendor', 'api_key').innerHTML = `<option value="">Select API-enabled external supplier</option>${state.vendors.filter((vendor) => {
       const profile = state.profiles.find((item) => Number(item.vendor) === Number(vendor.id));
@@ -308,6 +340,7 @@
     if (field('survey')) field('survey').value = '';
     if (field('is_active')) field('is_active').checked = true;
     state.selectedSurvey = null;
+    if (mode === 'client') setClientSelection([], false);
     errorBox.hidden = true;
     const results = $('#surveySearchResults');
     if (results) results.hidden = true;
@@ -363,8 +396,8 @@
     if (record) {
       field('record_id').value = record.id;
       field('client_vendor').value = record.vendor;
-      field('client').value = record.client;
-      field('client_vendor').disabled = true; field('client').disabled = true;
+      setClientSelection([record.client], true);
+      field('client_vendor').disabled = true;
       field('client_quantity_limit').value = record.quantity_limit;
       field('client_cpi_cut').value = record.cpi_cut_override_percent ?? '';
       field('client_starts_at').value = toInputDateTime(record.starts_at);
@@ -491,6 +524,26 @@
     state.selectedSurvey = { id: Number(button.dataset.selectSurvey) };
     $('#surveySearchResults').hidden = true;
   });
+  clientPicker.querySelector('.vendor-client-picker-trigger').addEventListener('click', () => {
+    const open = !clientPicker.classList.contains('open');
+    clientPicker.classList.toggle('open', open);
+    clientPicker.querySelector('.vendor-client-picker-menu').hidden = !open;
+    clientPicker.querySelector('.vendor-client-picker-trigger').setAttribute('aria-expanded', String(open));
+    if (open) clientPicker.querySelector('input[type="search"]').focus();
+  });
+  clientPicker.querySelector('input[type="search"]').addEventListener('input', (event) => renderClientPickerOptions(event.target.value));
+  clientPicker.querySelector('.vendor-client-picker-options').addEventListener('change', (event) => {
+    if (!event.target.matches('input[type="checkbox"]')) return;
+    const target = [...field('client', 'client').options].find((item) => item.value === event.target.value);
+    if (target) target.selected = event.target.checked;
+    updateClientPickerLabel();
+  });
+  document.addEventListener('click', (event) => {
+    if (clientPicker.contains(event.target)) return;
+    clientPicker.classList.remove('open');
+    clientPicker.querySelector('.vendor-client-picker-menu').hidden = true;
+    clientPicker.querySelector('.vendor-client-picker-trigger').setAttribute('aria-expanded', 'false');
+  });
   $('#copyIssuedKey').addEventListener('click', async () => {
     await navigator.clipboard.writeText($('#issuedKeyValue').value);
     toast('API key copied. Store it securely.');
@@ -515,8 +568,10 @@
       };
     } else if (mode === 'client') {
       url = `/api/v1/vendors/client-allocations/${id ? `${id}/` : ''}`;
+      const clientIds = selectedClientIds();
+      if (!clientIds.length) { errorBox.textContent = 'Select at least one client.'; errorBox.hidden = false; return; }
       payload = {
-        vendor: Number(field('client_vendor').value), client: Number(field('client').value),
+        vendor: Number(field('client_vendor').value), client: clientIds[0],
         quantity_limit: Number(field('client_quantity_limit').value),
         cpi_cut_override_percent: field('client_cpi_cut').disabled ? null : nullableNumber(field('client_cpi_cut').value),
         starts_at: toApiDateTime(field('client_starts_at').value), ends_at: toApiDateTime(field('client_ends_at').value),
@@ -542,7 +597,12 @@
     try {
       const submit = $('[data-vendor-submit]', form);
       submit.disabled = true;
-      const result = await api(url, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+      let result;
+      if (mode === 'client' && !id) {
+        for (const clientId of selectedClientIds()) {
+          result = await api(url, { method: 'POST', body: JSON.stringify({ ...payload, client: clientId }) });
+        }
+      } else result = await api(url, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       if (mode === 'api_key') {
         $('#issuedKeyValue').value = result.api_key;
         $('#issuedKeyPanel').hidden = false;
@@ -551,7 +611,8 @@
         toast('API key generated. Copy it now.');
         await reloadData();
       } else {
-        closeModal(); toast(id ? 'Changes saved.' : 'Configuration created.'); await reloadData();
+        const count = mode === 'client' && !id ? selectedClientIds().length : 1;
+        closeModal(); toast(id ? 'Changes saved.' : (count > 1 ? `${count} client allocations created.` : 'Configuration created.')); await reloadData();
       }
     } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
     finally { const submit = $('[data-vendor-submit]', form); if (submit) submit.disabled = false; }

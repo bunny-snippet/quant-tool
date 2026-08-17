@@ -195,8 +195,8 @@
 
   function formatLoi(seconds) {
     if (seconds == null) return '—';
-    const total = Number(seconds); const minutes = Math.floor(total / 60); const remainder = total % 60;
-    return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+    const minutes = Number(seconds) / 60;
+    return `${minutes.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} min`;
   }
 
   function formatMoney(value, currency = 'USD') {
