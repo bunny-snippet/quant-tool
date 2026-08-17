@@ -40,6 +40,7 @@ from vendors.services import (
     reserve_attempt_capacity,
     resolve_vendor_survey_context,
     organization_client_ids_for_user,
+    scope_surveys_for_api_key,
     scope_surveys_for_user,
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
@@ -1491,10 +1492,9 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [HasFunctionPermission]
 
     def get_queryset(self):
-        queryset = annotate_survey_pricing_for_user(
-            scope_surveys_for_user(super().get_queryset(), self.request.user),
-            self.request.user,
-        )
+        queryset = scope_surveys_for_user(super().get_queryset(), self.request.user)
+        queryset = scope_surveys_for_api_key(queryset, self.request.auth)
+        queryset = annotate_survey_pricing_for_user(queryset, self.request.user)
         completed_attempts = (
             SurveyAttempt.objects.filter(
                 survey_id=OuterRef("pk"),

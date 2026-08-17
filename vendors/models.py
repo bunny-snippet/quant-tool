@@ -373,6 +373,12 @@ class VendorAPIKey(models.Model):
         on_delete=models.PROTECT,
         related_name="vendor_api_keys",
     )
+    client_allocations = models.ManyToManyField(
+        "VendorClientAllocation",
+        blank=True,
+        related_name="api_keys",
+        help_text="Client grants this key may expose. Project visibility and caps still follow the live allocation rules.",
+    )
     name = models.CharField(max_length=120)
     prefix = models.CharField(max_length=16, db_index=True)
     last_four = models.CharField(max_length=4)

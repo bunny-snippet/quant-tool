@@ -1,3 +1,5 @@
+from django.db.models import Q
+
 from accounts.models import EmployeeProfile
 
 
@@ -5,6 +7,33 @@ VENDOR_ACCOUNT_TYPES = {
     EmployeeProfile.AccountType.INTERNAL_VENDOR,
     EmployeeProfile.AccountType.EXTERNAL_VENDOR,
 }
+
+
+def valid_supplier_profile_q(prefix=""):
+    """Match supplier account types only when their required role still exists."""
+
+    return (
+        Q(**{
+            f"{prefix}account_type": EmployeeProfile.AccountType.INTERNAL_VENDOR,
+            f"{prefix}role__slug": "admin",
+            f"{prefix}role__is_active": True,
+        })
+        | Q(**{
+            f"{prefix}account_type": EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+            f"{prefix}role__slug": "external-vendor",
+            f"{prefix}role__is_active": True,
+        })
+    )
+
+
+def is_valid_supplier_profile(profile) -> bool:
+    if not profile or not profile.role_id or not profile.role.is_active:
+        return False
+    expected_role = {
+        EmployeeProfile.AccountType.INTERNAL_VENDOR: "admin",
+        EmployeeProfile.AccountType.EXTERNAL_VENDOR: "external-vendor",
+    }.get(profile.account_type)
+    return bool(expected_role and profile.role.slug == expected_role)
 
 
 def vendor_scope_user_id(user) -> int | None:

@@ -28,6 +28,7 @@ from .models import (
     OrganizationClientAccess,
     OrganizationUnit,
     VendorClientAllocation,
+    VendorAPIKey,
     VendorSurveyAllocation,
 )
 
@@ -233,6 +234,19 @@ def scope_surveys_for_user(queryset, user):
     if organization_client_ids is not None:
         scoped = scoped.filter(client_id__in=organization_client_ids)
     return scoped
+
+
+def scope_surveys_for_api_key(queryset, api_key):
+    """Apply the client grants explicitly selected when an API key was issued."""
+
+    if not isinstance(api_key, VendorAPIKey):
+        return queryset
+    client_ids = api_key.client_allocations.filter(
+        vendor_id=api_key.vendor_id,
+        is_active=True,
+        client__is_active=True,
+    ).values("client_id")
+    return queryset.filter(client_id__in=Subquery(client_ids)).distinct()
 
 
 def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True, for_update=False):

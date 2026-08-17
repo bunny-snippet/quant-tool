@@ -6,6 +6,7 @@ from accounts.models import EmployeeProfile
 
 from .models import VendorAPIKey
 from .security import digest_api_key
+from .access import is_valid_supplier_profile
 
 
 class VendorAPIKeyAuthentication(BaseAuthentication):
@@ -35,7 +36,7 @@ class VendorAPIKeyAuthentication(BaseAuthentication):
         if not vendor.is_active:
             raise AuthenticationFailed("Vendor account is inactive.")
         profile = getattr(vendor, "employee_profile", None)
-        if not profile or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
+        if not is_valid_supplier_profile(profile) or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
             raise AuthenticationFailed("API key is not assigned to an external supplier.")
         commercial = getattr(vendor, "vendor_commercial_profile", None)
         if not commercial or not commercial.is_active or not commercial.api_access_enabled:

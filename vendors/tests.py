@@ -1,7 +1,9 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
@@ -42,10 +44,12 @@ class VendorFoundationTests(TestCase):
         self.employee = User.objects.create_user("ordinary-employee")
         EmployeeProfile.objects.filter(user=self.internal).update(
             account_type=EmployeeProfile.AccountType.INTERNAL_VENDOR,
+            role=Role.objects.get(slug="admin"),
             created_by=self.owner,
         )
         EmployeeProfile.objects.filter(user=self.external).update(
             account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+            role=Role.objects.get(slug="external-vendor"),
             created_by=self.owner,
         )
         self.client_record = Client.objects.create(
@@ -366,6 +370,79 @@ class VendorFoundationTests(TestCase):
         self.assertContains(page, 'id="surveyAllocationModal"')
         self.assertContains(page, 'id="vendorApiKeyModal"')
         self.assertNotContains(page, 'id="vendorManagementForm"')
+        script = (Path(settings.BASE_DIR) / "static" / "vendors" / "management.js").read_text(encoding="utf-8")
+        self.assertIn("closest('button[data-edit-policy]')", script)
+        self.assertNotIn("closest('[data-edit-policy]')", script)
+        self.assertIn("closest('button[data-revoke-api-key]')", script)
+        self.assertNotIn("closest('[data-revoke-api-key]')", script)
+
+    def test_supplier_directory_hides_profiles_without_the_required_role(self):
+        EmployeeProfile.objects.filter(user=self.internal).update(role=None)
+        api = APIClient()
+        api.force_authenticate(self.owner)
+
+        directory = api.get(reverse("vendor-directory-list"))
+        self.assertEqual(directory.status_code, 200)
+        self.assertNotIn(self.internal.pk, [row["id"] for row in directory.data["results"]])
+        options = api.get(reverse("vendor-management-options"))
+        self.assertNotIn(self.internal.pk, [row["id"] for row in options.data["vendors"]])
+
+    def test_directory_reports_average_effective_client_cut(self):
+        second_client = Client.objects.create(
+            code="average-cut-client", name="Average Cut Client", created_by=self.owner,
+        )
+        VendorClientAllocation.objects.create(
+            vendor=self.external,
+            client=second_client,
+            quantity_limit=10,
+            cpi_cut_override_percent=Decimal("50.00"),
+            created_by=self.owner,
+        )
+        api = APIClient()
+        api.force_authenticate(self.owner)
+        response = api.get(reverse("vendor-directory-list"))
+        row = next(item for item in response.data["results"] if item["id"] == self.external.pk)
+        self.assertEqual(row["active_client_allocation_count"], 2)
+        self.assertEqual(Decimal(row["average_client_cpi_cut_percent"]), Decimal("40.00"))
+
+    def test_api_key_can_be_scoped_to_one_selected_client(self):
+        self.external_policy.delivery_mode = VendorCommercialProfile.DeliveryMode.BOTH
+        self.external_policy.save(update_fields=["delivery_mode", "updated_at"])
+        second_client = Client.objects.create(
+            code="key-scope-client", name="Key Scope Client", created_by=self.owner,
+        )
+        second_survey = Survey.objects.create(
+            client=second_client,
+            source_id=88007,
+            name="Key scoped survey",
+            status=Survey.Status.LIVE,
+            remaining=5,
+            cpi=Decimal("8.00"),
+        )
+        second_allocation = VendorClientAllocation.objects.create(
+            vendor=self.external,
+            client=second_client,
+            quantity_limit=5,
+            created_by=self.owner,
+        )
+        owner_api = APIClient()
+        owner_api.force_authenticate(self.owner)
+        issued = owner_api.post(reverse("vendor-api-key-list"), {
+            "vendor": self.external.pk,
+            "name": "One client only",
+            "client_allocations": [second_allocation.pk],
+        }, format="json")
+        self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.data["client_names"], [second_client.name])
+
+        listing = APIClient().get(reverse("survey-list"), HTTP_X_API_KEY=issued.data["api_key"])
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([row["source_id"] for row in listing.data["results"]], [second_survey.source_id])
+
+        allocation_detail = owner_api.get(
+            reverse("vendor-client-allocation-detail", kwargs={"pk": second_allocation.pk})
+        )
+        self.assertEqual(allocation_detail.data["api_key_scopes"][0]["name"], "One client only")
 
     def test_api_key_inherits_live_client_scope_and_different_client_cuts(self):
         self.external_policy.delivery_mode = VendorCommercialProfile.DeliveryMode.BOTH
@@ -409,6 +486,7 @@ class VendorFoundationTests(TestCase):
         issued = owner_api.post(reverse("vendor-api-key-list"), {
             "vendor": self.external.pk,
             "name": "UAT integration",
+            "client_allocations": [self.external_client_allocation.pk, second_client_allocation.pk],
         }, format="json")
         self.assertEqual(issued.status_code, 201)
         raw_key = issued.data["api_key"]
@@ -482,6 +560,7 @@ class VendorFoundationTests(TestCase):
         issued = owner_api.post(reverse("vendor-api-key-list"), {
             "vendor": self.external.pk,
             "name": "API-only integration",
+            "client_allocations": [self.external_client_allocation.pk],
         }, format="json")
         self.assertEqual(issued.status_code, 201)
         self.assertEqual(
