@@ -221,6 +221,74 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "scheduled_sync_enabled": "Test and verify this connection before scheduling it."
                 })
+        elif provider_key == "toluna":
+            attrs.setdefault("base_url", "https://tws.toluna.com")
+            credential_refs = attrs.get(
+                "credential_env_keys", getattr(self.instance, "credential_env_keys", {})
+            ) or {}
+            required = {"api_auth_key", "partner_auth_key"}
+            missing = sorted(key for key in required if not credential_refs.get(key))
+            panel_keys = sorted(
+                key for key, value in credential_refs.items()
+                if str(key).startswith("panel_") and value
+            )
+            if missing or not panel_keys:
+                detail = []
+                if missing:
+                    detail.append(f"missing {', '.join(missing)}")
+                if not panel_keys:
+                    detail.append("at least one panel_<culture> mapping is required")
+                raise serializers.ValidationError({"credential_env_keys": f"Toluna configuration is incomplete: {'; '.join(detail)}."})
+            env_pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+            if any(
+                not isinstance(value, str) or not env_pattern.fullmatch(value)
+                for value in credential_refs.values() if value
+            ):
+                raise serializers.ValidationError({
+                    "credential_env_keys": "Use environment-variable names here, never Toluna credential values."
+                })
+            invalid_panels = [
+                key for key in panel_keys
+                if not re.fullmatch(r"panel_[a-z]{2}_[a-z]{2}", str(key).lower())
+            ]
+            if invalid_panels:
+                raise serializers.ValidationError({
+                    "credential_env_keys": f"Invalid Toluna panel keys: {', '.join(invalid_panels)}. Use panel_en_us format."
+                })
+            config = attrs.get("config", getattr(self.instance, "config", {})) or {}
+            allowed_config = {
+                "environment", "member_base_url", "external_sample_base_url", "reference_base_url",
+                "timeout_seconds", "detail_refresh_batch", "reference_refresh_hours", "is_test_member",
+                "callback_hash_required",
+            }
+            unexpected = set(config) - allowed_config
+            if unexpected:
+                raise serializers.ValidationError({
+                    "config": f"Unsupported Toluna settings: {', '.join(sorted(unexpected))}."
+                })
+            if str(config.get("environment") or "production").lower() not in {"production", "sandbox"}:
+                raise serializers.ValidationError({"config": "Toluna environment must be production or sandbox."})
+            for boolean_key in ("is_test_member", "callback_hash_required"):
+                if boolean_key in config and not isinstance(config[boolean_key], bool):
+                    raise serializers.ValidationError({"config": f"{boolean_key} must be true or false."})
+            try:
+                interval = int(attrs.get(
+                    "sync_interval_seconds", getattr(self.instance, "sync_interval_seconds", 60)
+                ))
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({
+                    "sync_interval_seconds": "Sync interval must be a whole number."
+                }) from exc
+            if interval < 60:
+                raise serializers.ValidationError({
+                    "sync_interval_seconds": "Toluna Get Quotas sync must be at least 60 seconds."
+                })
+            if attrs.get("scheduled_sync_enabled", False) and getattr(
+                self.instance, "last_test_status", ""
+            ) != "success":
+                raise serializers.ValidationError({
+                    "scheduled_sync_enabled": "Test and verify this Toluna connection before scheduling it."
+                })
         elif provider_key in {"biobrain", "voqall"} or "voqall.com" in base_url.lower():
             api_root = base_url[:-8] if base_url.lower().endswith("/surveys") else base_url
             current_inventory = attrs.get(
@@ -267,7 +335,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
         if token is not None:
             set_integration_token(instance, token)
-        if connection_changed and instance.provider_code == "rfg":
+        if connection_changed and instance.provider_code in {"rfg", "toluna"}:
             instance.last_test_status = ""
             instance.last_test_error = "Connection settings changed; test the connection again."
             instance.scheduled_sync_enabled = False

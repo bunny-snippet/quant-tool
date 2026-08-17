@@ -8,7 +8,12 @@ from accounts.models import Role
 
 from .models import Client, ClientIntegration
 from .schema import filter_unconfigured_upstream_provider_endpoints, remove_unconfigured_upstream_provider_tags
-from .upstream import INNOVATE_OPERATIONS, RFG_OPERATIONS, operation_response_description
+from .upstream import (
+    INNOVATE_OPERATIONS,
+    RFG_OPERATIONS,
+    TOLUNA_OPERATIONS,
+    operation_response_description,
+)
 
 
 class UpstreamExplorerTests(TestCase):
@@ -50,13 +55,18 @@ class UpstreamExplorerTests(TestCase):
     def test_every_documented_provider_operation_has_named_route_and_plain_language_contract(self):
         self.assertEqual(len(INNOVATE_OPERATIONS), 34)
         self.assertEqual(len(RFG_OPERATIONS), 12)
+        self.assertEqual(len(TOLUNA_OPERATIONS), 5)
         for provider, operations in (
             ("innovatemr", INNOVATE_OPERATIONS),
             ("rfg", RFG_OPERATIONS),
+            ("toluna", TOLUNA_OPERATIONS),
         ):
             for code, spec in operations.items():
                 route_name = f"upstream-explorer-{provider}-{code.replace('_', '-')}"
-                route = reverse(route_name, args=["innovate" if provider == "innovatemr" else "rfg"])
+                route = reverse(
+                    route_name,
+                    args=["innovate" if provider == "innovatemr" else provider],
+                )
                 self.assertIn(f"/{provider}/{code.replace('_', '-')}/", route)
                 self.assertTrue(spec.description)
                 self.assertTrue(spec.documentation_url.startswith("http"))
@@ -71,20 +81,57 @@ class UpstreamExplorerTests(TestCase):
         endpoints = [
             ("/api/v1/vendors/upstream-explorer/{client_code}/innovatemr/inventory/", "", "GET", object()),
             ("/api/v1/vendors/upstream-explorer/{client_code}/rfg/inventory/", "", "GET", object()),
+            ("/api/v1/vendors/upstream-explorer/{client_code}/toluna/quotas/", "", "GET", object()),
             ("/survey/rfg/callback", "", "GET", object()),
             ("/api/v1/vendors/upstream-explorer/", "", "GET", object()),
         ]
         filtered = filter_unconfigured_upstream_provider_endpoints(endpoints)
-        self.assertEqual([item[0] for item in filtered], [endpoints[0][0], endpoints[3][0]])
+        self.assertEqual([item[0] for item in filtered], [endpoints[0][0], endpoints[4][0]])
         schema = {"tags": [
             {"name": "Client API catalog"}, {"name": "InnovateMR APIs"},
             {"name": "RFG APIs"}, {"name": "RFG Callbacks"},
+            {"name": "Toluna APIs"},
         ]}
         result = remove_unconfigured_upstream_provider_tags(schema, None, None, False)
         self.assertEqual(
             [item["name"] for item in result["tags"]],
             ["Client API catalog", "InnovateMR APIs"],
         )
+
+    @patch.dict("os.environ", {
+        "TEST_TOLUNA_API": "toluna-api-secret",
+        "TEST_TOLUNA_REFERENCE": "toluna-reference-secret",
+        "TEST_TOLUNA_PANEL_US": "panel-guid-us",
+    })
+    @patch("surveys.providers.toluna.TolunaProvider._request")
+    def test_toluna_quota_explorer_uses_named_culture_and_redacts_credentials(self, request):
+        request.return_value = ({"CountryID": 1, "Surveys": [{"SurveyID": 7}]}, 200)
+        toluna_client = Client.objects.create(code="toluna", name="Toluna", provider_code="toluna")
+        ClientIntegration.objects.create(
+            client=toluna_client,
+            name="Toluna production",
+            provider_code="toluna",
+            base_url="https://tws.toluna.com",
+            credential_env_keys={
+                "api_auth_key": "TEST_TOLUNA_API",
+                "partner_auth_key": "TEST_TOLUNA_REFERENCE",
+                "panel_en_us": "TEST_TOLUNA_PANEL_US",
+            },
+            config={"environment": "production"},
+        )
+        response = self.client.get(
+            reverse("upstream-explorer-toluna-quotas", args=["toluna"]),
+            {"culture": "en-us", "include_routables": "true"},
+        )
+        self.assertEqual(response.status_code, 200)
+        request.assert_called_once_with(
+            "GET",
+            "https://tws.toluna.com/IPExternalSamplingService/ExternalSample/panel-guid-us/Quotas",
+            headers={"Accept": "application/json", "API_AUTH_KEY": "toluna-api-secret"},
+            params={"includeRoutables": "true"},
+        )
+        self.assertNotIn("toluna-api-secret", response.content.decode())
+        self.assertEqual(response.json()["result"]["Surveys"][0]["SurveyID"], 7)
 
     @patch.dict("os.environ", {"TEST_INNOVATE_TOKEN": "server-only-token"})
     def test_catalog_documents_urls_without_exposing_secret(self):

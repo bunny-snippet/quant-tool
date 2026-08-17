@@ -1,6 +1,6 @@
 # Survey Workspace
 
-Django-based multi-client survey workspace that synchronizes upstream provider inventory, stores it locally, and exposes responsive Projects UI plus a documented REST API. InnovateMR remains supported and Research For Good Live Alert is available through the Client Catalog integration flow.
+Django-based multi-client survey workspace that synchronizes upstream provider inventory, stores it locally, and exposes responsive Projects UI plus a documented REST API. InnovateMR and Research For Good remain supported, while Toluna Integrated Panel is available in Quant through the Client Catalog integration flow.
 
 Hostinger Ubuntu VPS deployment with MySQL, Nginx, Gunicorn, Redis and Celery is covered in [`deploy/README.md`](deploy/README.md).
 
@@ -9,6 +9,7 @@ Hostinger Ubuntu VPS deployment with MySQL, Nginx, Gunicorn, Redis and Celery is
 - Dashboard placeholder and responsive Projects workspace matching the supplied table reference.
 - Full and cursor-paged InnovateMR inventory ingestion.
 - Secure UI-driven Research For Good onboarding, HMAC-SHA1 API adapter, preview, per-client scheduled sync, targeting, deduplication and callback tracking.
+- Toluna External Sample inventory, culture reference mapping, member registration/update, quota matching, respondent invite generation and HMAC-SHA256 callback verification.
 - Deterministic merge by `surveyId`; the payload with the newest `modifiedDate` wins.
 - Immutable 14-digit project IDs in `YYYYMM########` format, for example `20260800000001`.
 - Quota and survey-targeting/pre-screening persistence with stale-data refresh.
@@ -135,4 +136,4 @@ python manage.py spectacular --file schema.yml --validate
 python manage.py collectstatic --noinput
 ```
 
-See [architecture](docs/architecture.md), [client integrations](docs/client-integrations.md), and [synchronization runbook](docs/synchronization.md) for the internal design and operations contract.
+See [architecture](docs/architecture.md), [client integrations](docs/client-integrations.md), [Toluna integration](docs/toluna-integration.md), and [synchronization runbook](docs/synchronization.md) for the internal design and operations contract.

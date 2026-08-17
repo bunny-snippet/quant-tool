@@ -18,6 +18,7 @@ class VendorAPIKeyAuthenticationScheme(OpenApiAuthenticationExtension):
 PROVIDER_TAGS = {
     "innovatemr": {"InnovateMR APIs"},
     "rfg": {"RFG APIs", "RFG Callbacks"},
+    "toluna": {"Toluna APIs"},
 }
 
 
@@ -50,6 +51,8 @@ def filter_unconfigured_upstream_provider_endpoints(endpoints):
             "/upstream-explorer/{client_code}/rfg/" in path
             or path.rstrip("/") == "/survey/rfg/callback"
         ) and "rfg" not in configured:
+            continue
+        if "/upstream-explorer/{client_code}/toluna/" in path and "toluna" not in configured:
             continue
         filtered.append(endpoint)
     return filtered

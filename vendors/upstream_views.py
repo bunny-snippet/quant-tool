@@ -22,6 +22,7 @@ from .models import ClientIntegration
 from .upstream import (
     INNOVATE_OPERATIONS,
     RFG_OPERATIONS,
+    TOLUNA_OPERATIONS,
     UpstreamExplorerError,
     execute_operation,
     integration_metadata,
@@ -40,12 +41,15 @@ CATALOG_TAG = "Client API catalog"
 INNOVATE_TAG = "InnovateMR APIs"
 RFG_TAG = "RFG APIs"
 RFG_CALLBACK_TAG = "RFG Callbacks"
+TOLUNA_TAG = "Toluna APIs"
 PROVIDER_ALIASES = {
     "innovate": "innovatemr",
     "innovate-mr": "innovatemr",
     "innovatemr": "innovatemr",
     "rfg": "rfg",
     "research-for-good": "rfg",
+    "toluna": "toluna",
+    "toluna-integrated-panel": "toluna",
 }
 
 PARAMETER_HELP = {
@@ -85,6 +89,9 @@ PARAMETER_HELP = {
     "end": "RFG log end date/time filter.",
     "zip": "Respondent postal/ZIP code.",
     "country_code": "Two-letter RFG country code.",
+    "culture": "Configured Toluna culture, for example en-us, en-gb or en-in.",
+    "cultures": "Comma-separated configured Toluna cultures (maximum five). Blank uses all configured cultures.",
+    "include_routables": "When true, Toluna returns routable targeting questions in quota layers.",
 }
 
 UPSTREAM_INPUT_NOTES = {
@@ -185,6 +192,8 @@ def _lookup_aliases(integration):
         aliases.update({"innovate", "innovate-mr", "innovatemr"})
     elif provider == "rfg":
         aliases.update({"rfg", "research-for-good"})
+    elif provider == "toluna":
+        aliases.update({"toluna", "toluna-integrated-panel"})
     return aliases
 
 
@@ -321,7 +330,7 @@ class UpstreamExplorerViewSet(
     @action(detail=True, methods=["get"], url_path=r"execute/(?P<operation>[a-z][a-z0-9_]+)")
     def execute(self, request, client_code=None, operation=None):
         integration = self.get_object()
-        spec = {**INNOVATE_OPERATIONS, **RFG_OPERATIONS}.get(operation)
+        spec = {**INNOVATE_OPERATIONS, **RFG_OPERATIONS, **TOLUNA_OPERATIONS}.get(operation)
         if spec and spec.mutating:
             return Response(
                 {"detail": "Use the provider-specific POST endpoint for live mutations."},
@@ -411,7 +420,7 @@ def _operation_parameters(spec):
     parameters = [
         OpenApiParameter(
             name,
-            bool if name in {"zips_only", "allow_recontacts"} else int if name in {"num_surveys", "page_size", "inventory_type"} else str,
+            bool if name in {"zips_only", "allow_recontacts", "include_routables"} else int if name in {"num_surveys", "page_size", "inventory_type"} else str,
             required=name in spec.required_parameters,
             description=PARAMETER_HELP.get(name, name.replace("_", " ").title()),
         )
@@ -444,7 +453,7 @@ def _operation_description(provider, spec):
 
 def _build_operation_action(provider, operation, spec):
     local_method = "post" if spec.mutating else "get"
-    tag = INNOVATE_TAG if provider == "innovatemr" else RFG_TAG
+    tag = INNOVATE_TAG if provider == "innovatemr" else TOLUNA_TAG if provider == "toluna" else RFG_TAG
 
     def operation_action(self, request, client_code=None):
         integration = self.get_object()
@@ -501,4 +510,11 @@ for _operation, _spec in RFG_OPERATIONS.items():
         UpstreamExplorerViewSet,
         f"rfg_{_operation}",
         _build_operation_action("rfg", _operation, _spec),
+    )
+
+for _operation, _spec in TOLUNA_OPERATIONS.items():
+    setattr(
+        UpstreamExplorerViewSet,
+        f"toluna_{_operation}",
+        _build_operation_action("toluna", _operation, _spec),
     )

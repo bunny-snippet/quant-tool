@@ -3,8 +3,12 @@ from .base import ProviderConfigurationError
 
 def _provider_classes():
     from .rfg import ResearchForGoodProvider
+    from .toluna import TolunaProvider
 
-    return {ResearchForGoodProvider.code: ResearchForGoodProvider}
+    return {
+        ResearchForGoodProvider.code: ResearchForGoodProvider,
+        TolunaProvider.code: TolunaProvider,
+    }
 
 
 def provider_catalog() -> list[dict]:

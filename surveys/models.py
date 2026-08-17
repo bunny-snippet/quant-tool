@@ -186,6 +186,75 @@ class TargetingQuestion(models.Model):
         ordering = ["question_id"]
 
 
+class TolunaReferenceQuestion(models.Model):
+    """Culture-specific Toluna question/answer mapping used by quota matching.
+
+    Credentials and Panel GUIDs deliberately do not live in this table.  The
+    row is only a local, provider-neutral display/mapping cache and can be
+    rebuilt from Toluna's Reference Data API at any time.
+    """
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        related_name="toluna_reference_questions",
+        on_delete=models.CASCADE,
+    )
+    culture_code = models.CharField(max_length=12, db_index=True)
+    culture_id = models.PositiveIntegerField(db_index=True)
+    question_id = models.BigIntegerField(db_index=True)
+    internal_name = models.CharField(max_length=300, blank=True)
+    display_name = models.TextField(blank=True)
+    answer_type = models.CharField(max_length=80, blank=True)
+    is_routable = models.BooleanField(default=False)
+    options = models.JSONField(default=list, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "culture_code", "question_id"],
+                name="unique_toluna_reference_question",
+            )
+        ]
+        indexes = [models.Index(fields=["integration", "culture_code"])]
+        ordering = ["culture_code", "question_id"]
+
+
+class TolunaMember(models.Model):
+    """Audit/cache of a member profile registered with Toluna.
+
+    ``member_code`` is our stable prescreener UID.  ``profile_hash`` makes a
+    repeated attempt idempotent while still issuing a PUT when the profile has
+    genuinely changed.
+    """
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        related_name="toluna_members",
+        on_delete=models.CASCADE,
+    )
+    member_code = models.CharField(max_length=80, db_index=True)
+    culture_code = models.CharField(max_length=12, blank=True, db_index=True)
+    profile_hash = models.CharField(max_length=64, blank=True)
+    is_registered = models.BooleanField(default=False)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "member_code"],
+                name="unique_toluna_member_code",
+            )
+        ]
+        ordering = ["-updated_at"]
+
+
 class SyncRun(models.Model):
     class Status(models.TextChoices):
         RUNNING = "running", "Running"

@@ -33,6 +33,7 @@ def dispatch_due_integrations_task():
         Q(scheduled_sync_enabled=True)
         | Q(provider_code="innovatemr")
         | Q(provider_code="rfg", last_test_status="success")
+        | Q(provider_code="toluna", last_test_status="success")
     ).only(
         "id", "provider_code", "sync_interval_seconds", "last_sync_started_at",
         "credential_env_key", "encrypted_api_token",
@@ -43,6 +44,7 @@ def dispatch_due_integrations_task():
         interval_seconds = {
             "innovatemr": settings.CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS,
             "rfg": settings.CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS,
+            "toluna": settings.CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS,
         }.get(integration.provider_code, integration.sync_interval_seconds)
         interval_seconds = max(60, interval_seconds)
         due_at = (integration.last_sync_started_at or (now - timedelta(days=1))) + timedelta(
@@ -68,7 +70,7 @@ def sync_client_integration_task(integration_id):
     integration.last_sync_error = ""
     integration.save(update_fields=["last_sync_started_at", "last_sync_status", "last_sync_error", "updated_at"])
     try:
-        if integration.provider_code == "rfg":
+        if integration.provider_code in {"rfg", "toluna"}:
             run = sync_client_integration(integration, refresh_details=False)
             details = refresh_client_integration_details(integration)
             summary = {
@@ -151,7 +153,7 @@ def reconcile_pending_attempts_task():
     lookback = now - timedelta(hours=settings.INNOVATEMR_ATTEMPT_RECONCILE_LOOKBACK_HOURS)
     pending = SurveyAttempt.objects.select_related("survey__integration").filter(
         status=SurveyAttempt.Status.REDIRECTED, callback_at__isnull=True, initiated_at__gte=lookback,
-    ).exclude(survey__integration__provider_code="rfg").filter(
+    ).exclude(survey__integration__provider_code__in=("rfg", "toluna")).filter(
         Q(upstream_checked_at__isnull=True) | Q(upstream_checked_at__lte=retry_before)
     ).order_by(
         "upstream_checked_at", "-initiated_at"

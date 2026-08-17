@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
+from .models import (
+    Survey,
+    SurveyAttempt,
+    SurveyQuota,
+    SyncRun,
+    TargetingQuestion,
+    TolunaMember,
+    TolunaReferenceQuestion,
+)
 
 
 class SurveyQuotaInline(admin.TabularInline):
@@ -42,3 +50,19 @@ class SurveyAttemptAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "status_source", "supplier_code", "entry_device", "entry_browser", "is_verified", "initiated_at"]
     readonly_fields = [field.name for field in SurveyAttempt._meta.fields]
+
+
+@admin.register(TolunaReferenceQuestion)
+class TolunaReferenceQuestionAdmin(admin.ModelAdmin):
+    list_display = ["integration", "culture_code", "question_id", "internal_name", "answer_type", "is_routable", "updated_at"]
+    list_filter = ["integration", "culture_code", "answer_type", "is_routable"]
+    search_fields = ["question_id", "internal_name", "display_name"]
+    readonly_fields = ["raw_data", "created_at", "updated_at"]
+
+
+@admin.register(TolunaMember)
+class TolunaMemberAdmin(admin.ModelAdmin):
+    list_display = ["integration", "member_code", "culture_code", "is_registered", "last_synced_at", "updated_at"]
+    list_filter = ["integration", "culture_code", "is_registered"]
+    search_fields = ["member_code"]
+    readonly_fields = ["created_at", "updated_at"]

@@ -127,7 +127,7 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertEqual(response.json()[0]["code"], "rfg")
         self.assertEqual(
             {provider["code"] for provider in response.json()},
-            {"rfg", "innovatemr", "custom"},
+            {"rfg", "toluna", "innovatemr", "custom"},
         )
         response = api.post("/api/v1/vendors/integrations/", {
             "client": self.client_record.pk,

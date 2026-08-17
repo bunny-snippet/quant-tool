@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from copy import deepcopy
@@ -17,6 +18,7 @@ from .credentials import resolve_integration_token
 
 INNOVATE_DOCS = "https://developer.innovatemr.com"
 RFG_DOCS = "https://docs.researchforgood.com/RFGAPI/livealert/apidocs"
+TOLUNA_DOCS = "https://docs.integratedpanel.toluna.com"
 OPERATION_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
 SECRET_FIELD_NAMES = frozenset({
     "authorization", "api_key", "apikey", "access_token", "secret", "signature", "hash",
@@ -289,6 +291,55 @@ RFG_OPERATIONS = {
 }
 
 
+TOLUNA_OPERATIONS = {
+    "connection_test": OperationSpec(
+        "connection_test",
+        "Connection and panel test",
+        "Validates Toluna API/Reference credentials, configured cultures, panel GUIDs and panel settings.",
+        "@toluna_test",
+        f"{TOLUNA_DOCS}/externalsample/api/getquotas.html",
+        response_description="Authentication state, configured cultures, reference-question count and settings-test result.",
+    ),
+    "cultures": OperationSpec(
+        "cultures",
+        "Reference cultures",
+        "Returns Toluna's supported culture names and CultureIDs.",
+        "/IPUtilityService/ReferenceData/Cultures",
+        f"{TOLUNA_DOCS}/mapping/referencedataapi/cultures.html",
+        response_description="Toluna culture rows used to map EN-US style configuration to numeric CultureIDs.",
+    ),
+    "reference_questions": OperationSpec(
+        "reference_questions",
+        "Question and answer library",
+        "Returns Toluna profiling questions and answer IDs for one to five configured cultures.",
+        "/IPUtilityService/ReferenceData/QuestionsAndAnswersData",
+        f"{TOLUNA_DOCS}/mapping/referencedataapi/questionsandanswers.html",
+        query_parameters=("cultures",),
+        upstream_method="POST",
+        response_description="Translated Toluna question definitions, answer IDs, answer labels and routing metadata.",
+    ),
+    "settings": OperationSpec(
+        "settings",
+        "Panel settings",
+        "Returns the Integrated Panel settings for one configured culture panel.",
+        "/IntegratedPanelService/api/Settings",
+        f"{TOLUNA_DOCS}/externalsample/api/getsettings.html",
+        required_parameters=("culture",),
+        response_description="Toluna panel settings for the configured culture's PanelGUID.",
+    ),
+    "quotas": OperationSpec(
+        "quotas",
+        "Live surveys and quotas",
+        "Returns live External Sample surveys, waves, quotas and targeting for one configured culture.",
+        "/IPExternalSamplingService/ExternalSample/{PanelGUID}/Quotas",
+        f"{TOLUNA_DOCS}/externalsample/api/getquotas.html",
+        required_parameters=("culture",),
+        query_parameters=("include_routables",),
+        response_description="Country/cache metadata plus live surveys, waves, CPI, IR, LOI, quota capacity and targeting layers.",
+    ),
+}
+
+
 INNOVATE_RESPONSE_DESCRIPTIONS = {
     "inventory": "Live survey rows allocated to this supplier account, including survey ID, market, CPI, IR, LOI, status and entry-link fields supplied by InnovateMR.",
     "paged_inventory": "One page of allocated live surveys plus the provider's next-page/cursor information.",
@@ -338,7 +389,12 @@ RFG_RESPONSE_DESCRIPTIONS = {
 
 def operation_response_description(provider: str, spec: OperationSpec) -> str:
     provider = re.sub(r"[-_]", "", str(provider or "").lower())
-    mapping = RFG_RESPONSE_DESCRIPTIONS if provider == "rfg" else INNOVATE_RESPONSE_DESCRIPTIONS
+    if provider == "rfg":
+        mapping = RFG_RESPONSE_DESCRIPTIONS
+    elif provider == "toluna":
+        mapping = {}
+    else:
+        mapping = INNOVATE_RESPONSE_DESCRIPTIONS
     return mapping.get(spec.code, spec.response_description)
 
 
@@ -380,6 +436,8 @@ def operation_specs(integration) -> dict[str, OperationSpec]:
     provider = _provider_key(integration)
     if provider == "rfg":
         return dict(RFG_OPERATIONS)
+    if provider == "toluna":
+        return dict(TOLUNA_OPERATIONS)
     if provider == "innovatemr":
         operations = dict(INNOVATE_OPERATIONS)
     else:
@@ -396,7 +454,7 @@ def operation_specs(integration) -> dict[str, OperationSpec]:
 
 def credential_metadata(integration) -> dict[str, Any]:
     provider = _provider_key(integration)
-    if provider == "rfg":
+    if provider in {"rfg", "toluna"}:
         references = integration.credential_env_keys or {}
         env_names = [str(value) for value in references.values() if value]
         configured = bool(env_names) and all(bool(os.getenv(name, "")) for name in env_names)
@@ -404,7 +462,11 @@ def credential_metadata(integration) -> dict[str, Any]:
             "source": "environment",
             "environment_variables": env_names,
             "configured": configured,
-            "authentication": "RFG signed HMAC request (APID/time/hash generated server-side)",
+            "authentication": (
+                "RFG signed HMAC request (APID/time/hash generated server-side)"
+                if provider == "rfg"
+                else "Toluna API_AUTH_KEY / PARTNER_AUTH_KEY headers injected server-side"
+            ),
         }
     try:
         configured = bool(resolve_integration_token(integration))
@@ -447,6 +509,22 @@ def _configured_endpoint(integration, spec: OperationSpec) -> str:
 def _effective_url(integration, spec: OperationSpec) -> str:
     if _provider_key(integration) == "rfg":
         return f"{integration.base_url.rstrip('/')} (command: {spec.endpoint})"
+    if _provider_key(integration) == "toluna":
+        config = integration.config or {}
+        environment = str(config.get("environment") or "production").lower()
+        es_base_url = str(
+            config.get("external_sample_base_url")
+            or ("https://training.ups.toluna.com" if environment == "sandbox" else integration.base_url)
+            or "https://tws.toluna.com"
+        ).rstrip("/")
+        reference_base_url = str(
+            config.get("reference_base_url") or "https://tws.toluna.com"
+        ).rstrip("/")
+        if spec.code == "connection_test":
+            return "Toluna Reference Data + Integrated Panel settings"
+        if spec.code in {"cultures", "reference_questions"}:
+            return f"{reference_base_url}{spec.endpoint}"
+        return f"{es_base_url}{spec.endpoint}"
     endpoint = _configured_endpoint(integration, spec)
     if not endpoint:
         return "Not configured"
@@ -460,6 +538,8 @@ def integration_metadata(integration) -> dict[str, Any]:
         aliases.update({"innovate", "innovatemr", "innovate-mr"})
     elif provider == "rfg":
         aliases.update({"rfg", "research-for-good"})
+    elif provider == "toluna":
+        aliases.update({"toluna", "toluna-integrated-panel"})
     return {
         "client_code": integration.client.code,
         "lookup_aliases": sorted(alias for alias in aliases if alias),
@@ -533,7 +613,7 @@ def _limit_payload(payload: Any, limit: int) -> tuple[Any, int | None, bool]:
 
 def _credential_values(integration) -> set[str]:
     values = set()
-    if _provider_key(integration) == "rfg":
+    if _provider_key(integration) in {"rfg", "toluna"}:
         for env_name in (integration.credential_env_keys or {}).values():
             if env_name and os.getenv(str(env_name), ""):
                 values.add(os.getenv(str(env_name), ""))
@@ -620,6 +700,77 @@ def _execute_rfg(integration, spec: OperationSpec, parameters: dict[str, Any]) -
     return result
 
 
+def _execute_toluna(integration, spec: OperationSpec, parameters: dict[str, Any]) -> Any:
+    """Execute the documented read-only Toluna operations with server-side secrets."""
+    provider = get_provider(integration)
+    required = _required_values(spec, parameters)
+    if spec.code == "connection_test":
+        return provider.test_connection()
+    if spec.code == "cultures":
+        payload, _ = provider._request(
+            "GET",
+            f"{provider.reference_base_url}/IPUtilityService/ReferenceData/Cultures",
+            headers=provider.reference_headers,
+        )
+        return payload
+
+    configured_panels = dict(provider._panels())
+    if spec.code == "reference_questions":
+        cultures = [
+            value.strip().lower().replace("_", "-")
+            for value in str(parameters.get("cultures") or "").split(",")
+            if value.strip()
+        ] or list(configured_panels)
+        cultures = list(dict.fromkeys(cultures))
+        if len(cultures) > 5:
+            raise UpstreamExplorerError("Toluna accepts a maximum of five cultures per Reference Data request.")
+        unsupported = [value for value in cultures if value not in configured_panels]
+        if unsupported:
+            raise UpstreamExplorerError(
+                f"Culture(s) not configured for this integration: {', '.join(unsupported)}."
+            )
+        culture_rows = provider._cultures()
+        missing = [value for value in cultures if value not in culture_rows]
+        if missing:
+            raise UpstreamExplorerError(f"Toluna did not return culture(s): {', '.join(missing)}.")
+        payload, _ = provider._request(
+            "POST",
+            f"{provider.reference_base_url}/IPUtilityService/ReferenceData/QuestionsAndAnswersData",
+            headers=provider.reference_headers,
+            json={
+                "CultureIDs": [int(culture_rows[value]["CultureID"]) for value in cultures],
+                "CategoryIDs": [],
+                "IncludeComputed": False,
+                "IncludeRoutables": True,
+                "IncludeDemographics": True,
+            },
+        )
+        return payload
+
+    culture = required["culture"].lower().replace("_", "-")
+    panel_guid = configured_panels.get(culture)
+    if not panel_guid:
+        raise UpstreamExplorerError(f"Culture '{culture}' is not configured for this integration.")
+    if spec.code == "settings":
+        payload, _ = provider._request(
+            "GET",
+            f"{provider.es_base_url}/IntegratedPanelService/api/Settings",
+            headers=provider.api_headers,
+            params={"partnerGUID": panel_guid},
+        )
+        return payload
+    include_routables = str(parameters.get("include_routables") or "true").lower() in {
+        "1", "true", "yes", "on",
+    }
+    payload, _ = provider._request(
+        "GET",
+        f"{provider.es_base_url}/IPExternalSamplingService/ExternalSample/{quote(panel_guid, safe='')}/Quotas",
+        headers=provider.api_headers,
+        params={"includeRoutables": str(include_routables).lower()},
+    )
+    return payload
+
+
 def _execute_rest(integration, spec: OperationSpec, parameters: dict[str, Any]) -> Any:
     client = InnovateMRClient(integration=integration)
     required = _required_values(spec, parameters)
@@ -691,11 +842,13 @@ def execute_operation(integration, operation: str, parameters: dict[str, Any]) -
     except (TypeError, ValueError) as exc:
         raise UpstreamExplorerError("Limit must be a whole number from 1 to 200.") from exc
     try:
-        payload = (
-            _execute_rfg(integration, spec, parameters)
-            if _provider_key(integration) == "rfg"
-            else _execute_rest(integration, spec, parameters)
-        )
+        provider = _provider_key(integration)
+        if provider == "rfg":
+            payload = _execute_rfg(integration, spec, parameters)
+        elif provider == "toluna":
+            payload = _execute_toluna(integration, spec, parameters)
+        else:
+            payload = _execute_rest(integration, spec, parameters)
     except (ProviderError, InnovateMRAPIError, ValueError) as exc:
         raise UpstreamExplorerError(str(exc)) from exc
     payload = _redact(payload, _credential_values(integration))

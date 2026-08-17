@@ -1074,7 +1074,10 @@ def survey_start(request):
         is_rfg = bool(
             survey.integration_id and survey.integration.provider_code == "rfg"
         )
-        if not survey.entry_link and not is_rfg:
+        is_dynamic_provider = bool(
+            survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}
+        )
+        if not survey.entry_link and not is_dynamic_provider:
             return _invalid_survey_link(request)
         expected_supplier_code = survey.integration.supplier_code if survey.integration_id else settings.PUBLIC_SUPPLIER_CODE
         if supplier_code != expected_supplier_code:
@@ -1083,14 +1086,16 @@ def survey_start(request):
         stale = survey.targeting_synced_at is None or (
             survey.source_modified_at and survey.targeting_synced_at < survey.source_modified_at
         )
-        if is_rfg:
-            stale = stale or not survey.entry_link or not survey.targeting_questions.filter(
-                raw_data__adapter_version__in=[2, 3]
+        if is_dynamic_provider:
+            stale = stale or not survey.targeting_questions.filter(
+                raw_data__adapter_version__in=[1, 2, 3]
             ).exists()
+            if is_rfg:
+                stale = stale or not survey.entry_link
         targeting_warning = ""
         if stale:
             try:
-                if is_rfg:
+                if is_dynamic_provider:
                     get_provider(survey.integration).refresh_details(survey)
                 else:
                     replace_survey_targeting(InnovateMRClient(integration=survey.integration), survey)
@@ -1100,7 +1105,7 @@ def survey_start(request):
                     survey.pk,
                     survey.integration_id,
                 )
-                if not survey.entry_link:
+                if not survey.entry_link and not is_dynamic_provider:
                     return _invalid_survey_link(
                         request,
                         "The provider entry link is temporarily unavailable. Please try again shortly.",
@@ -1108,7 +1113,7 @@ def survey_start(request):
                     )
                 if not survey.targeting_questions.exists():
                     targeting_warning = "Pre-screening criteria are temporarily unavailable. You can still continue."
-        if not survey.entry_link:
+        if not survey.entry_link and not is_dynamic_provider:
             return _invalid_survey_link(
                 request,
                 "The provider entry link is temporarily unavailable. Please try again shortly.",
@@ -1187,8 +1192,13 @@ def survey_start(request):
                         attempt, answers_with_entry_postal_code(attempt, answers)
                     )
                 provider = None
-                if attempt.survey.integration_id and attempt.survey.integration.provider_code == "rfg":
+                provider_code = (
+                    attempt.survey.integration.provider_code
+                    if attempt.survey.integration_id else ""
+                )
+                if provider_code in {"rfg", "toluna"}:
                     provider = get_provider(attempt.survey.integration)
+                if provider_code == "rfg":
                     eligible, reason = provider.validate_prescreener(attempt.survey, answers)
                     if not eligible:
                         _finish_local_rfg_attempt(
@@ -1228,7 +1238,9 @@ def survey_start(request):
                         locked.outbound_url = outbound_url
                         locked.status = SurveyAttempt.Status.REDIRECTED
                         locked.save(update_fields=[
-                            "answers", "submitted_at", "redirected_at", "outbound_url", "status", "updated_at"
+                            "answers", "submitted_at", "redirected_at", "outbound_url", "status",
+                            "source_cpi_snapshot", "payable_cpi_snapshot", "cpi_snapshot_source",
+                            "upstream_transaction_data", "updated_at"
                         ])
                     return HttpResponseRedirect(outbound_url)
             except Exception as exc:
@@ -1421,8 +1433,22 @@ def survey_status(request):
     attempt = SurveyAttempt.objects.filter(rid=rid).first()
     ip_address = get_request_ip(request)
     if attempt:
+        callback_verified = False
+        provider_code = ""
+        if attempt.survey.integration_id:
+            provider_code = attempt.survey.integration.provider_code
+        if provider_code == "toluna":
+            try:
+                callback_verified = get_provider(attempt.survey.integration).verify_callback(request)
+            except ProviderError as exc:
+                return render(request, "surveys/flow_error.html", {
+                    "title": "Invalid Toluna callback",
+                    "message": str(exc),
+                }, status=403)
         with transaction.atomic():
-            attempt = SurveyAttempt.objects.select_for_update().get(pk=attempt.pk)
+            attempt = SurveyAttempt.objects.select_for_update().select_related(
+                "survey__integration"
+            ).get(pk=attempt.pk)
             now = timezone.now()
             exit_client_data = get_request_client_data(request)
             if attempt.callback_at is None:
@@ -1435,13 +1461,19 @@ def survey_status(request):
                 attempt.exit_device = exit_client_data.get("device", "")
                 attempt.exit_os = exit_client_data.get("os", "")
                 attempt.exit_client_data = exit_client_data
-                attempt.status_source = "browser_callback"
+                attempt.status_source = "toluna_callback" if provider_code == "toluna" else "browser_callback"
+                if provider_code == "toluna":
+                    attempt.is_verified = callback_verified
+                    attempt.upstream_transaction_data = {
+                        **(attempt.upstream_transaction_data or {}),
+                        "toluna_callback": dict(request.GET.items()),
+                    }
             attempt.last_callback_at = now
             attempt.callback_count += 1
             attempt.save(update_fields=[
                 "callback_at", "callback_ip", "loi_seconds", "status", "exit_user_agent", "exit_browser",
                 "exit_device", "exit_os", "exit_client_data", "status_source", "last_callback_at",
-                "callback_count", "updated_at"
+                "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
             ])
             finalize_attempt_capacity(attempt)
         status_label = attempt.get_status_display()
@@ -1587,7 +1619,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
             survey.source_modified_at is not None and synced_at < survey.source_modified_at
         )
         if stale:
-            if survey.integration_id and survey.integration.provider_code == "rfg":
+            if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:
                 get_provider(survey.integration).refresh_details(survey)
             else:
                 refresh = replace_survey_quotas if detail_type == "quotas" else replace_survey_targeting
