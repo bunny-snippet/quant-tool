@@ -83,6 +83,22 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
         with transaction.atomic():
             for source_key, normalized in normalized_rows.items():
                 survey = Survey.objects.filter(integration=integration, source_key=source_key).first()
+                # Some provider inventory APIs (including Toluna Get Quotas)
+                # do not return created/updated timestamps. Persist stable local
+                # fallbacks once so project sorting, date filters and the table
+                # never receive null dates. Reuse them on later syncs; using
+                # `now` every minute would incorrectly mark every survey as
+                # updated on every poll.
+                normalized.values["source_created_at"] = (
+                    normalized.values.get("source_created_at")
+                    or (survey.source_created_at if survey else None)
+                    or (survey.created_at if survey else now)
+                )
+                normalized.values["source_modified_at"] = (
+                    normalized.values.get("source_modified_at")
+                    or (survey.source_modified_at if survey else None)
+                    or (survey.updated_at if survey else normalized.values["source_created_at"])
+                )
                 values = {
                     **normalized.values,
                     "client": integration.client,
@@ -95,7 +111,7 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                     run.created += 1
                     touched.append(survey)
                 elif _survey_changed(survey, normalized):
-                    source_changed = survey.source_modified_at != normalized.modified_at
+                    source_changed = survey.source_modified_at != values["source_modified_at"]
                     for field, value in values.items():
                         setattr(survey, field, value)
                     if source_changed:

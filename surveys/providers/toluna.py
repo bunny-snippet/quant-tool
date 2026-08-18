@@ -372,7 +372,14 @@ class TolunaProvider(SurveyProvider):
         required = max(0, _integer(_pick(survey, "CompletesRequired")))
         remaining = max(0, _integer(_pick(survey, "EstimatedCompletesRemaining")))
         price = _pick(survey, "Price", default={}) or {}
-        modified = _datetime(_pick(survey, "LastUpdated", "ModifiedDate"))
+        created = _datetime(_pick(
+            survey,
+            "CreatedDate", "CreationDate", "CreatedAt", "LaunchDate", "StartDate",
+        ))
+        modified = _datetime(_pick(
+            survey,
+            "LastUpdated", "ModifiedDate", "LastModified", "UpdatedAt", "UpdateDate",
+        )) or created
         devices = [str(item) for item in (_pick(survey, "DeviceTypeIDs", default=[]) or [])]
         source_key = f"{survey_id}:{wave_id}"
         raw_data = {**survey, "_toluna": metadata}
@@ -401,6 +408,7 @@ class TolunaProvider(SurveyProvider):
                 "device_type": ", ".join(devices),
                 "has_quota": bool(_pick(survey, "Quotas", default=[])),
                 "is_recontact": bool(_pick(survey, "IsSurveyRecontact", default=False)),
+                "source_created_at": created,
                 "source_modified_at": modified,
                 "last_seen_at": seen_at,
                 "entry_link": "",

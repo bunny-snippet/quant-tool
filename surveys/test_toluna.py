@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
@@ -12,7 +13,9 @@ from vendors.models import Client, ClientIntegration
 from vendors.serializers import ClientIntegrationSerializer
 
 from .models import Survey, SurveyAttempt, TolunaMember, TolunaReferenceQuestion
+from .provider_services import sync_client_integration
 from .providers.toluna import TolunaProvider
+from .serializers import SurveyListSerializer
 
 
 class FakeResponse:
@@ -113,6 +116,54 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(TolunaReferenceQuestion.objects.filter(integration=self.integration).count(), 2)
         self.assertNotIn("panel-guid", str(rows))
         self.assertEqual(session.calls[2][2]["headers"]["API_AUTH_KEY"], "api-key")
+
+    @patch("surveys.provider_services.get_provider")
+    def test_inventory_sync_persists_stable_fallback_timestamps(self, get_provider_mock):
+        get_provider_mock.return_value = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)),
+        )
+        first = sync_client_integration(self.integration)
+        survey = Survey.objects.get(integration=self.integration, source_key="71:72")
+        created_at = survey.source_created_at
+        modified_at = survey.source_modified_at
+
+        self.assertEqual(first.created, 1)
+        self.assertIsNotNone(created_at)
+        self.assertEqual(modified_at, created_at)
+
+        get_provider_mock.return_value = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(QUOTAS)),
+        )
+        second = sync_client_integration(self.integration)
+        survey.refresh_from_db()
+
+        self.assertEqual(second.unchanged, 1)
+        self.assertEqual(survey.source_created_at, created_at)
+        self.assertEqual(survey.source_modified_at, modified_at)
+
+    @patch("surveys.serializers.has_function_access", return_value=True)
+    def test_blank_upstream_link_still_returns_toluna_platform_copy_link(self, _access):
+        user = get_user_model().objects.create_user(
+            username="toluna-copy", email="toluna-copy@example.test", password="test-password"
+        )
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="71:72",
+            company_name="Toluna",
+            name="Toluna test survey",
+            status=Survey.Status.LIVE,
+            entry_link="",
+        )
+        request = RequestFactory().get("/api/surveys/")
+        request.user = user
+
+        data = SurveyListSerializer(survey, context={"request": request}).data
+
+        self.assertIn("/survey/start?", data["start_link"])
+        self.assertIn("surveyId=71%3A72", data["start_link"])
 
     def test_member_registration_quota_match_and_invite_build(self):
         bootstrap = TolunaProvider(
