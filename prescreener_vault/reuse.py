@@ -5,7 +5,7 @@ from decimal import Decimal, ROUND_FLOOR
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from surveys.models import ProfileReuseEvent, ProfileReuseMonthlyCounter, SurveyAttempt
@@ -20,6 +20,8 @@ AGE_GROUP_RANGES = {
     "35-39": (35, 39), "40-44": (40, 44), "45-49": (45, 49), "50-54": (50, 54),
 }
 GENDER_ALIASES = {"male": ("male", "m", "man"), "female": ("female", "f", "woman")}
+FIRST_REUSE_POOL = "first"
+RETURNING_REUSE_POOL = "returning"
 
 
 def effective_profile_uid(attempt) -> str:
@@ -42,6 +44,18 @@ def _target_from_baseline(integration, baseline):
     return int((Decimal(baseline) * percentage / Decimal("100")).to_integral_value(
         rounding=ROUND_FLOOR
     ))
+
+
+def _pool_targets(integration, total_target):
+    if not integration.profile_rereuse_enabled:
+        return total_target, 0
+    repeat_percentage = Decimal(str(integration.profile_rereuse_percentage or 0))
+    repeat_target = int(
+        (Decimal(total_target) * repeat_percentage / Decimal("100")).to_integral_value(
+            rounding=ROUND_FLOOR
+        )
+    )
+    return max(0, total_target - repeat_target), repeat_target
 
 
 def _monthly_baseline(integration, reference=None):
@@ -82,19 +96,32 @@ def profile_reuse_month_status(integration, reference=None):
         )
         target = _target_from_baseline(integration, baseline)
         used = counter.allocated_reuses
+        first_used = counter.first_reuse_allocated
+        repeat_used = counter.repeat_reuse_allocated
     else:
         baseline = live_baseline
         target = _target_from_baseline(integration, baseline)
         used = 0
+        first_used = 0
+        repeat_used = 0
+    first_target, repeat_target = _pool_targets(integration, target)
     return {
         "period": period_start.isoformat(), "previous_month_attempts": previous_attempts,
         "baseline_attempts": baseline, "baseline_source": baseline_source,
         "target_reuses": target, "used_reuses": used,
         "remaining_reuses": max(0, target - used),
+        "first_reuse_target": first_target,
+        "first_reuse_used": first_used,
+        "first_reuse_remaining": max(0, first_target - first_used),
+        "repeat_reuse_enabled": integration.profile_rereuse_enabled,
+        "repeat_reuse_target": repeat_target,
+        "repeat_reuse_used": repeat_used,
+        "repeat_reuse_remaining": max(0, repeat_target - repeat_used),
     }
 
 
-def _claim_month_slot(integration):
+def _claim_month_slot(integration, excluded_pools=None):
+    excluded_pools = set(excluded_pools or ())
     period_start, _, live_baseline, baseline_source = _monthly_baseline(integration)
     with transaction.atomic():
         counter, created = ProfileReuseMonthlyCounter.objects.select_for_update().get_or_create(
@@ -107,23 +134,42 @@ def _claim_month_slot(integration):
             counter.baseline_attempts = live_baseline
         baseline = counter.baseline_attempts
         target = _target_from_baseline(integration, baseline)
+        first_target, repeat_target = _pool_targets(integration, target)
         counter.target_reuses = target
         if target <= 0:
             counter.save(update_fields=["baseline_attempts", "target_reuses", "updated_at"])
             return None
-        if counter.allocated_reuses >= target:
+        available = []
+        if FIRST_REUSE_POOL not in excluded_pools and counter.first_reuse_allocated < first_target:
+            available.append((FIRST_REUSE_POOL, counter.first_reuse_allocated, first_target))
+        if RETURNING_REUSE_POOL not in excluded_pools and counter.repeat_reuse_allocated < repeat_target:
+            available.append((RETURNING_REUSE_POOL, counter.repeat_reuse_allocated, repeat_target))
+        if counter.allocated_reuses >= target or not available:
             counter.save(update_fields=["baseline_attempts", "target_reuses", "updated_at"])
             return None
-        counter.allocated_reuses += 1
-        counter.save(update_fields=["baseline_attempts", "target_reuses", "allocated_reuses", "updated_at"])
-        return counter.pk
-
-
-def _release_month_slot(counter_id):
-    if counter_id:
-        ProfileReuseMonthlyCounter.objects.filter(pk=counter_id, allocated_reuses__gt=0).update(
-            allocated_reuses=F("allocated_reuses") - 1
+        pool, _, _ = min(
+            available,
+            key=lambda row: (Decimal(row[1]) / Decimal(row[2]), row[0] != FIRST_REUSE_POOL),
         )
+        counter.allocated_reuses += 1
+        if pool == FIRST_REUSE_POOL:
+            counter.first_reuse_allocated += 1
+        else:
+            counter.repeat_reuse_allocated += 1
+        counter.save(update_fields=[
+            "baseline_attempts", "target_reuses", "allocated_reuses",
+            "first_reuse_allocated", "repeat_reuse_allocated", "updated_at",
+        ])
+        return counter.pk, pool
+
+
+def _release_month_slot(counter_id, pool):
+    if not counter_id:
+        return
+    field = "first_reuse_allocated" if pool == FIRST_REUSE_POOL else "repeat_reuse_allocated"
+    ProfileReuseMonthlyCounter.objects.filter(
+        pk=counter_id, allocated_reuses__gt=0, **{f"{field}__gt": 0}
+    ).update(allocated_reuses=F("allocated_reuses") - 1, **{field: F(field) - 1})
 
 
 def _profile_signature(attempt, answers):
@@ -139,35 +185,49 @@ def _profile_signature(attempt, answers):
     }
 
 
-def _reserve_vault_profile(attempt, signature, minimum_days):
+def _reserve_vault_profile(attempt, signature, minimum_days, pool):
     threshold = timezone.now() - timedelta(days=minimum_days)
     gender_values = GENDER_ALIASES.get(signature["gender"], (signature["gender"],))
+    integration = attempt.survey.integration
+    client_code = str(integration.client.code or "").strip().lower()
     with transaction.atomic(using=DATABASE_ALIAS):
-        candidate = (
+        candidates = (
             PrescreenerSubmission.objects.using(DATABASE_ALIAS).select_for_update(skip_locked=True)
             .filter(
+                source_client_code=client_code,
                 country_code=signature["country_code"],
                 respondent_age_group=signature["age_group"],
                 respondent_gender__in=gender_values,
-                submitted_at__lte=threshold,
             )
             .exclude(uid=attempt.prescreener_uid)
-            .order_by("usage_count", "submitted_at", "uid")
-            .first()
         )
+        if pool == FIRST_REUSE_POOL:
+            candidates = candidates.filter(usage_count=1, submitted_at__lte=threshold).order_by(
+                "submitted_at", "uid"
+            )
+        else:
+            candidates = candidates.filter(usage_count__gte=2).filter(
+                Q(last_reused_at__lte=threshold)
+                | Q(last_reused_at__isnull=True, submitted_at__lte=threshold)
+            ).order_by("usage_count", "last_reused_at", "submitted_at", "uid")
+        candidate = candidates.first()
         if candidate is None:
             return None
+        previous_last_reused_at = candidate.last_reused_at
+        reserved_at = timezone.now()
         PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(pk=candidate.pk).update(
-            usage_count=F("usage_count") + 1
+            usage_count=F("usage_count") + 1, last_reused_at=reserved_at
         )
         candidate.usage_count += 1
-        return candidate
+        candidate.last_reused_at = reserved_at
+        return candidate, previous_last_reused_at
 
 
-def _undo_vault_reservation(uid):
+def _undo_vault_reservation(uid, previous_last_reused_at=None):
     if uid:
         PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(uid=uid, usage_count__gt=1).update(
-            usage_count=F("usage_count") - 1
+            usage_count=F("usage_count") - 1,
+            last_reused_at=previous_last_reused_at,
         )
 
 
@@ -191,22 +251,38 @@ def maybe_assign_reusable_profile(attempt, answers):
     signature = _profile_signature(attempt, answers)
     if not signature["country_code"] or signature["age_group"] not in AGE_GROUP_RANGES or signature["gender"] not in GENDER_ALIASES:
         return None
-    allowed_countries = {str(value).strip().upper() for value in (integration.profile_reuse_country_codes or []) if str(value).strip()}
-    if allowed_countries and signature["country_code"] not in allowed_countries:
-        return None
     if signature["age_group"] not in (integration.profile_reuse_age_groups or []):
         return None
     if signature["gender"] not in (integration.profile_reuse_genders or []):
         return None
 
-    counter_id = _claim_month_slot(integration)
-    if not counter_id:
-        return None
+    counter_id = None
+    selected_pool = None
     candidate = None
+    previous_last_reused_at = None
     try:
-        candidate = _reserve_vault_profile(attempt, signature, int(integration.profile_reuse_eligible_after_days))
+        excluded_pools = set()
+        while len(excluded_pools) < 2:
+            slot = _claim_month_slot(integration, excluded_pools)
+            if not slot:
+                break
+            counter_id, selected_pool = slot
+            minimum_days = (
+                int(integration.profile_reuse_eligible_after_days)
+                if selected_pool == FIRST_REUSE_POOL
+                else int(integration.profile_rereuse_cooldown_days)
+            )
+            reservation = _reserve_vault_profile(
+                attempt, signature, minimum_days, selected_pool
+            )
+            if reservation:
+                candidate, previous_last_reused_at = reservation
+                break
+            _release_month_slot(counter_id, selected_pool)
+            excluded_pools.add(selected_pool)
+            counter_id = None
+            selected_pool = None
         if candidate is None:
-            _release_month_slot(counter_id)
             return None
         with transaction.atomic():
             updated = SurveyAttempt.objects.filter(pk=attempt.pk, provider_profile_uid="").update(
@@ -220,12 +296,13 @@ def maybe_assign_reusable_profile(attempt, answers):
                 reused_rid=candidate.rid, reused_uid=candidate.uid,
                 source_registered_at=candidate.submitted_at,
                 source_usage_number=candidate.usage_count,
+                reuse_pool=selected_pool,
                 country_code=signature["country_code"], age_group=signature["age_group"],
                 gender=signature["gender"],
             )
         attempt.provider_profile_uid = candidate.uid
         return event
     except Exception:
-        _release_month_slot(counter_id)
-        _undo_vault_reservation(candidate.uid if candidate else "")
+        _release_month_slot(counter_id, selected_pool)
+        _undo_vault_reservation(candidate.uid if candidate else "", previous_last_reused_at)
         raise

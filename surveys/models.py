@@ -420,6 +420,8 @@ class ProfileReuseMonthlyCounter(models.Model):
     baseline_attempts = models.PositiveIntegerField(default=0)
     target_reuses = models.PositiveIntegerField(default=0)
     allocated_reuses = models.PositiveIntegerField(default=0)
+    first_reuse_allocated = models.PositiveIntegerField(default=0)
+    repeat_reuse_allocated = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -450,6 +452,12 @@ class ProfileReuseEvent(models.Model):
     reused_uid = models.CharField(max_length=19, db_index=True)
     source_registered_at = models.DateTimeField()
     source_usage_number = models.PositiveIntegerField()
+    reuse_pool = models.CharField(
+        max_length=16,
+        choices=(("first", "First reuse"), ("returning", "Returning profile")),
+        default="first",
+        db_index=True,
+    )
     country_code = models.CharField(max_length=8, db_index=True)
     age_group = models.CharField(max_length=20, db_index=True)
     gender = models.CharField(max_length=20, db_index=True)

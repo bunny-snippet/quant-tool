@@ -71,11 +71,13 @@
           </div>
         </div>
         <section class="reuse-editor">
-          <header><div><h3>Reusable UID policy</h3><p>Client-wise monthly budget with a fair country, age-band and gender queue.</p></div><label class="mode-switch" title="Enable reusable UIDs"><input id="profileReuseEnabled" type="checkbox"><span></span></label></header>
+          <header><div><h3>Reusable UID policy</h3><p>Client-wise monthly budget; country always matches automatically, with age-band and gender controls.</p></div><label class="mode-switch" title="Enable reusable UIDs"><input id="profileReuseEnabled" type="checkbox"><span></span></label></header>
           <div class="form-grid">
             <div class="field"><label for="profileReuseDays">Eligible after (days)</label><input id="profileReuseDays" type="number" min="1" max="730" value="60"><small>A registered UID cannot enter the queue before this age.</small></div>
             <div class="field"><label for="profileReusePercentage">Next-month reuse (%)</label><input id="profileReusePercentage" type="number" min="0.01" max="100" step="0.01" value="30"><small>Calculated from this client's previous calendar-month attempts.</small></div>
-            <div class="field wide"><label for="profileReuseCountries">Countries</label><select id="profileReuseCountries" class="reuse-country" multiple></select><small>No selection means all countries currently served by this client.</small></div>
+            <div class="field wide flow-editor"><label><input id="profileRereuseEnabled" type="checkbox"> Include already-reused profiles</label><small>Off: only first-time reuse candidates are selected. On: the monthly target is split into two fair pools.</small></div>
+            <div class="field"><label for="profileRereusePercentage">Returning-pool share (%)</label><input id="profileRereusePercentage" type="number" min="0.01" max="99.99" step="0.01" value="50"><small>For a target of 30, 50% reserves 15 for each pool.</small></div>
+            <div class="field"><label for="profileRereuseCooldownDays">Reuse again after (days)</label><input id="profileRereuseCooldownDays" type="number" min="1" max="730" value="30"><small>Cooldown before an already-reused UID may return.</small></div>
             <div class="field full"><label>Age bands</label><div class="reuse-options" id="profileReuseAgeGroups"></div></div>
             <div class="field full"><label>Genders</label><div class="reuse-options" id="profileReuseGenders"></div></div>
           </div>
@@ -136,9 +138,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   const providerMeta=code=>providers.find(item=>item.code===code)||fallbackProviders.find(item=>item.code===code)||{code,label:code||'Unknown provider',default_base_url:'',minimum_sync_interval_seconds:60};
 
   function renderReuseEditor(item={}){
-    const selectedCountries=item.profile_reuse_country_codes||[];
-    const countries=[...new Set([...selectedCountries,...(item.profile_reuse_available_country_codes||[]),...integrations.flatMap(row=>row.profile_reuse_available_country_codes||[])])].sort();
-    el('profileReuseCountries').innerHTML=countries.map(code=>`<option value="${escapeHtml(code)}" ${selectedCountries.includes(code)?'selected':''}>${escapeHtml(code)}</option>`).join('');
     const selectedAges=item.profile_reuse_age_groups||reuseAgeGroups;
     el('profileReuseAgeGroups').innerHTML=reuseAgeGroups.map(value=>`<label class="reuse-option"><input type="checkbox" value="${value}" ${selectedAges.includes(value)?'checked':''}>${value}</label>`).join('');
     const selectedGenders=item.profile_reuse_genders||reuseGenders;
@@ -146,6 +145,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     el('profileReuseEnabled').checked=item.profile_reuse_enabled===true;
     el('profileReuseDays').value=item.profile_reuse_eligible_after_days||60;
     el('profileReusePercentage').value=item.profile_reuse_monthly_percentage||30;
+    el('profileRereuseEnabled').checked=item.profile_rereuse_enabled===true;
+    el('profileRereusePercentage').value=item.profile_rereuse_percentage||50;
+    el('profileRereuseCooldownDays').value=item.profile_rereuse_cooldown_days||30;
   }
   const checkedValues=id=>[...el(id).querySelectorAll('input:checked')].map(input=>input.value);
 
@@ -177,7 +179,8 @@ document.addEventListener('DOMContentLoaded',()=>{
       const flowControl=isRfg?`<div class="flow-mode"><div><strong data-flow-title="${item.id}">${strict?'Strict flow':'Relaxed flow'}</strong><small data-flow-copy="${item.id}">${strict?'Local mismatch terminates before RFG.':'RFG makes the final eligibility decision.'}</small></div>${canManage?`<label class="mode-switch" title="Toggle strict or relaxed targeting"><input type="checkbox" data-targeting-toggle="${item.id}" ${strict?'checked':''}><span></span></label>`:`<span class="badge">${strict?'Strict':'Relaxed'}</span>`}</div>`:'';
       const reuseStatus=item.profile_reuse_status||{};
       const reuseBaselineSource=reuseStatus.baseline_source==='current_month_bootstrap'?'current month bootstrap':'previous month';
-      const reuseControl=`<div class="flow-mode reuse-card"><div><strong>Reusable UID flow</strong><small>${item.profile_reuse_eligible_after_days} days old &middot; ${escapeHtml(item.profile_reuse_monthly_percentage)}% of ${reuseBaselineSource}</small><div class="reuse-stats"><span>Baseline ${reuseStatus.baseline_attempts||0}</span><span>Target ${reuseStatus.target_reuses||0}</span><span>Used ${reuseStatus.used_reuses||0}</span><span>Remaining ${reuseStatus.remaining_reuses||0}</span></div></div>${canManage?`<label class="mode-switch" title="Activate or deactivate UID reuse"><input type="checkbox" data-reuse-toggle="${item.id}" ${item.profile_reuse_enabled?'checked':''}><span></span></label>`:`<span class="badge ${item.profile_reuse_enabled?'success':''}">${item.profile_reuse_enabled?'On':'Off'}</span>`}</div>`;
+      const poolStats=item.profile_rereuse_enabled?`<div class="reuse-stats"><span>First ${reuseStatus.first_reuse_used||0}/${reuseStatus.first_reuse_target||0}</span><span>Returning ${reuseStatus.repeat_reuse_used||0}/${reuseStatus.repeat_reuse_target||0}</span><span>Cooldown ${item.profile_rereuse_cooldown_days||30}d</span></div>`:'';
+      const reuseControl=`<div class="flow-mode reuse-card"><div><strong>Reusable UID flow</strong><small>${item.profile_reuse_eligible_after_days} days old &middot; ${escapeHtml(item.profile_reuse_monthly_percentage)}% of ${reuseBaselineSource}</small><div class="reuse-stats"><span>Baseline ${reuseStatus.baseline_attempts||0}</span><span>Target ${reuseStatus.target_reuses||0}</span><span>Used ${reuseStatus.used_reuses||0}</span><span>Remaining ${reuseStatus.remaining_reuses||0}</span></div>${poolStats}</div>${canManage?`<label class="mode-switch" title="Activate or deactivate UID reuse"><input type="checkbox" data-reuse-toggle="${item.id}" ${item.profile_reuse_enabled?'checked':''}><span></span></label>`:`<span class="badge ${item.profile_reuse_enabled?'success':''}">${item.profile_reuse_enabled?'On':'Off'}</span>`}</div>`;
       const automatic=item.provider_code==='innovatemr'||((isRfg||isToluna)&&item.last_test_status==='success');
       return `<article class="card"><span class="badge ${escapeHtml(item.last_sync_status)}">${item.is_active?'Active':'Inactive'} &middot; ${automatic?'Automatic':item.scheduled_sync_enabled?'Scheduled':'Manual'}</span><div class="card-provider">${escapeHtml(meta.label)}</div><h3>${escapeHtml(item.client_name)} &middot; ${escapeHtml(item.name)}</h3><div class="meta">Supplier ${escapeHtml(item.supplier_code)}<br>${contract}<br>${credentials} &middot; ${escapeHtml(item.survey_count)} surveys<br>Last test: ${escapeHtml(item.last_test_status||'never')} (${escapeHtml(fmt(item.last_tested_at))})<br>Last sync: ${escapeHtml(item.last_sync_status||'never')} (${escapeHtml(fmt(item.last_sync_finished_at))})${item.last_sync_error?`<br>${escapeHtml(item.last_sync_error)}`:''}</div>${flowControl}${reuseControl}${canManage?`<div class="actions"><button class="secondary" data-edit="${item.id}">Edit policy</button><button class="secondary" data-test="${item.id}">Test connection</button><button class="primary" data-sync="${item.id}">Sync now</button></div>`:''}</article>`;
     }).join(''):'<div class="card empty">No client integrations yet.</div>';
@@ -285,7 +288,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       const providerCode=el('provider').value;
       let mapping={};
       try{mapping=el('fieldMapping').value.trim()?JSON.parse(el('fieldMapping').value):{}}catch(error){el('formStatus').textContent='Custom field mapping must be valid JSON.';el('formStatus').className='status-line error';return}
-      const payload={client:+el('client').value,name:el('name').value.trim(),provider_code:providerCode,base_url:el('baseUrl').value.trim(),supplier_code:el('supplierCode').value.trim(),sync_interval_seconds:+el('interval').value,detail_refresh_batch:+el('detailBatch').value,scheduled_sync_enabled:el('scheduled').checked,is_active:el('active').checked,profile_reuse_enabled:el('profileReuseEnabled').checked,profile_reuse_eligible_after_days:+el('profileReuseDays').value,profile_reuse_monthly_percentage:el('profileReusePercentage').value,profile_reuse_country_codes:[...el('profileReuseCountries').selectedOptions].map(option=>option.value),profile_reuse_age_groups:checkedValues('profileReuseAgeGroups'),profile_reuse_genders:checkedValues('profileReuseGenders')};
+      const payload={client:+el('client').value,name:el('name').value.trim(),provider_code:providerCode,base_url:el('baseUrl').value.trim(),supplier_code:el('supplierCode').value.trim(),sync_interval_seconds:+el('interval').value,detail_refresh_batch:+el('detailBatch').value,scheduled_sync_enabled:el('scheduled').checked,is_active:el('active').checked,profile_reuse_enabled:el('profileReuseEnabled').checked,profile_reuse_eligible_after_days:+el('profileReuseDays').value,profile_reuse_monthly_percentage:el('profileReusePercentage').value,profile_rereuse_enabled:el('profileRereuseEnabled').checked,profile_rereuse_percentage:el('profileRereusePercentage').value,profile_rereuse_cooldown_days:+el('profileRereuseCooldownDays').value,profile_reuse_age_groups:checkedValues('profileReuseAgeGroups'),profile_reuse_genders:checkedValues('profileReuseGenders')};
       if(providerCode==='rfg'){
         payload.credential_env_keys={apid:el('rfgApidEnv').value.trim(),secret:el('rfgSecretEnv').value.trim()};
         payload.config={country:el('rfgCountry').value.trim().toUpperCase(),category:el('rfgCategory').value,allow_recontacts:el('rfgRecontacts').checked,enforce_local_targeting:el('rfgStrictTargeting').checked,callback_security_mode:'ip'};

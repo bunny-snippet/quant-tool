@@ -546,7 +546,7 @@ def prescreener_data_export(request):
     def submission_rows():
         for submission in queryset.iterator(chunk_size=500):
             yield [
-                submission.uid, submission.rid, submission.country, submission.country_code,
+                submission.uid, submission.country, submission.country_code,
                 submission.language, submission.language_code, submission.respondent_age,
                 submission.respondent_age_group, submission.respondent_gender,
                 submission.respondent_ethnicity, submission.respondent_postal_code,
@@ -558,7 +558,7 @@ def prescreener_data_export(request):
         for submission in queryset.iterator(chunk_size=250):
             for answer in submission.question_answers.all():
                 yield [
-                    submission.uid, submission.rid, answer.position, answer.question_id,
+                    submission.uid, answer.position, answer.question_id,
                     answer.question_key, answer.question_text, answer.question_type,
                     answer.question_category, answer.canonical_attribute,
                     ", ".join(str(value) for value in answer.answer_values),
@@ -572,15 +572,15 @@ def prescreener_data_export(request):
         [
             ExcelSheet(
                 "Submissions",
-                ["UID", "RID", "Country", "Country code", "Language", "Language code", "Age", "Age group", "Gender", "Ethnicity", "ZIP / postal code", "Visits", "Registered at (IST)", "Captured at (IST)"],
+                ["UID", "Country", "Country code", "Language", "Language code", "Age", "Age group", "Gender", "Ethnicity", "ZIP / postal code", "Visits", "Registered at (IST)", "Captured at (IST)"],
                 submission_rows(),
-                [22, 14, 20, 13, 17, 14, 9, 13, 14, 24, 18, 13, 22, 22],
+                [22, 20, 13, 17, 14, 9, 13, 14, 24, 18, 13, 22, 22],
             ),
             ExcelSheet(
                 "Answers",
-                ["UID", "RID", "Position", "Question ID", "Question key", "Question", "Question type", "Category", "Reusable attribute", "Answer values", "Answer labels", "Upstream values"],
+                ["UID", "Position", "Question ID", "Question key", "Question", "Question type", "Category", "Reusable attribute", "Answer values", "Answer labels", "Upstream values"],
                 answer_rows(),
-                [22, 14, 10, 16, 22, 48, 18, 18, 20, 28, 34, 25],
+                [22, 10, 16, 22, 48, 18, 18, 20, 28, 34, 25],
             ),
         ],
     )

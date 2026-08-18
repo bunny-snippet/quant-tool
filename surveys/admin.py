@@ -58,7 +58,7 @@ class SurveyAttemptAdmin(admin.ModelAdmin):
 class ProfileReuseMonthlyCounterAdmin(admin.ModelAdmin):
     list_display = [
         "integration", "period_start", "baseline_attempts", "target_reuses",
-        "allocated_reuses", "updated_at",
+        "allocated_reuses", "first_reuse_allocated", "repeat_reuse_allocated", "updated_at",
     ]
     list_filter = ["integration", "period_start"]
     readonly_fields = [field.name for field in ProfileReuseMonthlyCounter._meta.fields]
@@ -68,10 +68,10 @@ class ProfileReuseMonthlyCounterAdmin(admin.ModelAdmin):
 class ProfileReuseEventAdmin(admin.ModelAdmin):
     list_display = [
         "attempt", "integration", "registered_uid", "reused_rid", "reused_uid",
-        "country_code", "age_group", "gender", "source_usage_number", "created_at",
+        "reuse_pool", "country_code", "age_group", "gender", "source_usage_number", "created_at",
     ]
     search_fields = ["attempt__rid", "registered_uid", "reused_rid", "reused_uid"]
-    list_filter = ["integration", "country_code", "age_group", "gender", "created_at"]
+    list_filter = ["integration", "reuse_pool", "country_code", "age_group", "gender", "created_at"]
     readonly_fields = [field.name for field in ProfileReuseEvent._meta.fields]
 
 

@@ -24,7 +24,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not settings.PRESCREENER_VAULT_ENABLED:
             raise CommandError("Set PRESCREENER_VAULT_ENABLED=true before running this command.")
-        queryset = SurveyAttempt.objects.select_related("survey").filter(
+        queryset = SurveyAttempt.objects.select_related(
+            "survey__integration__client"
+        ).filter(
             id__gt=options["after_id"]
         ).exclude(answers={}).order_by("id")
         if options["limit"]:

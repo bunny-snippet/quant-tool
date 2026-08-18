@@ -6,6 +6,12 @@ class PrescreenerSubmission(models.Model):
 
     uid = models.CharField(max_length=19, primary_key=True)
     rid = models.CharField(max_length=10, unique=True)
+    source_client_code = models.CharField(
+        max_length=80,
+        blank=True,
+        db_index=True,
+        help_text="Stable client scope that prevents profiles crossing between clients.",
+    )
     country = models.CharField(max_length=120, blank=True)
     country_code = models.CharField(max_length=8, blank=True, db_index=True)
     language = models.CharField(max_length=80, blank=True)
@@ -23,6 +29,7 @@ class PrescreenerSubmission(models.Model):
         db_index=True,
         help_text="Total visits: one original submission plus approved profile reuses.",
     )
+    last_reused_at = models.DateTimeField(null=True, blank=True, db_index=True)
     submitted_at = models.DateTimeField(db_index=True)
     captured_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -33,6 +40,10 @@ class PrescreenerSubmission(models.Model):
             models.Index(
                 fields=["country_code", "respondent_age_group", "respondent_gender", "usage_count", "submitted_at"],
                 name="vault_reuse_queue_idx",
+            ),
+            models.Index(
+                fields=["source_client_code", "country_code", "respondent_age_group", "respondent_gender", "usage_count"],
+                name="vault_client_reuse_idx",
             ),
         ]
 

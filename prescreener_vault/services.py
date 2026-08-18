@@ -260,6 +260,10 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None, allow
     attempt.submitted_at = submitted_at
     snapshots, dimensions, age, age_group, gender, ethnicity, postal_code = _question_snapshots(attempt, answers)
     survey = attempt.survey
+    integration = getattr(survey, "integration", None)
+    source_client_code = str(
+        getattr(getattr(integration, "client", None), "code", "") or ""
+    ).strip().lower()
     raw_answers = copy.deepcopy(answers)
 
     def persist_once():
@@ -268,6 +272,11 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None, allow
             if existing:
                 if existing.rid != attempt.rid:
                     raise PrescreenerVaultError("Vault UID is already mapped to a different RID.")
+                if not existing.source_client_code and source_client_code:
+                    PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(
+                        pk=existing.pk, source_client_code=""
+                    ).update(source_client_code=source_client_code)
+                    existing.source_client_code = source_client_code
                 if existing.raw_answers != raw_answers:
                     if not allow_draft_replace:
                         raise PrescreenerVaultError("This RID/UID already has a different immutable submission.")
@@ -301,6 +310,7 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None, allow
             submission = PrescreenerSubmission.objects.using(DATABASE_ALIAS).create(
                 uid=uid,
                 rid=attempt.rid,
+                source_client_code=source_client_code,
                 country=survey.country,
                 country_code=survey.country_code.upper(),
                 language=survey.language,

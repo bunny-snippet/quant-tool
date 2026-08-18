@@ -99,6 +99,22 @@ class ClientIntegration(models.Model):
         default=default_profile_reuse_genders,
         blank=True,
     )
+    profile_rereuse_enabled = models.BooleanField(
+        default=False,
+        help_text="Allow profiles that already completed one reuse round to enter a separate queue.",
+    )
+    profile_rereuse_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("50.00"),
+        validators=PERCENTAGE_VALIDATORS,
+        help_text="Share of the monthly reuse target reserved for already-reused profiles.",
+    )
+    profile_rereuse_cooldown_days = models.PositiveSmallIntegerField(
+        default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(730)],
+        help_text="Minimum cooldown after a profile reuse before it can be used again.",
+    )
     encrypted_api_token = models.TextField(blank=True, editable=False)
     credential_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
     credential_last_four = models.CharField(max_length=4, blank=True, editable=False)
