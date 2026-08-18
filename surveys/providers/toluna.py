@@ -183,7 +183,15 @@ class TolunaProvider(SurveyProvider):
                 if str(key).lower() in allowed and value not in (None, "", [], {})
             }
             if selected:
-                return json.dumps(selected, ensure_ascii=True, separators=(",", ":"))[:800]
+                rendered = json.dumps(selected, ensure_ascii=True, separators=(",", ":"))
+                # Toluna sometimes embeds the complete rejected member body
+                # inside Message. Never send MemberCode, GUID, DOB or profile
+                # answers back to the browser/log-facing exception.
+                if "Cannot Register MemberCode" in rendered:
+                    question_ids = sorted(set(re.findall(r"QuestionID\\?[\"']?\s*:\s*(\d+)", rendered)))
+                    suffix = f" (question IDs: {', '.join(question_ids)})" if question_ids else ""
+                    return f"Toluna rejected one or more member profile attributes{suffix}."
+                return rendered[:800]
         text = str(getattr(response, "text", "") or "").strip()
         if text and "<html" not in text.lower():
             return re.sub(r"\s+", " ", text)[:500]
@@ -454,7 +462,10 @@ class TolunaProvider(SurveyProvider):
                         question_id = _integer(_pick(item, "QuestionID"), -1)
                         if question_id < 0:
                             continue
-                        current = rows.setdefault(question_id, {"answer_ids": set(), "answer_values": [], "raw": []})
+                        current = rows.setdefault(question_id, {
+                            "answer_ids": set(), "answer_values": [], "raw": [],
+                            "all_routable": True,
+                        })
                         current["answer_ids"].update(
                             _integer(value, -1) for value in (_pick(item, "AnswerIDs", default=[]) or [])
                         )
@@ -464,6 +475,9 @@ class TolunaProvider(SurveyProvider):
                             values = [part.strip() for part in values.split(",") if part.strip()]
                         current["answer_values"].extend(str(value) for value in (values or []))
                         current["raw"].append(item)
+                        current["all_routable"] = current["all_routable"] and bool(
+                            _pick(item, "IsRoutable", default=False)
+                        )
         return rows
 
     @staticmethod
@@ -493,7 +507,14 @@ class TolunaProvider(SurveyProvider):
             kind = self._question_kind(row)
             if kind in {"birth_date", "gender"} and kind not in mandatory:
                 mandatory[kind] = row
-        question_ids = set(requirements)
+        # Routable quota attributes are intentionally left unanswered. Toluna
+        # documents that its own preliminary screener asks these before the
+        # final survey; forcing them into Member Registration can return 400.
+        question_ids = {
+            question_id
+            for question_id, requirement in requirements.items()
+            if not requirement.get("all_routable")
+        }
         question_ids.update(row.question_id for row in mandatory.values())
         questions = []
         for question_id in sorted(question_ids):
@@ -526,8 +547,11 @@ class TolunaProvider(SurveyProvider):
                 category="Required profile" if kind in {"birth_date", "gender"} else "Toluna targeting",
                 options=options,
                 raw_data={
-                    "adapter_version": 1,
+                    "adapter_version": 2,
                     "toluna_kind": kind,
+                    "toluna_is_routable": bool(
+                        requirement.get("all_routable") or reference.is_routable
+                    ),
                     "allowed_answer_ids": allowed_ids,
                     "allowed_answer_values": requirement.get("answer_values") or [],
                     "required_for_member": kind in {"birth_date", "gender"},
@@ -659,12 +683,23 @@ class TolunaProvider(SurveyProvider):
                 matched_subquota = False
                 for subquota in _pick(layer, "SubQuotas", default=[]) or []:
                     conditions = _pick(subquota, "QuestionsAndAnswers", default=[]) or []
-                    if all(
-                        (question_id := _integer(_pick(condition, "QuestionID"), -1)) in answers_by_question
-                        and question_id in questions
-                        and self._answer_matches(condition, answers_by_question[question_id], questions[question_id])
-                        for condition in conditions
-                    ):
+                    def condition_matches(condition):
+                        question_id = _integer(_pick(condition, "QuestionID"), -1)
+                        # Unknown routable attributes are explicitly allowed by
+                        # Toluna and are resolved in its own pre-survey router.
+                        if bool(_pick(condition, "IsRoutable", default=False)) and (
+                            question_id not in answers_by_question or question_id not in questions
+                        ):
+                            return True
+                        return (
+                            question_id in answers_by_question
+                            and question_id in questions
+                            and self._answer_matches(
+                                condition, answers_by_question[question_id], questions[question_id]
+                            )
+                        )
+
+                    if all(condition_matches(condition) for condition in conditions):
                         matched_subquota = True
                         break
                 if not matched_subquota:
@@ -686,6 +721,14 @@ class TolunaProvider(SurveyProvider):
             f"Toluna {culture.replace('_', '-')} PanelGUID",
         )
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        reference_questions = {
+            row.question_id: row
+            for row in TolunaReferenceQuestion.objects.filter(
+                integration=self.integration,
+                culture_code=culture.replace("_", "-"),
+                question_id__in=questions,
+            )
+        }
         registration_answers = []
         birth_date = postal_code = ""
         for question_id, answer in self._answers_by_question(answers).items():
@@ -700,6 +743,25 @@ class TolunaProvider(SurveyProvider):
                 continue
             if kind == "postal":
                 postal_code = str(values[0]).strip()
+                continue
+            # The member endpoint requires DOB plus gender; arbitrary quota
+            # questions are not member-registration attributes. They remain
+            # available for local quota matching and Toluna's preliminary
+            # router, but sending them here can make Toluna reject the entire
+            # member with HTTP 400 (for example routable question 2910077).
+            if kind != "gender":
+                continue
+            reference = reference_questions.get(question_id)
+            reference_type = str(
+                (reference.answer_type if reference else "")
+                or (question.raw_data or {}).get("reference_answer_type")
+                or ""
+            ).lower()
+            is_routable = bool(
+                (reference.is_routable if reference else False)
+                or (question.raw_data or {}).get("toluna_is_routable")
+            )
+            if is_routable or "computed" in reference_type:
                 continue
             mapped = []
             for value in upstream_values:

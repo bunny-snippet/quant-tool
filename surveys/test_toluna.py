@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import hmac
 from datetime import date, datetime
@@ -15,7 +16,7 @@ from vendors.serializers import ClientIntegrationSerializer
 from prescreener_vault.constants import DATABASE_ALIAS
 from prescreener_vault.models import PrescreenerSubmission
 
-from .models import Survey, SurveyAttempt, TolunaMember, TolunaReferenceQuestion
+from .models import Survey, SurveyAttempt, TargetingQuestion, TolunaMember, TolunaReferenceQuestion
 from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaProvider
@@ -192,6 +193,16 @@ class TolunaProviderTests(TestCase):
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
         self.assertEqual(questions[1001538].question_type, "numeric")
         self.assertEqual(questions[1001538].text, "What is your age?")
+        targeting_only = TargetingQuestion.objects.create(
+            survey=survey,
+            question_id=2910077,
+            key="toluna_2910077",
+            text="Toluna preliminary attribute",
+            question_type="single",
+            category="Toluna targeting",
+            options=[{"OptionId": 5312785, "OptionText": "Yes"}],
+            raw_data={"toluna_kind": "profile"},
+        )
         answers = {
             str(questions[1001538].pk): {
                 "question_id": 1001538, "question_key": questions[1001538].key,
@@ -200,6 +211,10 @@ class TolunaProviderTests(TestCase):
             str(questions[1001007].pk): {
                 "question_id": 1001007, "question_key": questions[1001007].key,
                 "values": ["2000247"], "upstream_values": ["2000247"],
+            },
+            str(targeting_only.pk): {
+                "question_id": 2910077, "question_key": targeting_only.key,
+                "values": ["5312785"], "upstream_values": ["5312785"],
             },
         }
         invite = {
@@ -229,6 +244,7 @@ class TolunaProviderTests(TestCase):
             "member_id": attempt.prescreener_uid,
             "birth_date": member_body["BirthDate"],
         })
+        self.assertEqual(len(member_body["RegistrationAnswers"]), 1)
         self.assertEqual(member_body["RegistrationAnswers"][0]["QuestionID"], 1001007)
         self.assertEqual(parse_qs(urlsplit(outbound).query)["rid"], [attempt.rid])
         self.assertEqual(attempt.source_cpi_snapshot, Decimal("3.25"))
@@ -242,6 +258,64 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_routable_quota_attribute_is_left_for_toluna_prescreener(self):
+        reference = copy.deepcopy(REFERENCE)
+        reference.append({
+            "IsRoutable": True,
+            "InternalName": "Toluna preliminary attribute",
+            "TranslatedQuestion": {
+                "QuestionID": 2910077,
+                "CultureID": 1,
+                "DisplayNameTranslation": "Toluna preliminary attribute",
+            },
+            "TranslatedAnswers": [
+                {"AnswerID": 5312785, "Translation": "Yes", "AnswerInternalName": "Yes"},
+            ],
+            "AnswerType": "SingleSelect",
+        })
+        quotas = copy.deepcopy(QUOTAS)
+        quotas["Surveys"][0]["Quotas"][0]["Layers"].append({
+            "LayerID": 3,
+            "SubQuotas": [{
+                "SubQuotaID": 30,
+                "QuestionsAndAnswers": [{
+                    "QuestionID": 2910077,
+                    "AnswerIDs": [5312785],
+                    "AnswerValues": [],
+                    "IsRoutable": True,
+                }],
+            }],
+        })
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(reference), FakeResponse(quotas)),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        provider.refresh_details(survey)
+
+        self.assertFalse(survey.targeting_questions.filter(question_id=2910077).exists())
+        self.assertTrue(
+            survey.targeting_questions.filter(raw_data__adapter_version=2).exists()
+        )
+
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        answers = {
+            str(questions[1001538].pk): {
+                "question_id": 1001538, "values": ["27"], "upstream_values": ["2006353"],
+            },
+            str(questions[1001007].pk): {
+                "question_id": 1001007, "values": ["2000247"], "upstream_values": ["2000247"],
+            },
+        }
+        matched = provider._matching_quota(survey, answers)
+        self.assertEqual(matched.quota_id, 900)
 
     def test_member_ready_page_shows_identity_then_redirects_once(self):
         survey = Survey.objects.create(
@@ -378,6 +452,31 @@ class TolunaProviderTests(TestCase):
             provider._request("POST", "https://toluna.test/member")
 
         self.assertNotIn("must-not-be-echoed", str(raised.exception))
+
+    def test_member_validation_error_never_echoes_profile_payload(self):
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse({
+                "Message": (
+                    'Cannot Register MemberCode:secret-member. An attribute is invalid: '
+                    '{"PartnerGUID":"secret-guid","BirthDate":"09/07/2002",'
+                    '"RegistrationAnswers":[{"QuestionID":2910077,'
+                    '"Answers":[{"AnswerID":5312785}]}]}'
+                ),
+            }, status_code=400)),
+        )
+
+        with self.assertRaisesRegex(
+            ProviderError,
+            r"rejected one or more member profile attributes.*2910077",
+        ) as raised:
+            provider._request("POST", "https://toluna.test/member")
+
+        rendered = str(raised.exception)
+        self.assertNotIn("secret-member", rendered)
+        self.assertNotIn("secret-guid", rendered)
+        self.assertNotIn("09/07/2002", rendered)
+        self.assertNotIn("5312785", rendered)
 
     def test_callback_hmac_verifies_exact_url_with_trailing_ampersand(self):
         unsigned = "http://testserver/survey?status=1&rid=Abc123XyZ9&"

@@ -1096,6 +1096,10 @@ def survey_start(request):
             ).exists()
             if is_rfg:
                 stale = stale or not survey.entry_link
+            elif survey.integration.provider_code == "toluna":
+                stale = stale or not survey.targeting_questions.filter(
+                    raw_data__adapter_version=2
+                ).exists()
         targeting_warning = ""
         if stale:
             try:
