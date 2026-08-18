@@ -52,6 +52,8 @@ Successful testing enables scheduled synchronization. The project inventory beco
 
 The returned invite's SurveyID and WaveID must match the local project before redirect. `PartnerAmount`, LOI and IR are snapshotted on the attempt so later upstream changes cannot rewrite historical commercial data.
 
+Member synchronization uses a shared-cache single-flight lock per integration + `MemberCode`. This prevents concurrent web workers from duplicating registration and enforces Toluna's minimum delay between two calls for the same member without serializing different respondents.
+
 Toluna's common Age question is intentionally absent from its Reference Data API. The adapter therefore includes Toluna's documented common Age/Gender IDs as a guarded fallback for every configured culture. All other profile mappings continue to come from the live Reference Data response.
 
 ## Callback setup

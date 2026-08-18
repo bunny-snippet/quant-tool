@@ -172,6 +172,15 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(attempt.source_cpi_snapshot, Decimal("3.25"))
         self.assertTrue(TolunaMember.objects.get(member_code=attempt.prescreener_uid).is_registered)
 
+        # The same vault UID and unchanged profile must not be registered a
+        # second time. Only a fresh invite is requested for the new journey.
+        repeat_session = RecordingSession(FakeResponse(invite))
+        repeat_outbound = TolunaProvider(
+            self.integration, session=repeat_session
+        ).build_outbound_url(survey, attempt, answers)
+        self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
+        self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
     def test_callback_hmac_verifies_exact_url_with_trailing_ampersand(self):
         unsigned = "http://testserver/survey?status=1&rid=Abc123XyZ9&"
         signature = hmac.new(b"hmac-secret", unsigned.encode(), hashlib.sha256).hexdigest()
@@ -200,3 +209,17 @@ class TolunaProviderTests(TestCase):
         updated = serializer.save()
         self.assertEqual(updated.last_test_status, "")
         self.assertFalse(updated.scheduled_sync_enabled)
+
+    def test_serializer_requires_hmac_reference_when_callback_verification_is_enabled(self):
+        credential_refs = dict(self.integration.credential_env_keys)
+        credential_refs.pop("hmac_key")
+        serializer = ClientIntegrationSerializer(
+            self.integration,
+            data={
+                "credential_env_keys": credential_refs,
+                "config": {"environment": "production", "callback_hash_required": True},
+            },
+            partial=True,
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("credential_env_keys", serializer.errors)

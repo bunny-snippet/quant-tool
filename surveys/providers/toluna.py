@@ -2,11 +2,14 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
+import time
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 import requests
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
@@ -685,40 +688,81 @@ class TolunaProvider(SurveyProvider):
         profile_hash = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
-        member, _ = TolunaMember.objects.select_for_update().get_or_create(
-            integration=self.integration,
-            member_code=attempt.prescreener_uid,
-            defaults={"culture_code": str((survey.raw_data.get("_toluna") or {}).get("culture_code") or "")},
-        )
-        if member.is_registered and member.profile_hash == profile_hash:
-            return
-        url = f"{self.member_base_url}/IntegratedPanelService/api/Respondent"
-        method = "PUT" if member.is_registered else "POST"
+        # Toluna explicitly rejects near-simultaneous calls for the same
+        # MemberCode.  A cache single-flight lock serializes one respondent
+        # across all Gunicorn/Celery processes without holding a database
+        # transaction open while the upstream HTTP request is running.
+        identity = hashlib.sha256(
+            f"{self.integration.pk}:{attempt.prescreener_uid}".encode("utf-8")
+        ).hexdigest()
+        lock_key = f"toluna:member-lock:{identity}"
+        throttle_key = f"toluna:member-throttle:{identity}"
+        lock_token = secrets.token_hex(16)
+        deadline = time.monotonic() + 2.0
+        while not cache.add(lock_key, lock_token, timeout=45):
+            if time.monotonic() >= deadline:
+                raise ProviderError(
+                    "This Toluna member profile is already being synchronized. Please submit again shortly."
+                )
+            time.sleep(0.05)
         try:
-            _, status_code = self._request(
-                method,
-                url,
-                expected=(200, 201, 409),
-                headers={"Accept": "application/json;version=2.0", "Content-Type": "application/json"},
-                json=payload,
+            member, _ = TolunaMember.objects.get_or_create(
+                integration=self.integration,
+                member_code=attempt.prescreener_uid,
+                defaults={
+                    "culture_code": str(
+                        (survey.raw_data.get("_toluna") or {}).get("culture_code") or ""
+                    )
+                },
             )
-            if status_code == 409:
-                self._request(
-                    "PUT",
+            if member.is_registered and member.profile_hash == profile_hash:
+                return
+
+            # The marker starts when a Toluna member request starts.  Waiting
+            # for it to expire enforces the documented one-second minimum
+            # between calls for the same MemberCode, including a POST->PUT
+            # retry after an upstream conflict.
+            while cache.get(throttle_key):
+                time.sleep(0.05)
+            cache.set(throttle_key, True, timeout=2)
+
+            url = f"{self.member_base_url}/IntegratedPanelService/api/Respondent"
+            method = "PUT" if member.is_registered else "POST"
+            try:
+                _, status_code = self._request(
+                    method,
                     url,
-                    expected=(200,),
+                    expected=(200, 201, 409),
                     headers={"Accept": "application/json;version=2.0", "Content-Type": "application/json"},
                     json=payload,
                 )
-        except ProviderError as exc:
-            member.last_error = str(exc)
-            member.save(update_fields=["last_error", "updated_at"])
-            raise
-        member.profile_hash = profile_hash
-        member.is_registered = True
-        member.last_synced_at = timezone.now()
-        member.last_error = ""
-        member.save(update_fields=["profile_hash", "is_registered", "last_synced_at", "last_error", "updated_at"])
+                if status_code == 409:
+                    while cache.get(throttle_key):
+                        time.sleep(0.05)
+                    cache.set(throttle_key, True, timeout=2)
+                    self._request(
+                        "PUT",
+                        url,
+                        expected=(200,),
+                        headers={"Accept": "application/json;version=2.0", "Content-Type": "application/json"},
+                        json=payload,
+                    )
+            except ProviderError as exc:
+                member.last_error = str(exc)
+                member.save(update_fields=["last_error", "updated_at"])
+                raise
+            member.profile_hash = profile_hash
+            member.is_registered = True
+            member.last_synced_at = timezone.now()
+            member.last_error = ""
+            member.save(update_fields=[
+                "profile_hash", "is_registered", "last_synced_at", "last_error", "updated_at"
+            ])
+        finally:
+            # Do not delete a newer owner's lock if this request ever outlives
+            # the safety timeout and another process has already acquired it.
+            if cache.get(lock_key) == lock_token:
+                cache.delete(lock_key)
 
     def build_outbound_url(self, survey, attempt, answers):
         if not attempt.prescreener_uid:

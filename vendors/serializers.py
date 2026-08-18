@@ -271,6 +271,12 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
             for boolean_key in ("is_test_member", "callback_hash_required"):
                 if boolean_key in config and not isinstance(config[boolean_key], bool):
                     raise serializers.ValidationError({"config": f"{boolean_key} must be true or false."})
+            if config.get("callback_hash_required", True) and not credential_refs.get("hmac_key"):
+                raise serializers.ValidationError({
+                    "credential_env_keys": (
+                        "A Toluna HMAC-key environment variable is required while callback verification is enabled."
+                    )
+                })
             try:
                 interval = int(attrs.get(
                     "sync_interval_seconds", getattr(self.instance, "sync_interval_seconds", 60)
