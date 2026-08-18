@@ -152,13 +152,42 @@ class TolunaProvider(SurveyProvider):
         except requests.RequestException as exc:
             raise ProviderError("Toluna request could not reach the upstream service.") from exc
         if response.status_code not in expected:
-            raise ProviderError(f"Toluna request failed (HTTP {response.status_code}).")
+            # Toluna normally returns a small Result/ResultCode or validation
+            # message for 400 responses. Surface only known diagnostic fields:
+            # never echo the complete response because it may contain member
+            # profile data.
+            detail = self._safe_error_detail(response)
+            suffix = f": {detail}" if detail else "."
+            raise ProviderError(f"Toluna request failed (HTTP {response.status_code}){suffix}")
         if response.status_code in {201, 204}:
             return None, response.status_code
         try:
             return response.json(), response.status_code
         except ValueError as exc:
             raise ProviderError("Toluna returned invalid JSON.") from exc
+
+    @staticmethod
+    def _safe_error_detail(response):
+        allowed = {
+            "result", "resultcode", "message", "errormessage", "error",
+            "errors", "modelstate", "title", "detail",
+        }
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            selected = {
+                str(key): value
+                for key, value in payload.items()
+                if str(key).lower() in allowed and value not in (None, "", [], {})
+            }
+            if selected:
+                return json.dumps(selected, ensure_ascii=True, separators=(",", ":"))[:800]
+        text = str(getattr(response, "text", "") or "").strip()
+        if text and "<html" not in text.lower():
+            return re.sub(r"\s+", " ", text)[:500]
+        return ""
 
     def _panels(self):
         panels = []
@@ -688,15 +717,20 @@ class TolunaProvider(SurveyProvider):
             for item in registration_answers if questions.get(_integer(item["QuestionID"]))
         ):
             raise ProviderError("Gender is required before Toluna member registration.")
-        return {
+        payload = {
             "PartnerGUID": partner_guid,
             "MemberCode": attempt.prescreener_uid,
             "IsActive": True,
             "BirthDate": birth_date,
-            "PostalCode": postal_code,
             "IsTest": bool((self.integration.config or {}).get("is_test_member", False)),
             "RegistrationAnswers": registration_answers,
         }
+        # PostalCode is optional in Toluna's contract. An empty string is not
+        # equivalent to omitting an optional value and can be rejected as an
+        # invalid property for surveys that did not ask for postal code.
+        if postal_code:
+            payload["PostalCode"] = postal_code
+        return payload
 
     def _register_member(self, survey, attempt, answers):
         payload = self._member_payload(survey, attempt, answers)

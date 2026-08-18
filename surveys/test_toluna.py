@@ -14,15 +14,17 @@ from vendors.serializers import ClientIntegrationSerializer
 
 from .models import Survey, SurveyAttempt, TolunaMember, TolunaReferenceQuestion
 from .provider_services import sync_client_integration
+from .providers import ProviderError
 from .providers.toluna import TolunaProvider
 from .serializers import SurveyListSerializer
 
 
 class FakeResponse:
-    def __init__(self, payload=None, status_code=200):
+    def __init__(self, payload=None, status_code=200, text=""):
         self.payload = payload
         self.status_code = status_code
         self.content = b"" if payload is None else b"json"
+        self.text = text
 
     def json(self):
         return self.payload
@@ -208,6 +210,7 @@ class TolunaProviderTests(TestCase):
         member_body = session.calls[0][2]["json"]
         self.assertEqual(member_body["PartnerGUID"], "panel-guid")
         self.assertEqual(member_body["MemberCode"], attempt.prescreener_uid)
+        self.assertNotIn("PostalCode", member_body)
         born = datetime.strptime(member_body["BirthDate"], "%m/%d/%Y").date()
         calculated_age = date.today().year - born.year - (
             (date.today().month, date.today().day) < (born.month, born.day)
@@ -230,6 +233,23 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_toluna_validation_error_exposes_only_safe_diagnostic_fields(self):
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse({
+                "Result": "INVALID_PROPERTY_DATA",
+                "ResultCode": 7,
+                "Message": "PostalCode is invalid",
+                "PartnerGUID": "must-not-be-echoed",
+                "MemberCode": "must-not-be-echoed",
+            }, status_code=400)),
+        )
+
+        with self.assertRaisesRegex(ProviderError, "INVALID_PROPERTY_DATA") as raised:
+            provider._request("POST", "https://toluna.test/member")
+
+        self.assertNotIn("must-not-be-echoed", str(raised.exception))
 
     def test_callback_hmac_verifies_exact_url_with_trailing_ampersand(self):
         unsigned = "http://testserver/survey?status=1&rid=Abc123XyZ9&"
