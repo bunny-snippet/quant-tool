@@ -683,6 +683,7 @@ class TolunaProvider(SurveyProvider):
                 matched_subquota = False
                 for subquota in _pick(layer, "SubQuotas", default=[]) or []:
                     conditions = _pick(subquota, "QuestionsAndAnswers", default=[]) or []
+
                     def condition_matches(condition):
                         question_id = _integer(_pick(condition, "QuestionID"), -1)
                         # Unknown routable attributes are explicitly allowed by
@@ -699,7 +700,19 @@ class TolunaProvider(SurveyProvider):
                             )
                         )
 
-                    if all(condition_matches(condition) for condition in conditions):
+                    # Toluna's sampling contract is OR between answer rows for
+                    # the same QuestionID, but AND between different
+                    # QuestionIDs in one SubQuota. Treating every row as AND
+                    # makes range questions impossible to satisfy (for
+                    # example an age cannot be both 18-24 and 25-29).
+                    conditions_by_question = {}
+                    for condition in conditions:
+                        question_id = _integer(_pick(condition, "QuestionID"), -1)
+                        conditions_by_question.setdefault(question_id, []).append(condition)
+                    if all(
+                        any(condition_matches(condition) for condition in question_conditions)
+                        for question_conditions in conditions_by_question.values()
+                    ):
                         matched_subquota = True
                         break
                 if not matched_subquota:

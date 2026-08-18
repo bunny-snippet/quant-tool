@@ -317,6 +317,60 @@ class TolunaProviderTests(TestCase):
         matched = provider._matching_quota(survey, answers)
         self.assertEqual(matched.quota_id, 900)
 
+    def test_multiple_ranges_for_same_question_are_or_conditions(self):
+        quotas = copy.deepcopy(QUOTAS)
+        quotas["Surveys"][0]["Quotas"][0]["Layers"][0]["SubQuotas"][0][
+            "QuestionsAndAnswers"
+        ] = [
+            {
+                "QuestionID": 1001538,
+                "AnswerIDs": [],
+                "AnswerValues": ["13-17"],
+                "IsRoutable": False,
+            },
+            {
+                "QuestionID": 1001538,
+                "AnswerIDs": [],
+                "AnswerValues": ["18-24"],
+                "IsRoutable": False,
+            },
+            {
+                "QuestionID": 1001538,
+                "AnswerIDs": [],
+                "AnswerValues": ["25-29"],
+                "IsRoutable": False,
+            },
+        ]
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(quotas)),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        provider.refresh_details(survey)
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        answers = {
+            str(questions[1001538].pk): {
+                "question_id": 1001538,
+                "values": ["23"],
+                "upstream_values": ["23"],
+            },
+            str(questions[1001007].pk): {
+                "question_id": 1001007,
+                "values": ["2000247"],
+                "upstream_values": ["2000247"],
+            },
+        }
+
+        matched = provider._matching_quota(survey, answers)
+
+        self.assertEqual(matched.quota_id, 900)
+
     def test_member_ready_page_shows_identity_then_redirects_once(self):
         survey = Survey.objects.create(
             client=self.integration.client,
