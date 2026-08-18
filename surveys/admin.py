@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    ProfileReuseEvent,
+    ProfileReuseMonthlyCounter,
     Survey,
     SurveyAttempt,
     SurveyQuota,
@@ -41,15 +43,36 @@ class SyncRunAdmin(admin.ModelAdmin):
 @admin.register(SurveyAttempt)
 class SurveyAttemptAdmin(admin.ModelAdmin):
     list_display = [
-        "rid", "prescreener_uid", "survey", "platform_user", "vendor", "client", "status", "status_source", "initiated_at", "loi_seconds", "initiation_ip",
+        "rid", "prescreener_uid", "provider_profile_uid", "survey", "platform_user", "vendor", "client", "status", "status_source", "initiated_at", "loi_seconds", "initiation_ip",
         "callback_ip", "entry_browser", "entry_device", "is_verified",
     ]
     search_fields = [
-        "rid", "prescreener_uid", "user_id", "platform_user__username", "platform_user__email", "survey__local_id",
+        "rid", "prescreener_uid", "provider_profile_uid", "user_id", "platform_user__username", "platform_user__email", "survey__local_id",
         "survey__source_key", "survey__source_id", "initiation_ip", "callback_ip",
     ]
     list_filter = ["status", "status_source", "supplier_code", "entry_device", "entry_browser", "is_verified", "initiated_at"]
     readonly_fields = [field.name for field in SurveyAttempt._meta.fields]
+
+
+@admin.register(ProfileReuseMonthlyCounter)
+class ProfileReuseMonthlyCounterAdmin(admin.ModelAdmin):
+    list_display = [
+        "integration", "period_start", "baseline_attempts", "target_reuses",
+        "allocated_reuses", "updated_at",
+    ]
+    list_filter = ["integration", "period_start"]
+    readonly_fields = [field.name for field in ProfileReuseMonthlyCounter._meta.fields]
+
+
+@admin.register(ProfileReuseEvent)
+class ProfileReuseEventAdmin(admin.ModelAdmin):
+    list_display = [
+        "attempt", "integration", "registered_uid", "reused_uid",
+        "country_code", "age_group", "gender", "source_usage_number", "created_at",
+    ]
+    search_fields = ["attempt__rid", "registered_uid", "reused_uid"]
+    list_filter = ["integration", "country_code", "age_group", "gender", "created_at"]
+    readonly_fields = [field.name for field in ProfileReuseEvent._meta.fields]
 
 
 @admin.register(TolunaReferenceQuestion)

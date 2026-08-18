@@ -66,12 +66,13 @@ def _normalize_profile_value(attribute: str, value) -> str:
 def _age_group(age: int | None) -> str:
     if age is None:
         return ""
-    if age < 18:
-        return "under-18"
-    for lower, upper in ((18, 24), (25, 34), (35, 44), (45, 54), (55, 64)):
+    for lower, upper in (
+        (13, 17), (18, 24), (25, 29), (30, 34),
+        (35, 39), (40, 44), (45, 49), (50, 54),
+    ):
         if lower <= age <= upper:
             return f"{lower}-{upper}"
-    return "65+"
+    return ""
 
 
 def _age_from_value(value, submitted_at) -> int | None:

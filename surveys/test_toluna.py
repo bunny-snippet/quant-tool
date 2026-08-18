@@ -610,6 +610,39 @@ class TolunaProviderTests(TestCase):
                     attempt.upstream_transaction_data["toluna_outcome"]["code"], code
                 )
 
+    def test_reused_member_code_callback_updates_and_displays_canonical_rid(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-reused-member",
+            name="Toluna reused member test",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="OwnRid1001",
+            prescreener_uid="New1-Uid2-For3-Test",
+            provider_profile_uid="Old1-Uid2-For3-Test",
+            survey=survey,
+            user_id="1",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+        echoed_uid = attempt.provider_profile_uid
+        unsigned = f"http://testserver/survey?status=1&rid={echoed_uid}&"
+        signature = hmac.new(
+            b"hmac-secret", unsigned.encode(), hashlib.sha256
+        ).hexdigest()
+
+        response = self.client.get(
+            f"/survey?status=1&rid={echoed_uid}&hash={signature}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, attempt.rid)
+        self.assertNotContains(response, echoed_uid)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.COMPLETED)
+        self.assertEqual(attempt.status_source, "toluna_callback")
+
     def test_serializer_rejects_non_numeric_interval_and_resets_verification_after_edit(self):
         invalid = ClientIntegrationSerializer(
             self.integration,

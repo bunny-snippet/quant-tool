@@ -4,6 +4,7 @@
 {% block content %}
 <style>
   .integration-shell{max-width:1240px;margin:0 auto;padding:26px}.integration-head{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:22px}.integration-head h1{margin:0;font-size:26px}.integration-head p{margin:6px 0 0;color:#64748b}.primary,.secondary{border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,opacity .18s ease}.primary{background:#3157d5;color:#fff}.secondary{background:#eef2ff;color:#2946a8}.primary:hover,.secondary:hover{transform:translateY(-1px)}button:disabled{cursor:not-allowed;opacity:.55;transform:none!important}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}.card,.editor{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;box-shadow:0 5px 18px rgba(15,23,42,.05)}.card h3{margin:8px 0 6px}.meta{color:#64748b;font-size:13px;line-height:1.65;overflow-wrap:anywhere}.badge{display:inline-block;border-radius:20px;padding:4px 9px;background:#f1f5f9;font-size:12px;font-weight:800}.badge.success{background:#dcfce7;color:#166534}.badge.failed{background:#fee2e2;color:#991b1b}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}.editor{margin-bottom:22px}.editor h2{margin:0 0 4px}.editor-intro{margin:0 0 20px;color:#64748b}.form-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:15px}.field{grid-column:span 3;min-width:0}.field.wide{grid-column:span 6}.field.full{grid-column:1/-1}.field label{display:block;font-size:12px;font-weight:800;margin-bottom:6px;color:#334155}.field input,.field select,.field textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#17223b;outline:none;transition:border-color .18s ease,box-shadow .18s ease}.field input[type=checkbox]{width:auto;padding:0}.field input:focus,.field select:focus,.field textarea:focus{border-color:#3157d5;box-shadow:0 0 0 3px rgba(49,87,213,.11)}.field input:read-only{background:#f8fafc;color:#475569}.field small{display:block;color:#64748b;margin-top:5px;line-height:1.35}.client-control{display:flex;gap:8px}.client-control select{min-width:0}.client-control button{white-space:nowrap}.provider-note{grid-column:1/-1;display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border:1px solid #bfdbfe;border-radius:11px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5}.provider-note strong{display:block}.section-title{grid-column:1/-1;margin:4px 0 -2px;padding-top:4px;color:#17223b;font-size:14px}.checks{display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin-top:15px}.checks label{display:flex;gap:7px;align-items:center}.checks input{width:auto}.empty{color:#64748b;padding:28px;text-align:center}.hidden{display:none!important}.status-line{margin-top:9px;min-height:20px;color:#475569;white-space:pre-wrap}.status-line.error{color:#b91c1c}.api-advanced{margin-top:15px;border:1px solid #e2e8f0;border-radius:11px;padding:13px}.api-advanced summary{cursor:pointer;font-weight:800;color:#2946a8}.api-advanced[open] summary{margin-bottom:13px}.schedule-help{margin-top:6px;color:#64748b;font-size:12px}.schedule-help.warning{color:#9a6700}.credential-choice{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}.credential-choice span{font-size:11px;font-weight:800;color:#94a3b8;text-align:center}.card-provider{color:#3157d5;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.flow-mode{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-top:15px;padding:13px;border:1px solid #d9e5f4;border-radius:12px;background:#f8fbff}.flow-mode strong{display:block;color:#1f3150;font-size:13px}.flow-mode small{display:block;margin-top:3px;color:#6b7b92;font-size:11px;line-height:1.35}.mode-switch{position:relative;flex:0 0 46px;width:46px;height:26px}.mode-switch input{position:absolute;opacity:0;pointer-events:none}.mode-switch span{display:block;width:46px;height:26px;border-radius:999px;background:#aeb9c8;cursor:pointer;transition:.2s}.mode-switch span:after{content:'';display:block;width:20px;height:20px;margin:3px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(15,23,42,.25);transition:.2s}.mode-switch input:checked+span{background:#1eae80}.mode-switch input:checked+span:after{transform:translateX(20px)}.flow-editor{padding:13px;border:1px solid #cfe8e1;border-radius:11px;background:#f1fbf7}.flow-editor label{display:flex;gap:9px;align-items:center;margin:0!important}.flow-editor small{margin-left:24px!important}
+  .reuse-editor{grid-column:1/-1;margin-top:4px;padding:16px;border:1px solid #dce5f0;border-radius:14px;background:#f8fbff}.reuse-editor>header{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:13px}.reuse-editor h3{margin:0;color:#17223b;font-size:15px}.reuse-editor p{margin:3px 0 0;color:#64748b;font-size:11px}.reuse-options{display:flex;flex-wrap:wrap;gap:8px}.reuse-option{display:flex!important;align-items:center;gap:6px;padding:8px 10px;border:1px solid #dce5f0;border-radius:10px;background:#fff;font-size:11px!important}.reuse-option input{width:auto!important}.reuse-country{min-height:108px!important;padding:7px!important}.reuse-card{border-color:#cfe4f3;background:#f7fbff}.reuse-card .reuse-stats{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px}.reuse-card .reuse-stats span{padding:4px 7px;border-radius:8px;background:#fff;color:#50637d;font-size:10px}
   @media(max-width:1050px){.field{grid-column:span 4}.field.wide{grid-column:span 8}}
   @media(max-width:760px){.integration-shell{padding:16px}.integration-head{align-items:flex-start}.field,.field.wide{grid-column:span 6}.client-control{align-items:stretch}.client-control button{padding-inline:10px}.credential-choice{grid-template-columns:1fr}.credential-choice span{padding:0}}
   @media(max-width:520px){.integration-head{flex-direction:column}.integration-head .primary{width:100%}.field,.field.wide{grid-column:1/-1}.client-control{flex-direction:column}.grid{grid-template-columns:1fr}.actions button{flex:1}.checks{align-items:flex-start;flex-direction:column;gap:10px}}
@@ -69,6 +70,16 @@
             <div class="field wide"><label id="apiTokenLabel" for="apiToken">API token (leave blank to keep)</label><div class="credential-choice"><input id="apiToken" type="password" autocomplete="new-password" placeholder="Paste encrypted-at-rest token"><span>OR</span><input id="tokenEnv" autocomplete="off" placeholder="API_TOKEN_ENV_NAME"></div><small>Prefer an environment-variable name on production. Never place secrets in endpoint fields.</small></div>
           </div>
         </div>
+        <section class="reuse-editor">
+          <header><div><h3>Reusable UID policy</h3><p>Client-wise monthly budget with a fair country, age-band and gender queue.</p></div><label class="mode-switch" title="Enable reusable UIDs"><input id="profileReuseEnabled" type="checkbox"><span></span></label></header>
+          <div class="form-grid">
+            <div class="field"><label for="profileReuseDays">Eligible after (days)</label><input id="profileReuseDays" type="number" min="1" max="730" value="60"><small>A registered UID cannot enter the queue before this age.</small></div>
+            <div class="field"><label for="profileReusePercentage">Next-month reuse (%)</label><input id="profileReusePercentage" type="number" min="0.01" max="100" step="0.01" value="30"><small>Calculated from this client's previous calendar-month attempts.</small></div>
+            <div class="field wide"><label for="profileReuseCountries">Countries</label><select id="profileReuseCountries" class="reuse-country" multiple></select><small>No selection means all countries currently served by this client.</small></div>
+            <div class="field full"><label>Age bands</label><div class="reuse-options" id="profileReuseAgeGroups"></div></div>
+            <div class="field full"><label>Genders</label><div class="reuse-options" id="profileReuseGenders"></div></div>
+          </div>
+        </section>
       </div>
 
       <details class="api-advanced hidden" id="advancedSection">
@@ -115,12 +126,28 @@ document.addEventListener('DOMContentLoaded',()=>{
     custom:{inventoryEndpoint:'',authHeader:'Authorization',inventoryKey:'',pagedEndpoint:'',quotaEndpoint:'',quotaKey:'',targetingEndpoint:'',targetingKey:'',transactionEndpoint:'',transactionKey:''}
   };
   const ids=['recordId','client','name','provider','baseUrl','supplierCode','interval','detailBatch','rfgApidEnv','rfgSecretEnv','rfgCountry','rfgCategory','tolunaEnvironment','tolunaApiAuthEnv','tolunaPartnerAuthEnv','tolunaHmacEnv','tolunaPartnerGuidEnv','tolunaPanelEnCa','tolunaPanelEnGb','tolunaPanelEnIn','tolunaPanelEnSg','tolunaPanelEnUs','inventoryEndpoint','authHeader','inventoryKey','apiToken','tokenEnv','authPrefix','pagedEndpoint','quotaEndpoint','quotaKey','targetingEndpoint','targetingKey','transactionEndpoint','transactionKey','fieldMapping'];
+  const reuseAgeGroups=['13-17','18-24','25-29','30-34','35-39','40-44','45-49','50-54'];
+  const reuseGenders=['male','female'];
   const el=id=>document.getElementById(id);
   const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=')[1]||'';
   const escapeHtml=value=>String(value??'').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const rows=data=>Array.isArray(data)?data:(data.results||[]);
   const fmt=value=>value?new Date(value).toLocaleString():'Never';
   const providerMeta=code=>providers.find(item=>item.code===code)||fallbackProviders.find(item=>item.code===code)||{code,label:code||'Unknown provider',default_base_url:'',minimum_sync_interval_seconds:60};
+
+  function renderReuseEditor(item={}){
+    const selectedCountries=item.profile_reuse_country_codes||[];
+    const countries=[...new Set([...selectedCountries,...(item.profile_reuse_available_country_codes||[]),...integrations.flatMap(row=>row.profile_reuse_available_country_codes||[])])].sort();
+    el('profileReuseCountries').innerHTML=countries.map(code=>`<option value="${escapeHtml(code)}" ${selectedCountries.includes(code)?'selected':''}>${escapeHtml(code)}</option>`).join('');
+    const selectedAges=item.profile_reuse_age_groups||reuseAgeGroups;
+    el('profileReuseAgeGroups').innerHTML=reuseAgeGroups.map(value=>`<label class="reuse-option"><input type="checkbox" value="${value}" ${selectedAges.includes(value)?'checked':''}>${value}</label>`).join('');
+    const selectedGenders=item.profile_reuse_genders||reuseGenders;
+    el('profileReuseGenders').innerHTML=reuseGenders.map(value=>`<label class="reuse-option"><input type="checkbox" value="${value}" ${selectedGenders.includes(value)?'checked':''}>${value[0].toUpperCase()+value.slice(1)}</label>`).join('');
+    el('profileReuseEnabled').checked=item.profile_reuse_enabled===true;
+    el('profileReuseDays').value=item.profile_reuse_eligible_after_days||60;
+    el('profileReusePercentage').value=item.profile_reuse_monthly_percentage||30;
+  }
+  const checkedValues=id=>[...el(id).querySelectorAll('input:checked')].map(input=>input.value);
 
   async function api(url,options={}){
     options.headers={...(options.headers||{}),'Accept':'application/json','X-CSRFToken':decodeURIComponent(cookie('csrftoken'))};
@@ -148,8 +175,10 @@ document.addEventListener('DOMContentLoaded',()=>{
         : `Credential: ${escapeHtml(item.credential_env_key||item.masked_credential||'not configured')}`;
       const strict=item.config?.enforce_local_targeting!==false;
       const flowControl=isRfg?`<div class="flow-mode"><div><strong data-flow-title="${item.id}">${strict?'Strict flow':'Relaxed flow'}</strong><small data-flow-copy="${item.id}">${strict?'Local mismatch terminates before RFG.':'RFG makes the final eligibility decision.'}</small></div>${canManage?`<label class="mode-switch" title="Toggle strict or relaxed targeting"><input type="checkbox" data-targeting-toggle="${item.id}" ${strict?'checked':''}><span></span></label>`:`<span class="badge">${strict?'Strict':'Relaxed'}</span>`}</div>`:'';
+      const reuseStatus=item.profile_reuse_status||{};
+      const reuseControl=`<div class="flow-mode reuse-card"><div><strong>Reusable UID flow</strong><small>${item.profile_reuse_eligible_after_days} days old &middot; ${escapeHtml(item.profile_reuse_monthly_percentage)}% of previous month</small><div class="reuse-stats"><span>Previous ${reuseStatus.previous_month_attempts||0}</span><span>Target ${reuseStatus.target_reuses||0}</span><span>Used ${reuseStatus.used_reuses||0}</span><span>Remaining ${reuseStatus.remaining_reuses||0}</span></div></div>${canManage?`<label class="mode-switch" title="Activate or deactivate UID reuse"><input type="checkbox" data-reuse-toggle="${item.id}" ${item.profile_reuse_enabled?'checked':''}><span></span></label>`:`<span class="badge ${item.profile_reuse_enabled?'success':''}">${item.profile_reuse_enabled?'On':'Off'}</span>`}</div>`;
       const automatic=item.provider_code==='innovatemr'||((isRfg||isToluna)&&item.last_test_status==='success');
-      return `<article class="card"><span class="badge ${escapeHtml(item.last_sync_status)}">${item.is_active?'Active':'Inactive'} &middot; ${automatic?'Automatic':item.scheduled_sync_enabled?'Scheduled':'Manual'}</span><div class="card-provider">${escapeHtml(meta.label)}</div><h3>${escapeHtml(item.client_name)} &middot; ${escapeHtml(item.name)}</h3><div class="meta">Supplier ${escapeHtml(item.supplier_code)}<br>${contract}<br>${credentials} &middot; ${escapeHtml(item.survey_count)} surveys<br>Last test: ${escapeHtml(item.last_test_status||'never')} (${escapeHtml(fmt(item.last_tested_at))})<br>Last sync: ${escapeHtml(item.last_sync_status||'never')} (${escapeHtml(fmt(item.last_sync_finished_at))})${item.last_sync_error?`<br>${escapeHtml(item.last_sync_error)}`:''}</div>${flowControl}${canManage?`<div class="actions"><button class="secondary" data-edit="${item.id}">Edit</button><button class="secondary" data-test="${item.id}">Test connection</button><button class="primary" data-sync="${item.id}">Sync now</button></div>`:''}</article>`;
+      return `<article class="card"><span class="badge ${escapeHtml(item.last_sync_status)}">${item.is_active?'Active':'Inactive'} &middot; ${automatic?'Automatic':item.scheduled_sync_enabled?'Scheduled':'Manual'}</span><div class="card-provider">${escapeHtml(meta.label)}</div><h3>${escapeHtml(item.client_name)} &middot; ${escapeHtml(item.name)}</h3><div class="meta">Supplier ${escapeHtml(item.supplier_code)}<br>${contract}<br>${credentials} &middot; ${escapeHtml(item.survey_count)} surveys<br>Last test: ${escapeHtml(item.last_test_status||'never')} (${escapeHtml(fmt(item.last_tested_at))})<br>Last sync: ${escapeHtml(item.last_sync_status||'never')} (${escapeHtml(fmt(item.last_sync_finished_at))})${item.last_sync_error?`<br>${escapeHtml(item.last_sync_error)}`:''}</div>${flowControl}${reuseControl}${canManage?`<div class="actions"><button class="secondary" data-edit="${item.id}">Edit policy</button><button class="secondary" data-test="${item.id}">Test connection</button><button class="primary" data-sync="${item.id}">Sync now</button></div>`:''}</article>`;
     }).join(''):'<div class="card empty">No client integrations yet.</div>';
   }
 
@@ -221,6 +250,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       el('tolunaTestMember').checked=!!item.config?.is_test_member;
       updateScheduleState();
     }
+    renderReuseEditor(item);
     el('formStatus').textContent='';el('formStatus').className='status-line';
     el('editor').scrollIntoView({behavior:'smooth',block:'start'});
   }
@@ -254,7 +284,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       const providerCode=el('provider').value;
       let mapping={};
       try{mapping=el('fieldMapping').value.trim()?JSON.parse(el('fieldMapping').value):{}}catch(error){el('formStatus').textContent='Custom field mapping must be valid JSON.';el('formStatus').className='status-line error';return}
-      const payload={client:+el('client').value,name:el('name').value.trim(),provider_code:providerCode,base_url:el('baseUrl').value.trim(),supplier_code:el('supplierCode').value.trim(),sync_interval_seconds:+el('interval').value,detail_refresh_batch:+el('detailBatch').value,scheduled_sync_enabled:el('scheduled').checked,is_active:el('active').checked};
+      const payload={client:+el('client').value,name:el('name').value.trim(),provider_code:providerCode,base_url:el('baseUrl').value.trim(),supplier_code:el('supplierCode').value.trim(),sync_interval_seconds:+el('interval').value,detail_refresh_batch:+el('detailBatch').value,scheduled_sync_enabled:el('scheduled').checked,is_active:el('active').checked,profile_reuse_enabled:el('profileReuseEnabled').checked,profile_reuse_eligible_after_days:+el('profileReuseDays').value,profile_reuse_monthly_percentage:el('profileReusePercentage').value,profile_reuse_country_codes:[...el('profileReuseCountries').selectedOptions].map(option=>option.value),profile_reuse_age_groups:checkedValues('profileReuseAgeGroups'),profile_reuse_genders:checkedValues('profileReuseGenders')};
       if(providerCode==='rfg'){
         payload.credential_env_keys={apid:el('rfgApidEnv').value.trim(),secret:el('rfgSecretEnv').value.trim()};
         payload.config={country:el('rfgCountry').value.trim().toUpperCase(),category:el('rfgCategory').value,allow_recontacts:el('rfgRecontacts').checked,enforce_local_targeting:el('rfgStrictTargeting').checked,callback_security_mode:'ip'};
@@ -281,6 +311,14 @@ document.addEventListener('DOMContentLoaded',()=>{
     try{await api(`/api/v1/vendors/integrations/${id}/${test?'test-connection':'sync-now'}/`,{method:'POST'});await load()}catch(error){alert(error.message)}finally{event.target.disabled=false;event.target.textContent=original}
   };
   cards.onchange=async event=>{
+    const reuseToggle=event.target.closest('[data-reuse-toggle]');
+    if(reuseToggle){
+      const item=integrations.find(record=>String(record.id)===reuseToggle.dataset.reuseToggle);if(!item)return;
+      const enabled=reuseToggle.checked;reuseToggle.disabled=true;
+      try{await api(`/api/v1/vendors/integrations/${item.id}/`,{method:'PATCH',body:JSON.stringify({profile_reuse_enabled:enabled})});item.profile_reuse_enabled=enabled;await load()}
+      catch(error){reuseToggle.checked=!enabled;alert(error.message)}finally{reuseToggle.disabled=false}
+      return;
+    }
     const toggle=event.target.closest('[data-targeting-toggle]');if(!toggle)return;
     const item=integrations.find(record=>String(record.id)===toggle.dataset.targetingToggle);if(!item)return;
     const strict=toggle.checked;toggle.disabled=true;

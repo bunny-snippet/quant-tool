@@ -505,6 +505,9 @@ class DashboardResponseSerializer(serializers.Serializer):
 
 
 class SurveyAttemptSerializer(serializers.ModelSerializer):
+    prescreener_uid = serializers.SerializerMethodField()
+    registered_profile_uid = serializers.CharField(source="prescreener_uid", read_only=True)
+    profile_was_reused = serializers.SerializerMethodField()
     survey_local_id = serializers.CharField(source="survey.local_id", read_only=True)
     survey_source_id = serializers.SerializerMethodField()
     survey_name = serializers.CharField(source="survey.name", read_only=True)
@@ -530,7 +533,7 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = SurveyAttempt
         fields = [
-            "rid", "prescreener_uid", "survey_local_id", "survey_source_id", "survey_name", "company_name", "country", "country_code",
+            "rid", "prescreener_uid", "registered_profile_uid", "profile_was_reused", "survey_local_id", "survey_source_id", "survey_name", "company_name", "country", "country_code",
             "language_code", "platform_user", "user_id", "user_name", "username", "user_email", "supplier",
             "supplier_name", "vendor", "vendor_name", "client", "client_name", "client_allocation", "survey_allocation", "supplier_code",
             "buyer_id", "source_cpi_snapshot", "cpi_snapshot_source", "cpi_cut_percent_snapshot", "payable_cpi_snapshot", "cpi_currency_snapshot",
@@ -547,6 +550,12 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
         if not obj.platform_user:
             return "Deleted user"
         return obj.platform_user.get_full_name() or obj.platform_user.username
+
+    def get_prescreener_uid(self, obj) -> str:
+        return obj.provider_profile_uid or obj.prescreener_uid or ""
+
+    def get_profile_was_reused(self, obj) -> bool:
+        return bool(obj.provider_profile_uid)
 
     def get_survey_source_id(self, obj) -> str:
         return str(obj.survey.source_identifier)

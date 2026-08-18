@@ -310,6 +310,13 @@ class SurveyAttempt(models.Model):
         editable=False,
         help_text="Stable XXXX-XXXX-XXXX-XXXX identity for the isolated prescreener vault.",
     )
+    provider_profile_uid = models.CharField(
+        max_length=19,
+        blank=True,
+        db_index=True,
+        editable=False,
+        help_text="Reusable UID actually sent to the provider; blank means prescreener_uid was used.",
+    )
     survey = models.ForeignKey(Survey, related_name="attempts", on_delete=models.PROTECT)
     platform_user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, related_name="survey_attempts", on_delete=models.SET_NULL
@@ -399,3 +406,57 @@ class SurveyAttempt(models.Model):
 
     def calculate_loi_seconds(self, ended_at) -> int:
         return max(0, int((ended_at - self.loi_started_at).total_seconds()))
+
+
+class ProfileReuseMonthlyCounter(models.Model):
+    """Concurrency-safe monthly client budget for previously registered UIDs."""
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_months",
+    )
+    period_start = models.DateField(db_index=True)
+    baseline_attempts = models.PositiveIntegerField(default=0)
+    target_reuses = models.PositiveIntegerField(default=0)
+    allocated_reuses = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "period_start"],
+                name="unique_profile_reuse_month",
+            ),
+        ]
+        indexes = [models.Index(fields=["integration", "period_start"])]
+
+
+class ProfileReuseEvent(models.Model):
+    """Audit one journey that used an older vault UID instead of its new UID."""
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_events",
+    )
+    attempt = models.OneToOneField(
+        SurveyAttempt,
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_event",
+    )
+    registered_uid = models.CharField(max_length=19, db_index=True)
+    reused_uid = models.CharField(max_length=19, db_index=True)
+    source_registered_at = models.DateTimeField()
+    source_usage_number = models.PositiveIntegerField()
+    country_code = models.CharField(max_length=8, db_index=True)
+    age_group = models.CharField(max_length=20, db_index=True)
+    gender = models.CharField(max_length=20, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["integration", "created_at"]),
+            models.Index(fields=["integration", "country_code", "age_group", "gender"]),
+        ]

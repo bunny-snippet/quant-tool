@@ -86,6 +86,7 @@ from prescreener_vault.services import (
     wrong_target_country_answers,
 )
 from prescreener_vault.models import PrescreenerSubmission
+from prescreener_vault.reuse import effective_profile_uid, maybe_assign_reusable_profile
 from .providers import ProviderError, get_provider
 from .geolocation import (
     geolocation_client_data,
@@ -1257,6 +1258,10 @@ def survey_start(request):
                         )
                         return HttpResponseRedirect(_rfg_result_url(attempt.rid, "8"))
                 if not errors:
+                    # The attempt always retains its newly registered UID. A
+                    # client policy may separately assign an older matching UID
+                    # to the provider-facing identity.
+                    maybe_assign_reusable_profile(attempt, answers)
                     with transaction.atomic():
                         locked = SurveyAttempt.objects.select_for_update().select_related(
                             "survey", "survey__integration"
@@ -1386,7 +1391,7 @@ def toluna_member_ready(request):
     summary = request.session.get(f"toluna_member_ready_{rid}", {})
     return render(request, "surveys/toluna_member_ready.html", {
         "rid": attempt.rid,
-        "member_id": str(summary.get("member_id") or attempt.prescreener_uid or ""),
+        "member_id": str(summary.get("member_id") or effective_profile_uid(attempt)),
         "birth_date": str(summary.get("birth_date") or "Prepared"),
     })
 
@@ -1560,7 +1565,20 @@ def survey_status(request):
             "message": "A supported survey status and RID are required.",
         }, status=400)
 
+    # Keep the platform RID canonical even when a provider echoes the reusable
+    # profile UID (Toluna MemberCode) in its redirect. Reused UIDs are allowed
+    # to appear on multiple historical journeys, so the newest matching
+    # journey is the safe fallback when the provider did not return our RID.
     attempt = SurveyAttempt.objects.filter(rid=rid).first()
+    if attempt is None:
+        attempt = SurveyAttempt.objects.filter(prescreener_uid=rid).first()
+    if attempt is None:
+        attempt = (
+            SurveyAttempt.objects.filter(provider_profile_uid=rid)
+            .order_by("-initiated_at")
+            .first()
+        )
+    canonical_rid = attempt.rid if attempt else rid
     ip_address = get_request_ip(request)
     if attempt:
         callback_verified = False
@@ -1628,7 +1646,7 @@ def survey_status(request):
     return render(request, "surveys/status.html", {
         **page,
         "status_label": status_label,
-        "rid": rid,
+        "rid": canonical_rid,
         "ip_address": ip_address,
         "loi_seconds": attempt.loi_seconds if attempt else None,
         "attempt_found": bool(attempt),

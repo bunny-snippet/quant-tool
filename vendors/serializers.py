@@ -15,6 +15,7 @@ from .models import (
     AllocationReservation,
     Client,
     ClientIntegration,
+    PROFILE_REUSE_AGE_GROUPS,
     OrganizationClientAccess,
     OrganizationUnit,
     VendorClientAllocation,
@@ -122,6 +123,8 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
     has_credential = serializers.SerializerMethodField()
     masked_credential = serializers.SerializerMethodField()
     survey_count = serializers.IntegerField(source="surveys.count", read_only=True)
+    profile_reuse_status = serializers.SerializerMethodField()
+    profile_reuse_available_country_codes = serializers.SerializerMethodField()
     config = serializers.JSONField(
         required=False,
         help_text=(
@@ -135,6 +138,10 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "client", "client_name", "name", "provider_code", "base_url", "credential_env_key",
             "credential_env_keys", "config",
+            "profile_reuse_enabled", "profile_reuse_eligible_after_days",
+            "profile_reuse_monthly_percentage", "profile_reuse_country_codes",
+            "profile_reuse_age_groups", "profile_reuse_genders", "profile_reuse_status",
+            "profile_reuse_available_country_codes",
             "api_token", "has_credential", "masked_credential", "supplier_code", "scheduled_sync_enabled",
             "inventory_endpoint", "paged_inventory_endpoint", "quota_endpoint_template",
             "targeting_endpoint_template", "transaction_endpoint_template", "auth_header_name",
@@ -149,10 +156,60 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
             "has_credential", "masked_credential", "last_tested_at", "last_test_status", "last_test_error",
             "last_sync_started_at", "last_sync_finished_at", "last_sync_status", "last_sync_error",
             "last_sync_summary", "created_at", "updated_at",
+            "profile_reuse_status", "profile_reuse_available_country_codes",
         ]
+
+    def get_profile_reuse_status(self, obj) -> dict:
+        from prescreener_vault.reuse import profile_reuse_month_status
+
+        return profile_reuse_month_status(obj)
+
+    def get_profile_reuse_available_country_codes(self, obj) -> list[str]:
+        return list(
+            obj.surveys.exclude(country_code="")
+            .order_by("country_code")
+            .values_list("country_code", flat=True)
+            .distinct()[:250]
+        )
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        enabled = attrs.get(
+            "profile_reuse_enabled", getattr(self.instance, "profile_reuse_enabled", False)
+        )
+        percentage = attrs.get(
+            "profile_reuse_monthly_percentage",
+            getattr(self.instance, "profile_reuse_monthly_percentage", Decimal("30.00")),
+        )
+        if enabled and Decimal(str(percentage or 0)) <= 0:
+            raise serializers.ValidationError({
+                "profile_reuse_monthly_percentage": "Set a percentage above 0 before enabling UID reuse."
+            })
+        country_codes = attrs.get(
+            "profile_reuse_country_codes", getattr(self.instance, "profile_reuse_country_codes", [])
+        )
+        if not isinstance(country_codes, list):
+            raise serializers.ValidationError({"profile_reuse_country_codes": "Select a list of countries."})
+        cleaned_countries = []
+        for value in country_codes:
+            code = str(value or "").strip().upper()
+            if not re.fullmatch(r"[A-Z]{2,3}", code):
+                raise serializers.ValidationError({"profile_reuse_country_codes": f"Invalid country code: {value}."})
+            if code not in cleaned_countries:
+                cleaned_countries.append(code)
+        attrs["profile_reuse_country_codes"] = cleaned_countries
+        age_groups = attrs.get(
+            "profile_reuse_age_groups", getattr(self.instance, "profile_reuse_age_groups", list(PROFILE_REUSE_AGE_GROUPS))
+        )
+        if not isinstance(age_groups, list) or any(value not in PROFILE_REUSE_AGE_GROUPS for value in age_groups):
+            raise serializers.ValidationError({"profile_reuse_age_groups": "Select only the supported age groups."})
+        attrs["profile_reuse_age_groups"] = [value for value in PROFILE_REUSE_AGE_GROUPS if value in age_groups]
+        genders = attrs.get(
+            "profile_reuse_genders", getattr(self.instance, "profile_reuse_genders", ["male", "female"])
+        )
+        if not isinstance(genders, list) or any(value not in {"male", "female"} for value in genders):
+            raise serializers.ValidationError({"profile_reuse_genders": "Select male, female, or both."})
+        attrs["profile_reuse_genders"] = [value for value in ("male", "female") if value in genders]
         provider = str(attrs.get("provider_code", getattr(self.instance, "provider_code", ""))).lower()
         provider_key = provider.replace("-", "").replace("_", "")
         base_url = str(attrs.get("base_url", getattr(self.instance, "base_url", ""))).rstrip("/")

@@ -9,6 +9,18 @@ from django.db.models import F, Q
 
 PERCENTAGE_VALIDATORS = [MinValueValidator(Decimal("0.00")), MaxValueValidator(Decimal("100.00"))]
 
+PROFILE_REUSE_AGE_GROUPS = (
+    "13-17", "18-24", "25-29", "30-34", "35-39", "40-44", "45-49", "50-54",
+)
+
+
+def default_profile_reuse_age_groups():
+    return list(PROFILE_REUSE_AGE_GROUPS)
+
+
+def default_profile_reuse_genders():
+    return ["male", "female"]
+
 
 class Client(models.Model):
     """A survey buyer/source account controlled by the platform owner."""
@@ -57,6 +69,36 @@ class ClientIntegration(models.Model):
         help_text="Provider credential names mapped to environment-variable names; never secret values.",
     )
     config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
+    profile_reuse_enabled = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Allow this client to receive an eligible previously registered profile UID.",
+    )
+    profile_reuse_eligible_after_days = models.PositiveSmallIntegerField(
+        default=60,
+        validators=[MinValueValidator(1), MaxValueValidator(730)],
+        help_text="Minimum age of a registered UID before it enters the reuse queue.",
+    )
+    profile_reuse_monthly_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("30.00"),
+        validators=PERCENTAGE_VALIDATORS,
+        help_text="Percentage of the previous calendar month's attempts available as this month's reuse budget.",
+    )
+    profile_reuse_country_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Allowed ISO country codes. Empty means every country served by this integration.",
+    )
+    profile_reuse_age_groups = models.JSONField(
+        default=default_profile_reuse_age_groups,
+        blank=True,
+    )
+    profile_reuse_genders = models.JSONField(
+        default=default_profile_reuse_genders,
+        blank=True,
+    )
     encrypted_api_token = models.TextField(blank=True, editable=False)
     credential_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
     credential_last_four = models.CharField(max_length=4, blank=True, editable=False)

@@ -30,6 +30,10 @@ class PrescreenerSubmission(models.Model):
         ordering = ["-submitted_at"]
         indexes = [
             models.Index(fields=["country_code", "respondent_age_group", "respondent_gender"], name="vault_country_profile_idx"),
+            models.Index(
+                fields=["country_code", "respondent_age_group", "respondent_gender", "usage_count", "submitted_at"],
+                name="vault_reuse_queue_idx",
+            ),
         ]
 
 

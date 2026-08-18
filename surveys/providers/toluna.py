@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 import requests
+from prescreener_vault.reuse import effective_profile_uid
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -723,6 +724,7 @@ class TolunaProvider(SurveyProvider):
         raise ProviderError("The respondent profile does not match an open Toluna quota.")
 
     def _member_payload(self, survey, attempt, answers):
+        member_code = effective_profile_uid(attempt)
         refs = self.integration.credential_env_keys or {}
         culture = str((survey.raw_data.get("_toluna") or {}).get("culture_code") or "").replace("-", "_")
         # Toluna's FAQ defines Unique Partner Code, PartnerGUID and PanelGUID
@@ -752,7 +754,7 @@ class TolunaProvider(SurveyProvider):
             upstream_values = answer.get("upstream_values") or values
             kind = str((question.raw_data or {}).get("toluna_kind") or "profile")
             if kind == "birth_date":
-                birth_date = self._birth_date(values[0], attempt.prescreener_uid)
+                birth_date = self._birth_date(values[0], member_code)
                 continue
             if kind == "postal":
                 postal_code = str(values[0]).strip()
@@ -794,7 +796,7 @@ class TolunaProvider(SurveyProvider):
             raise ProviderError("Gender is required before Toluna member registration.")
         payload = {
             "PartnerGUID": partner_guid,
-            "MemberCode": attempt.prescreener_uid,
+            "MemberCode": member_code,
             "IsActive": True,
             "BirthDate": birth_date,
             "IsTest": bool((self.integration.config or {}).get("is_test_member", False)),
@@ -809,6 +811,7 @@ class TolunaProvider(SurveyProvider):
 
     def _register_member(self, survey, attempt, answers):
         payload = self._member_payload(survey, attempt, answers)
+        member_code = str(payload["MemberCode"])
         member_summary = {
             "member_id": str(payload["MemberCode"]),
             "birth_date": str(payload["BirthDate"]),
@@ -821,7 +824,7 @@ class TolunaProvider(SurveyProvider):
         # across all Gunicorn/Celery processes without holding a database
         # transaction open while the upstream HTTP request is running.
         identity = hashlib.sha256(
-            f"{self.integration.pk}:{attempt.prescreener_uid}".encode("utf-8")
+            f"{self.integration.pk}:{member_code}".encode("utf-8")
         ).hexdigest()
         lock_key = f"toluna:member-lock:{identity}"
         throttle_key = f"toluna:member-throttle:{identity}"
@@ -836,7 +839,7 @@ class TolunaProvider(SurveyProvider):
         try:
             member, _ = TolunaMember.objects.get_or_create(
                 integration=self.integration,
-                member_code=attempt.prescreener_uid,
+                member_code=member_code,
                 defaults={
                     "culture_code": str(
                         (survey.raw_data.get("_toluna") or {}).get("culture_code") or ""
@@ -894,7 +897,8 @@ class TolunaProvider(SurveyProvider):
                 cache.delete(lock_key)
 
     def build_outbound_url(self, survey, attempt, answers):
-        if not attempt.prescreener_uid:
+        member_code = effective_profile_uid(attempt)
+        if not member_code:
             raise ProviderError("The Toluna member identity is missing.")
         quota = self._matching_quota(survey, answers)
         # The public flow uses this non-sensitive summary on its confirmation
@@ -907,7 +911,7 @@ class TolunaProvider(SurveyProvider):
         )
         invite, _ = self._request(
             "GET",
-            f"{self.es_base_url}/IPExternalSamplingService/ExternalSample/{panel_guid}/{attempt.prescreener_uid}/Invite/{quota.quota_id}",
+            f"{self.es_base_url}/IPExternalSamplingService/ExternalSample/{panel_guid}/{member_code}/Invite/{quota.quota_id}",
             headers=self.api_headers,
         )
         if not isinstance(invite, dict) or not _pick(invite, "URL"):
