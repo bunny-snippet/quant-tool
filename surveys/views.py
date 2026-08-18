@@ -957,6 +957,10 @@ def _rfg_result_url(rid, result):
     return f"{reverse('rfg-result')}?{urlencode({'rid': rid, 'result': result})}"
 
 
+def _toluna_member_ready_url(rid):
+    return f"{reverse('toluna-member-ready')}?{urlencode({'rid': rid})}"
+
+
 def _finish_local_rfg_attempt(attempt, answers, request, *, result, reason):
     now = timezone.now()
     with transaction.atomic():
@@ -1183,6 +1187,21 @@ def survey_start(request):
             f"{reverse('survey-status')}?{urlencode({'status': '4', 'rid': attempt.rid})}"
         )
 
+    provider_code = (
+        attempt.survey.integration.provider_code
+        if attempt.survey.integration_id else ""
+    )
+    # A Toluna invite may already have been prepared by a previous POST. Do
+    # not register the member or request another invite when the browser
+    # refreshes/back-navigates; return to the confirmation step instead.
+    if (
+        provider_code == "toluna"
+        and attempt.status == SurveyAttempt.Status.INITIATED
+        and attempt.submitted_at
+        and attempt.outbound_url
+    ):
+        return HttpResponseRedirect(_toluna_member_ready_url(attempt.rid))
+
     if request.method == "POST":
         answers, errors = _collect_prescreener_answers(request, attempt.survey)
         if not errors:
@@ -1192,10 +1211,6 @@ def survey_start(request):
                         attempt, answers_with_entry_postal_code(attempt, answers)
                     )
                 provider = None
-                provider_code = (
-                    attempt.survey.integration.provider_code
-                    if attempt.survey.integration_id else ""
-                )
                 if provider_code in {"rfg", "toluna"}:
                     provider = get_provider(attempt.survey.integration)
                 if provider_code == "rfg":
@@ -1226,6 +1241,11 @@ def survey_start(request):
                         ).get(pk=attempt.pk)
                         if locked.status != SurveyAttempt.Status.INITIATED:
                             return HttpResponseRedirect(f"{reverse('survey-start')}?rid={quote(locked.rid)}")
+                        if provider_code == "toluna" and locked.submitted_at and locked.outbound_url:
+                            # A concurrent submit may have finished while this
+                            # request waited for the row lock. Reuse that
+                            # prepared invite instead of creating a second one.
+                            return HttpResponseRedirect(_toluna_member_ready_url(locked.rid))
                         outbound_url = (
                             provider.build_outbound_url(locked.survey, locked, answers)
                             if provider
@@ -1234,14 +1254,25 @@ def survey_start(request):
                         now = timezone.now()
                         locked.answers = operational_answer_value(answers)
                         locked.submitted_at = now
-                        locked.redirected_at = now
                         locked.outbound_url = outbound_url
-                        locked.status = SurveyAttempt.Status.REDIRECTED
+                        if provider_code == "toluna":
+                            # The respondent has not left our platform yet.
+                            # redirected_at/status change only after Continue.
+                            locked.redirected_at = None
+                            locked.status = SurveyAttempt.Status.INITIATED
+                        else:
+                            locked.redirected_at = now
+                            locked.status = SurveyAttempt.Status.REDIRECTED
                         locked.save(update_fields=[
                             "answers", "submitted_at", "redirected_at", "outbound_url", "status",
                             "source_cpi_snapshot", "payable_cpi_snapshot", "cpi_snapshot_source",
                             "upstream_transaction_data", "updated_at"
                         ])
+                    if provider_code == "toluna":
+                        request.session[f"toluna_member_ready_{locked.rid}"] = dict(
+                            getattr(provider, "last_member_summary", {}) or {}
+                        )
+                        return HttpResponseRedirect(_toluna_member_ready_url(locked.rid))
                     return HttpResponseRedirect(outbound_url)
             except Exception as exc:
                 if isinstance(exc, PrescreenerVaultError):
@@ -1275,6 +1306,66 @@ def survey_start(request):
             attempt.survey.integration_id
             and attempt.survey.integration.provider_code == "rfg"
         ),
+    })
+
+
+@require_http_methods(["GET", "POST"])
+def toluna_member_ready(request):
+    """Show the assigned Toluna identity before releasing the invite URL."""
+    if request.method == "GET" and not _has_exact_query(request, {"rid"}):
+        return _invalid_survey_link(request)
+
+    rid = (
+        request.GET.get("rid", "")
+        if request.method == "GET"
+        else request.POST.get("rid", "")
+    ).strip()
+    if len(rid) != 10 or not rid.isalnum():
+        return _invalid_survey_link(request)
+
+    attempt = SurveyAttempt.objects.select_related("survey__integration").filter(
+        rid=rid,
+        survey__integration__provider_code="toluna",
+    ).first()
+    if attempt is None:
+        return _invalid_survey_link(request, status_code=404)
+
+    if request.method == "POST":
+        with transaction.atomic():
+            locked = SurveyAttempt.objects.select_for_update().get(pk=attempt.pk)
+            if (
+                locked.status != SurveyAttempt.Status.INITIATED
+                or not locked.submitted_at
+                or not locked.outbound_url
+            ):
+                return _invalid_survey_link(
+                    request,
+                    "This Toluna survey entry has already been used or is no longer available.",
+                    status_code=409,
+                )
+            outbound_url = locked.outbound_url
+            locked.redirected_at = timezone.now()
+            locked.status = SurveyAttempt.Status.REDIRECTED
+            locked.save(update_fields=["redirected_at", "status", "updated_at"])
+        request.session.pop(f"toluna_member_ready_{rid}", None)
+        return HttpResponseRedirect(outbound_url)
+
+    if (
+        attempt.status != SurveyAttempt.Status.INITIATED
+        or not attempt.submitted_at
+        or not attempt.outbound_url
+    ):
+        return _invalid_survey_link(
+            request,
+            "This Toluna survey entry has already been used or is no longer available.",
+            status_code=409,
+        )
+
+    summary = request.session.get(f"toluna_member_ready_{rid}", {})
+    return render(request, "surveys/toluna_member_ready.html", {
+        "rid": attempt.rid,
+        "member_id": str(summary.get("member_id") or attempt.prescreener_uid or ""),
+        "birth_date": str(summary.get("birth_date") or "Prepared"),
     })
 
 

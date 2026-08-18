@@ -16,6 +16,7 @@ from .views import (
     termination_reasons_page,
     user_hits_page,
     survey_start,
+    toluna_member_ready,
     RFGCallbackAPIView,
     rfg_result,
     survey_status,
@@ -29,6 +30,7 @@ router.register("survey-attempts", SurveyAttemptViewSet, basename="survey-attemp
 
 urlpatterns = [
     path("survey/start", survey_start, name="survey-start"),
+    path("survey/toluna/member-ready", toluna_member_ready, name="toluna-member-ready"),
     path("survey/rfg/callback", RFGCallbackAPIView.as_view(), name="rfg-callback"),
     path("survey/rfg/result", rfg_result, name="rfg-result"),
     path("survey", survey_status, name="survey-status"),

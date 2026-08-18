@@ -734,6 +734,10 @@ class TolunaProvider(SurveyProvider):
 
     def _register_member(self, survey, attempt, answers):
         payload = self._member_payload(survey, attempt, answers)
+        member_summary = {
+            "member_id": str(payload["MemberCode"]),
+            "birth_date": str(payload["BirthDate"]),
+        }
         profile_hash = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
@@ -765,7 +769,7 @@ class TolunaProvider(SurveyProvider):
                 },
             )
             if member.is_registered and member.profile_hash == profile_hash:
-                return
+                return member_summary
 
             # The marker starts when a Toluna member request starts.  Waiting
             # for it to expire enforces the documented one-second minimum
@@ -807,6 +811,7 @@ class TolunaProvider(SurveyProvider):
             member.save(update_fields=[
                 "profile_hash", "is_registered", "last_synced_at", "last_error", "updated_at"
             ])
+            return member_summary
         finally:
             # Do not delete a newer owner's lock if this request ever outlives
             # the safety timeout and another process has already acquired it.
@@ -817,7 +822,9 @@ class TolunaProvider(SurveyProvider):
         if not attempt.prescreener_uid:
             raise ProviderError("The Toluna member identity is missing.")
         quota = self._matching_quota(survey, answers)
-        self._register_member(survey, attempt, answers)
+        # The public flow uses this non-sensitive summary on its confirmation
+        # screen. The provider URL is still kept server-side until Continue.
+        self.last_member_summary = self._register_member(survey, attempt, answers)
         culture = str((survey.raw_data.get("_toluna") or {}).get("culture_code") or "").replace("-", "_")
         panel_guid = environment_value(
             (self.integration.credential_env_keys or {}).get(f"panel_{culture}"),

@@ -1,0 +1,36 @@
+{% extends 'surveys/flow_base.html' %}
+{% block title %}Profile ready{% endblock %}
+{% block body_class %}member-ready-page{% endblock %}
+{% block content %}
+<main class="member-ready-shell">
+  <div class="member-ready-orb member-ready-orb-one" aria-hidden="true"></div>
+  <div class="member-ready-orb member-ready-orb-two" aria-hidden="true"></div>
+  <section class="member-ready-card">
+    <div class="member-ready-icon" aria-hidden="true">
+      <span></span>
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="18"></circle><path d="m16 24 5 5 11-12"></path></svg>
+    </div>
+    <p class="flow-eyebrow">Toluna profile ready</p>
+    <h1>Your survey profile is ready</h1>
+    <p class="member-ready-copy">Please review the assigned details, then continue to the survey.</p>
+
+    <dl class="member-ready-facts">
+      <div>
+        <dt>Member ID</dt>
+        <dd>{{ member_id }}</dd>
+      </div>
+      <div>
+        <dt>Date of birth</dt>
+        <dd>{{ birth_date }}</dd>
+      </div>
+    </dl>
+
+    <form method="post" action="{% url 'toluna-member-ready' %}" class="member-ready-action">
+      {% csrf_token %}
+      <input type="hidden" name="rid" value="{{ rid }}">
+      <button type="submit">Continue to survey <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="member-ready-note">Your survey opens securely after you continue.</p>
+  </section>
+</main>
+{% endblock %}

@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from vendors.models import Client, ClientIntegration
@@ -204,7 +205,8 @@ class TolunaProviderTests(TestCase):
             "URL": "https://router.toluna.test/invite?token=abc", "LOI": 7, "IR": 40,
         }
         session = RecordingSession(FakeResponse(None, 201), FakeResponse(invite))
-        outbound = TolunaProvider(self.integration, session=session).build_outbound_url(survey, attempt, answers)
+        provider = TolunaProvider(self.integration, session=session)
+        outbound = provider.build_outbound_url(survey, attempt, answers)
 
         self.assertEqual([call[0] for call in session.calls], ["POST", "GET"])
         member_body = session.calls[0][2]["json"]
@@ -220,6 +222,10 @@ class TolunaProviderTests(TestCase):
             member_body["BirthDate"],
             TolunaProvider._birth_date(27, attempt.prescreener_uid),
         )
+        self.assertEqual(provider.last_member_summary, {
+            "member_id": attempt.prescreener_uid,
+            "birth_date": member_body["BirthDate"],
+        })
         self.assertEqual(member_body["RegistrationAnswers"][0]["QuestionID"], 1001007)
         self.assertEqual(parse_qs(urlsplit(outbound).query)["rid"], [attempt.rid])
         self.assertEqual(attempt.source_cpi_snapshot, Decimal("3.25"))
@@ -233,6 +239,49 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_member_ready_page_shows_identity_then_redirects_once(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="71:72",
+            company_name="Toluna",
+            name="Toluna test survey",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Rdy123AbC9",
+            prescreener_uid="Ab1c-De2f-Gh3i-Jk4l",
+            survey=survey,
+            user_id="1",
+            submitted_at=timezone.now(),
+            outbound_url="https://router.toluna.test/invite?token=abc",
+        )
+        session = self.client.session
+        session[f"toluna_member_ready_{attempt.rid}"] = {
+            "member_id": attempt.prescreener_uid,
+            "birth_date": "08/12/1999",
+        }
+        session.save()
+        url = reverse("toluna-member-ready")
+
+        response = self.client.get(url, {"rid": attempt.rid})
+        self.assertContains(response, attempt.prescreener_uid)
+        self.assertContains(response, "08/12/1999")
+        self.assertContains(response, "Continue to survey")
+
+        response = self.client.post(url, {"rid": attempt.rid})
+        self.assertRedirects(
+            response,
+            attempt.outbound_url,
+            fetch_redirect_response=False,
+        )
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertIsNotNone(attempt.redirected_at)
+
+        replay = self.client.post(url, {"rid": attempt.rid})
+        self.assertEqual(replay.status_code, 409)
 
     def test_toluna_validation_error_exposes_only_safe_diagnostic_fields(self):
         provider = TolunaProvider(
