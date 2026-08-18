@@ -80,13 +80,10 @@ class Command(BaseCommand):
         credentials = self._configured_credentials()
         self._validate_inventory_prerequisites(credentials)
         cultures = sorted(key.removeprefix("panel_").replace("_", "-") for key in credentials if key.startswith("panel_"))
-        partner_ready = "partner_guid" in credentials
         callback_ready = "hmac_key" in credentials
 
         self.stdout.write(f"Toluna cultures: {', '.join(cultures)}")
-        self.stdout.write(
-            "Member/invite flow: " + ("ready" if partner_ready else "guarded (TOLUNA_PARTNER_GUID not configured)")
-        )
+        self.stdout.write("Member/invite flow: ready (culture PanelGUID is used as PartnerGUID)")
         self.stdout.write(
             "Callback verification: " + ("enabled" if callback_ready else "guarded (TOLUNA_HMAC_KEY not configured)")
         )

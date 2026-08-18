@@ -112,7 +112,6 @@ class TolunaProvider(SurveyProvider):
         ("api_auth_key", "External Sample API key environment variable"),
         ("partner_auth_key", "Reference Data API key environment variable"),
         ("hmac_key", "Callback HMAC key environment variable"),
-        ("partner_guid", "Member-management PartnerGUID environment variable"),
     )
 
     def __init__(self, integration, *, session=None):
@@ -648,7 +647,15 @@ class TolunaProvider(SurveyProvider):
 
     def _member_payload(self, survey, attempt, answers):
         refs = self.integration.credential_env_keys or {}
-        partner_guid = environment_value(refs.get("partner_guid"), "Toluna PartnerGUID")
+        culture = str((survey.raw_data.get("_toluna") or {}).get("culture_code") or "").replace("-", "_")
+        # Toluna's FAQ defines Unique Partner Code, PartnerGUID and PanelGUID
+        # as equivalent terms and instructs integrations to use the
+        # culture-specific PanelGUID. Keep the old partner_guid mapping only
+        # as a backward-compatible fallback for existing configurations.
+        partner_guid = environment_value(
+            refs.get(f"panel_{culture}") or refs.get("partner_guid"),
+            f"Toluna {culture.replace('_', '-')} PanelGUID",
+        )
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
         registration_answers = []
         birth_date = postal_code = ""

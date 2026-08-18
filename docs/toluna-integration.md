@@ -17,8 +17,6 @@ Copy the corresponding production values from the Toluna partner worksheet into 
 TOLUNA_API_AUTH_KEY=
 TOLUNA_PARTNER_AUTH_KEY=
 TOLUNA_HMAC_KEY=
-TOLUNA_PARTNER_GUID=
-
 TOLUNA_PANEL_EN_CA=
 TOLUNA_PANEL_EN_GB=
 TOLUNA_PANEL_EN_IN=
@@ -28,7 +26,11 @@ TOLUNA_PANEL_EN_US=
 CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS=60
 ```
 
-`TOLUNA_PARTNER_GUID` is separate from the culture PanelGUIDs. Inventory can be tested and synchronized without it; member creation and live invite generation deliberately stop until it is configured.
+Toluna's terminology uses Unique Partner Code, `PartnerGUID` and `PanelGUID`
+interchangeably. Member registration sends the selected survey culture's
+`TOLUNA_PANEL_EN_XX` value as `PartnerGUID`; no separate
+`TOLUNA_PARTNER_GUID` is required. A legacy `partner_guid` integration mapping
+is still accepted as a fallback for old deployments.
 
 ## UI setup
 

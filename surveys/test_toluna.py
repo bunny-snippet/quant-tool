@@ -81,7 +81,6 @@ QUOTAS = {
 @patch.dict("os.environ", {
     "TOLUNA_API_AUTH_KEY": "api-key",
     "TOLUNA_PARTNER_AUTH_KEY": "reference-key",
-    "TOLUNA_PARTNER_GUID": "partner-guid",
     "TOLUNA_HMAC_KEY": "hmac-secret",
     "TOLUNA_PANEL_EN_US": "panel-guid",
 }, clear=False)
@@ -96,7 +95,6 @@ class TolunaProviderTests(TestCase):
             credential_env_keys={
                 "api_auth_key": "TOLUNA_API_AUTH_KEY",
                 "partner_auth_key": "TOLUNA_PARTNER_AUTH_KEY",
-                "partner_guid": "TOLUNA_PARTNER_GUID",
                 "hmac_key": "TOLUNA_HMAC_KEY",
                 "panel_en_us": "TOLUNA_PANEL_EN_US",
             },
@@ -208,6 +206,7 @@ class TolunaProviderTests(TestCase):
 
         self.assertEqual([call[0] for call in session.calls], ["POST", "GET"])
         member_body = session.calls[0][2]["json"]
+        self.assertEqual(member_body["PartnerGUID"], "panel-guid")
         self.assertEqual(member_body["MemberCode"], attempt.prescreener_uid)
         born = datetime.strptime(member_body["BirthDate"], "%m/%d/%Y").date()
         calculated_age = date.today().year - born.year - (
