@@ -515,6 +515,12 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
             SurveyAttempt.Status.TERMINATED,
             SurveyAttempt.Status.OVER_QUOTA,
             SurveyAttempt.Status.QUALITY_TERMINATED,
+            SurveyAttempt.Status.SURVEY_NOT_AVAILABLE,
+            SurveyAttempt.Status.NO_SURVEYS,
+            SurveyAttempt.Status.NO_COOKIES,
+            SurveyAttempt.Status.MAX_SURVEYS_REACHED,
+            SurveyAttempt.Status.NOT_QUALIFIED,
+            SurveyAttempt.Status.SURVEY_TAKEN,
         }:
             return ""
         return provider_outcome(obj).get("reason", "")
@@ -524,6 +530,12 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
             SurveyAttempt.Status.TERMINATED,
             SurveyAttempt.Status.OVER_QUOTA,
             SurveyAttempt.Status.QUALITY_TERMINATED,
+            SurveyAttempt.Status.SURVEY_NOT_AVAILABLE,
+            SurveyAttempt.Status.NO_SURVEYS,
+            SurveyAttempt.Status.NO_COOKIES,
+            SurveyAttempt.Status.MAX_SURVEYS_REACHED,
+            SurveyAttempt.Status.NOT_QUALIFIED,
+            SurveyAttempt.Status.SURVEY_TAKEN,
         }:
             return ""
         return provider_outcome(obj).get("category", "")

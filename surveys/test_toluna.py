@@ -539,6 +539,53 @@ class TolunaProviderTests(TestCase):
         provider = TolunaProvider(self.integration, session=RecordingSession())
         self.assertTrue(provider.verify_callback(request))
 
+    def test_extended_toluna_status_pages_are_verified_and_recorded(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-status-pages",
+            name="Toluna status test",
+            status=Survey.Status.LIVE,
+        )
+        cases = [
+            ("1", "TolSt10001", SurveyAttempt.Status.COMPLETED, "Qualified"),
+            ("2", "TolSt20001", SurveyAttempt.Status.TERMINATED, "Terminated"),
+            ("3", "TolSt30001", SurveyAttempt.Status.OVER_QUOTA, "Quota full"),
+            ("4", "TolSt40001", SurveyAttempt.Status.QUALITY_TERMINATED, "Fraud terminated"),
+            ("7", "TolSt70001", SurveyAttempt.Status.SURVEY_NOT_AVAILABLE, "Survey not available"),
+            ("8", "TolSt80001", SurveyAttempt.Status.NO_SURVEYS, "No surveys"),
+            ("9", "TolSt90001", SurveyAttempt.Status.NO_COOKIES, "No cookies"),
+            ("10", "TolS100001", SurveyAttempt.Status.MAX_SURVEYS_REACHED, "Maximum surveys reached"),
+            ("11", "TolS110001", SurveyAttempt.Status.NOT_QUALIFIED, "Not qualified"),
+            ("12", "TolS120001", SurveyAttempt.Status.SURVEY_TAKEN, "Survey already taken"),
+        ]
+        for code, rid, expected_status, label in cases:
+            with self.subTest(code=code):
+                attempt = SurveyAttempt.objects.create(
+                    rid=rid,
+                    survey=survey,
+                    user_id="1",
+                    status=SurveyAttempt.Status.REDIRECTED,
+                )
+                unsigned = f"http://testserver/survey?status={code}&rid={rid}&"
+                signature = hmac.new(
+                    b"hmac-secret", unsigned.encode(), hashlib.sha256
+                ).hexdigest()
+
+                response = self.client.get(
+                    f"/survey?status={code}&rid={rid}&hash={signature}"
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, label)
+                attempt.refresh_from_db()
+                self.assertEqual(attempt.status, expected_status)
+                self.assertEqual(attempt.status_source, "toluna_callback")
+                self.assertTrue(attempt.is_verified)
+                self.assertEqual(
+                    attempt.upstream_transaction_data["toluna_outcome"]["code"], code
+                )
+
     def test_serializer_rejects_non_numeric_interval_and_resets_verification_after_edit(self):
         invalid = ClientIntegrationSerializer(
             self.integration,

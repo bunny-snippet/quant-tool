@@ -294,6 +294,12 @@ class SurveyAttempt(models.Model):
         TERMINATED = "2", "Terminated"
         OVER_QUOTA = "3", "Over quota"
         QUALITY_TERMINATED = "4", "Quality terminated"
+        SURVEY_NOT_AVAILABLE = "7", "Survey not available"
+        NO_SURVEYS = "8", "No surveys"
+        NO_COOKIES = "9", "No cookies"
+        MAX_SURVEYS_REACHED = "10", "Maximum surveys reached"
+        NOT_QUALIFIED = "11", "Not qualified"
+        SURVEY_TAKEN = "12", "Survey already taken"
 
     rid = models.CharField(max_length=10, unique=True, db_index=True)
     prescreener_uid = models.CharField(

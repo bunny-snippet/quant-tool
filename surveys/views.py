@@ -259,6 +259,12 @@ UNSUCCESSFUL_STATUS_LABELS = {
     SurveyAttempt.Status.TERMINATED: "Terminated",
     SurveyAttempt.Status.OVER_QUOTA: "Quota full",
     SurveyAttempt.Status.QUALITY_TERMINATED: "Quality / security",
+    SurveyAttempt.Status.SURVEY_NOT_AVAILABLE: "Survey not available",
+    SurveyAttempt.Status.NO_SURVEYS: "No surveys",
+    SurveyAttempt.Status.NO_COOKIES: "No cookies",
+    SurveyAttempt.Status.MAX_SURVEYS_REACHED: "Maximum surveys reached",
+    SurveyAttempt.Status.NOT_QUALIFIED: "Not qualified",
+    SurveyAttempt.Status.SURVEY_TAKEN: "Survey already taken",
 }
 UNSUCCESSFUL_ATTEMPT_STATUSES = set(UNSUCCESSFUL_STATUS_LABELS)
 
@@ -398,6 +404,12 @@ def studies_page(request):
             (SurveyAttempt.Status.TERMINATED, "Terminated"),
             (SurveyAttempt.Status.OVER_QUOTA, "Over quota"),
             (SurveyAttempt.Status.QUALITY_TERMINATED, "Quality terminated"),
+            (SurveyAttempt.Status.SURVEY_NOT_AVAILABLE, "Survey not available"),
+            (SurveyAttempt.Status.NO_SURVEYS, "No surveys"),
+            (SurveyAttempt.Status.NO_COOKIES, "No cookies"),
+            (SurveyAttempt.Status.MAX_SURVEYS_REACHED, "Maximum surveys reached"),
+            (SurveyAttempt.Status.NOT_QUALIFIED, "Not qualified"),
+            (SurveyAttempt.Status.SURVEY_TAKEN, "Survey already taken"),
         ],
         "study_filters": _component_access(codes, STUDY_FILTER_PERMISSIONS),
         "study_columns": _permitted_columns(codes, STUDY_COLUMN_PERMISSIONS),
@@ -1387,6 +1399,23 @@ STATUS_PAGES = {
 }
 
 
+# Toluna has a wider end-page contract than the platform-neutral S1-S4 set.
+# The database retains each distinct Toluna result so Traffic/Term Reports can
+# show the real outcome instead of collapsing every unsuccessful return to S2.
+TOLUNA_STATUS_PAGES = {
+    "1": {"title": "Survey qualified", "message": "Your survey response qualified and was completed successfully.", "tone": "success", "status_label": "Qualified"},
+    "2": {"title": "Survey terminated", "message": "The survey provider ended this attempt before completion.", "tone": "neutral", "status_label": "Terminated"},
+    "3": {"title": "Quota already filled", "message": "The required quota was filled before your response could be completed.", "tone": "warning", "status_label": "Quota full"},
+    "4": {"title": "Fraud check unsuccessful", "message": "This response did not pass the survey provider's fraud checks.", "tone": "danger", "status_label": "Fraud terminated"},
+    "7": {"title": "Survey not available", "message": "This survey is no longer available for this respondent.", "tone": "warning", "status_label": "Survey not available"},
+    "8": {"title": "No surveys available", "message": "There are currently no suitable surveys available for this respondent.", "tone": "neutral", "status_label": "No surveys"},
+    "9": {"title": "Cookies are required", "message": "The survey could not continue because browser cookies were unavailable.", "tone": "warning", "status_label": "No cookies"},
+    "10": {"title": "Survey limit reached", "message": "The maximum number of surveys allowed for this respondent has been reached.", "tone": "warning", "status_label": "Maximum surveys reached"},
+    "11": {"title": "Not qualified", "message": "The respondent did not meet this survey's qualification requirements.", "tone": "neutral", "status_label": "Not qualified"},
+    "12": {"title": "Survey already taken", "message": "This respondent has already participated in this survey.", "tone": "neutral", "status_label": "Survey already taken"},
+}
+
+
 RFG_CALLBACK_IPS = {
     "15.222.163.99", "3.97.223.177", "3.97.28.227", "3.230.105.121",
     "52.21.20.32", "52.45.41.61",
@@ -1524,11 +1553,11 @@ class RFGCallbackAPIView(APIView):
 def survey_status(request):
     status_code = request.GET.get("status", "").strip()
     rid = status_rid_from_request(request)
-    page = STATUS_PAGES.get(status_code)
+    page = STATUS_PAGES.get(status_code) or TOLUNA_STATUS_PAGES.get(status_code)
     if page is None or not rid:
         return render(request, "surveys/flow_error.html", {
             "title": "Invalid survey status",
-            "message": "A valid status (1–4) and RID are required.",
+            "message": "A supported survey status and RID are required.",
         }, status=400)
 
     attempt = SurveyAttempt.objects.filter(rid=rid).first()
@@ -1538,7 +1567,13 @@ def survey_status(request):
         provider_code = ""
         if attempt.survey.integration_id:
             provider_code = attempt.survey.integration.provider_code
+        if status_code not in STATUS_PAGES and provider_code != "toluna":
+            return render(request, "surveys/flow_error.html", {
+                "title": "Invalid survey status",
+                "message": "This extended result status is only configured for Toluna attempts.",
+            }, status=400)
         if provider_code == "toluna":
+            page = TOLUNA_STATUS_PAGES[status_code]
             try:
                 callback_verified = get_provider(attempt.survey.integration).verify_callback(request)
             except ProviderError as exc:
@@ -1568,6 +1603,11 @@ def survey_status(request):
                     attempt.upstream_transaction_data = {
                         **(attempt.upstream_transaction_data or {}),
                         "toluna_callback": dict(request.GET.items()),
+                        "toluna_outcome": {
+                            "code": status_code,
+                            "status": page["status_label"],
+                            "title": page["title"],
+                        },
                     }
             attempt.last_callback_at = now
             attempt.callback_count += 1
@@ -1577,7 +1617,11 @@ def survey_status(request):
                 "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
             ])
             finalize_attempt_capacity(attempt)
-        status_label = attempt.get_status_display()
+        if provider_code == "toluna":
+            page = TOLUNA_STATUS_PAGES.get(attempt.status, page)
+        else:
+            page = STATUS_PAGES.get(attempt.status, page)
+        status_label = page.get("status_label") or attempt.get_status_display()
     else:
         status_label = "Unknown attempt"
 

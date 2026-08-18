@@ -35,7 +35,11 @@
     page: 1, pages: 1, pageSize: Number(elements.pageSize?.value || 10), timer: null, controller: null,
     projectId: byId('studyProjectScope') ? (new URLSearchParams(window.location.search).get('internal_id') || '') : '',
   };
-  const statusTone = { initiated: 'initiate', redirected: 'initiate', '1': 'complete', '2': 'terminate', '3': 'quota', '4': 'quality' };
+  const statusTone = {
+    initiated: 'initiate', redirected: 'initiate', '1': 'complete', '2': 'terminate',
+    '3': 'quota', '4': 'quality', '7': 'terminate', '8': 'terminate', '9': 'quality',
+    '10': 'terminate', '11': 'terminate', '12': 'terminate',
+  };
   const deviceIcons = {
     desktop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>',
     mobile: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>',

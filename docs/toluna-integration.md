@@ -60,7 +60,7 @@ Toluna's common Age question is intentionally absent from its Reference Data API
 
 ## Callback setup
 
-Configure Toluna's four outcome/end pages to return to the Quant production host with `status`, `rid` and `hash`. The exact placeholder names are partner-configuration values, so confirm them in the partner worksheet before launch. The platform verifies HMAC-SHA256 over the exact final URL, including the documented trailing `&`, before accepting the callback.
+Configure Toluna's outcome/end pages to return to the Quant production host with `status`, `rid` and `hash`. Quant accepts the complete Toluna result set: Qualified (S1), Terminated (S2), Quota Full (S3), Fraud Terminate (S4), Survey Not Available (S7), No Surveys (S8), No Cookies (S9), Max Surveys Reached (S10), Not Qualified (S11), and Survey Taken (S12). The exact placeholder names are partner-configuration values, so confirm them in the partner worksheet before launch. The platform verifies HMAC-SHA256 over the exact final URL, including the documented trailing `&`, before accepting the callback.
 
 Do not disable callback HMAC in production. The callback status cannot be considered verified when the integration toggle is off.
 
