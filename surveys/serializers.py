@@ -15,6 +15,7 @@ from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
 
 class SurveyQuotaSerializer(serializers.ModelSerializer):
+    display_name = serializers.SerializerMethodField(help_text="Readable quota title without exposing provider-internal quota IDs.")
     status = serializers.SerializerMethodField(help_text="Current quota state; RFG zero-remaining quotas are reported as Full.")
     target_known = serializers.SerializerMethodField(help_text="True only when the provider supplied a target total.")
     completed_known = serializers.SerializerMethodField(help_text="True only when the provider supplied a completed total.")
@@ -25,7 +26,7 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
     class Meta:
         model = SurveyQuota
         fields = [
-            "id", "quota_id", "title", "name", "sample_size", "remaining", "completes",
+            "id", "quota_id", "title", "name", "display_name", "sample_size", "remaining", "completes",
             "clicks", "status", "targeting", "target_known", "completed_known", "limit_type",
             "scope_label", "targeting_details", "updated_at",
         ]
@@ -33,6 +34,34 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
     @staticmethod
     def _is_rfg(obj) -> bool:
         return bool(obj.survey.integration_id and obj.survey.integration.provider_code == "rfg")
+
+    @staticmethod
+    def _is_toluna(obj) -> bool:
+        return bool(obj.survey.integration_id and obj.survey.integration.provider_code == "toluna")
+
+    @staticmethod
+    def _toluna_question_rows(obj) -> list:
+        raw = obj.raw_data or {}
+        layers = raw.get("Layers")
+        if not isinstance(layers, list):
+            layers = (obj.targeting or {}).get("layers")
+        rows = []
+        for layer in layers if isinstance(layers, list) else []:
+            if not isinstance(layer, dict):
+                continue
+            for subquota in layer.get("SubQuotas") or []:
+                if not isinstance(subquota, dict):
+                    continue
+                rows.extend(
+                    item for item in (subquota.get("QuestionsAndAnswers") or [])
+                    if isinstance(item, dict)
+                )
+        return rows
+
+    def get_display_name(self, obj) -> str:
+        if self._is_toluna(obj):
+            return self.get_scope_label(obj)
+        return obj.name or obj.title or "Survey quota"
 
     def get_status(self, obj) -> str:
         raw = obj.raw_data or {}
@@ -69,6 +98,8 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         return datapoints if isinstance(datapoints, list) else []
 
     def get_scope_label(self, obj) -> str:
+        if self._is_toluna(obj):
+            return "Targeted respondent quota" if self._toluna_question_rows(obj) else "Overall survey quota"
         return "Targeted respondent quota" if self._quota_datapoints(obj) else "Overall survey quota"
 
     @staticmethod
@@ -85,7 +116,39 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         return f"{minimum}\u2013{maximum}"
 
     def get_targeting_details(self, obj) -> list:
+        normalized = (obj.raw_data or {}).get("targeting_details")
+        if isinstance(normalized, list):
+            return normalized
         questions = list(obj.survey.targeting_questions.all())
+        if self._is_toluna(obj):
+            question_map = {str(item.question_id): item for item in questions}
+            grouped = {}
+            for row in self._toluna_question_rows(obj):
+                question_id = str(row.get("QuestionID") or "").strip()
+                if not question_id:
+                    continue
+                question = question_map.get(question_id)
+                detail = grouped.setdefault(question_id, {
+                    "name": question.text if question else f"Qualification {question_id}",
+                    "values": [],
+                })
+                option_labels = {
+                    str(option.get("OptionId")): str(option.get("OptionText") or option.get("Translation") or option.get("OptionId"))
+                    for option in (question.options if question else [])
+                    if isinstance(option, dict)
+                }
+                values = row.get("AnswerValues") or []
+                if isinstance(values, str):
+                    values = [part.strip() for part in values.split(",") if part.strip()]
+                readable = [str(value) for value in values]
+                readable.extend(
+                    option_labels.get(str(value), str(value))
+                    for value in (row.get("AnswerIDs") or [])
+                )
+                for value in readable:
+                    if value and value not in detail["values"]:
+                        detail["values"].append(value)
+            return list(grouped.values())
         details = []
         for datapoint in self._quota_datapoints(obj):
             if not isinstance(datapoint, dict):

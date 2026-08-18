@@ -37,6 +37,12 @@
   };
 
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+  function projectIdControl(survey, title = "View this project's traffic reports") {
+    const projectId = escapeHtml(survey.local_id);
+    if (!canOpenProjectStudies) return `<strong class="id-link project-id-value">${projectId}</strong>`;
+    const studyUrl = `/traffic-reports/?internal_id=${encodeURIComponent(survey.local_id)}`;
+    return `<span class="id-link project-study-link" role="link" tabindex="0" data-study-url="${escapeHtml(studyUrl)}" title="${escapeHtml(title)}">${projectId}</span>`;
+  }
   const formatDate = (value) => value ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
   const money = (value) => value == null ? '—' : `$${Number(value).toFixed(2)}`;
   const filterDefaults = {
@@ -300,8 +306,7 @@
     const percent = Math.min(100, Number(survey.progress_percent || 0));
     const cells = [];
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    const studyUrl = `/traffic-reports/?internal_id=${encodeURIComponent(survey.local_id)}`;
-    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${canOpenProjectStudies ? `<a class="id-link project-study-link" href="${studyUrl}" title="View this project's traffic reports">${escapeHtml(survey.local_id)}</a>` : `<strong class="id-link">${escapeHtml(survey.local_id)}</strong>`}<small>${escapeHtml(clientName)}</small></div></td>`);
+    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${projectIdControl(survey)}<small>${escapeHtml(clientName)}</small></div></td>`);
     if (projectColumns.has('survey')) cells.push(`<td><div class="survey-name"><strong>${escapeHtml(survey.source_id ?? '—')}</strong><span>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</span></div></td>`);
     if (projectColumns.has('market')) cells.push(`<td><span class="market-pill">${escapeHtml(survey.country_code || '—')} <i>${escapeHtml(survey.language_code || '')}</i></span><small class="country-name">${escapeHtml(survey.country || '')}</small></td>`);
     if (projectColumns.has('completes')) cells.push(`<td><div class="complete-value"><strong>${survey.completes.toLocaleString()} / ${survey.sample_size.toLocaleString()}</strong><span><i style="width:${percent}%"></i></span></div></td>`);
@@ -316,8 +321,7 @@
   function cardTemplate(survey) {
     if (!projectColumns.size) return '<article class="survey-card"><div class="column-denied">No project columns are assigned to your account.</div></article>';
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    const studyUrl = `/traffic-reports/?internal_id=${encodeURIComponent(survey.local_id)}`;
-    const top = `${projectColumns.has('project_id') ? `${canOpenProjectStudies ? `<a class="id-link project-study-link" href="${studyUrl}">${escapeHtml(survey.local_id)}</a>` : `<strong class="id-link">${escapeHtml(survey.local_id)}</strong>`}<small class="project-card-client">${escapeHtml(clientName)}</small>` : ''}${projectColumns.has('modified') ? `<span class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</span>` : ''}`;
+    const top = `${projectColumns.has('project_id') ? `${projectIdControl(survey)}<small class="project-card-client">${escapeHtml(clientName)}</small>` : ''}${projectColumns.has('modified') ? `<span class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</span>` : ''}`;
     const metrics = [];
     if (projectColumns.has('market')) metrics.push(`<span><small>Market</small><b>${escapeHtml(survey.country_code || '—')} ${escapeHtml(survey.language_code || '')}</b></span>`);
     if (projectColumns.has('completes')) metrics.push(`<span><small>Completes</small><b>${survey.completes} / ${survey.sample_size}</b></span>`);
@@ -365,6 +369,13 @@
   document.addEventListener('click', async (event) => {
     if (!event.target.closest('.multi-select')) closeMultiSelects();
     if (!event.target.closest('[data-cpi-filter]')) closeCpiFilter();
+    const studyTarget = event.target.closest('[data-study-url]');
+    if (studyTarget) {
+      const selection = window.getSelection();
+      const selectingProjectId = selection && !selection.isCollapsed && selection.containsNode(studyTarget, true);
+      if (!selectingProjectId) window.location.assign(studyTarget.dataset.studyUrl);
+      return;
+    }
     const copy = event.target.closest('[data-copy]');
     if (copy) { await navigator.clipboard.writeText(copy.dataset.copy); toast('Project ID copied'); }
     const copyLink = event.target.closest('[data-copy-link]');
@@ -373,6 +384,13 @@
     if (action) {
       const survey = state.results.find((item) => item.local_id === action.dataset.action);
       if (survey) openDrawer(survey);
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    const studyTarget = event.target.closest('[data-study-url]');
+    if (studyTarget && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      window.location.assign(studyTarget.dataset.studyUrl);
     }
   });
 
@@ -392,7 +410,7 @@
     state.detailErrors = { targeting: null, quotas: null };
     els.drawer.hidden = els.backdrop.hidden = false;
     document.body.classList.add('drawer-open');
-    els.drawerSurvey.innerHTML = `<strong>${escapeHtml(survey.display_company_name || survey.company_name || 'InnovateMR')}</strong><span>${escapeHtml(survey.country_label || 'Market unavailable')}</span>`;
+    els.drawerSurvey.innerHTML = `<div class="drawer-survey-primary"><strong>${escapeHtml(survey.display_company_name || survey.company_name || 'Survey client')}</strong><span>${escapeHtml(survey.country_label || 'Market unavailable')}</span></div><div class="drawer-project-code"><small>Project ID</small><b>${escapeHtml(survey.local_id)}</b></div>`;
     setActiveTab('targeting');
     requestAnimationFrame(() => { els.drawer.classList.add('open'); els.backdrop.classList.add('open'); });
     loadDrawerDetails(survey);
@@ -441,7 +459,7 @@
 
   function renderQuotas(items) {
     if (!items.length) return '<div class="detail-empty"><div class="detail-empty-visual" aria-hidden="true"><span></span><span></span><span></span><i>✓</i></div><strong>No quota data</strong><p>This survey currently has no quota definitions.</p></div>';
-    return `<div class="quota-help"><strong>How to read this</strong><span>Remaining capacity is shown from the provider response. Target and completed totals appear only when the provider supplies them.</span></div><div class="detail-list">${items.map((quota, index) => `<article class="quota-item"><div class="detail-index">${String(index + 1).padStart(2, '0')}</div><div class="detail-main"><div class="detail-title"><div><strong>${escapeHtml(quota.name || quota.title || `Quota ${quota.quota_id || index + 1}`)}</strong><small class="quota-scope">${escapeHtml(quota.scope_label || 'Quota scope')} · limited by ${escapeHtml(quota.limit_type || 'Completes')}</small></div><span class="quota-status quota-status-${escapeHtml(String(quota.status || 'unknown').toLowerCase())}">${escapeHtml(quota.status || 'Unknown')}</span></div><div class="quota-stats"><span><small>Target</small><b>${quota.target_known ? escapeHtml(quota.sample_size) : '<em>Not provided</em>'}</b></span><span><small>Completed</small><b>${quota.completed_known ? escapeHtml(quota.completes) : '<em>Not provided</em>'}</b></span><span><small>Remaining</small><b>${escapeHtml(quota.remaining)}</b></span></div>${quotaTargeting(quota.targeting_details)}</div></article>`).join('')}</div>`;
+    return `<div class="quota-help"><strong>How to read this</strong><span>Remaining capacity is shown from the provider response. Target and completed totals appear only when the provider supplies them.</span></div><div class="detail-list">${items.map((quota, index) => `<article class="quota-item"><div class="detail-index">${String(index + 1).padStart(2, '0')}</div><div class="detail-main"><div class="detail-title"><div><strong>${escapeHtml(quota.display_name || quota.name || quota.title || 'Survey quota')}</strong><small class="quota-scope">${escapeHtml(quota.scope_label || 'Quota scope')} · limited by ${escapeHtml(quota.limit_type || 'Completes')}</small></div><span class="quota-status quota-status-${escapeHtml(String(quota.status || 'unknown').toLowerCase())}">${escapeHtml(quota.status || 'Unknown')}</span></div><div class="quota-stats"><span><small>Target</small><b>${quota.target_known ? escapeHtml(quota.sample_size) : '<em>Not provided</em>'}</b></span><span><small>Completed</small><b>${quota.completed_known ? escapeHtml(quota.completes) : '<em>Not provided</em>'}</b></span><span><small>Remaining</small><b>${escapeHtml(quota.remaining)}</b></span></div>${quotaTargeting(quota.targeting_details)}</div></article>`).join('')}</div>`;
   }
 
   function quotaTargeting(details) {

@@ -20,7 +20,7 @@ from .models import Survey, SurveyAttempt, TargetingQuestion, TolunaMember, Tolu
 from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaProvider
-from .serializers import SurveyListSerializer
+from .serializers import SurveyListSerializer, SurveyQuotaSerializer
 
 
 class FakeResponse:
@@ -258,6 +258,30 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_quota_serializer_uses_readable_scope_and_targeting_instead_of_id(self):
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        provider.refresh_details(survey)
+
+        data = SurveyQuotaSerializer(survey.quotas.get()).data
+
+        self.assertEqual(data["display_name"], "Targeted respondent quota")
+        self.assertEqual(data["scope_label"], "Targeted respondent quota")
+        self.assertNotIn(str(data["quota_id"]), data["display_name"])
+        self.assertEqual(
+            {row["name"] for row in data["targeting_details"]},
+            {"What is your age?", "What is your gender?"},
+        )
 
     def test_routable_quota_attribute_is_left_for_toluna_prescreener(self):
         reference = copy.deepcopy(REFERENCE)
