@@ -800,6 +800,12 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             normalized_key == "AGE"
             or ("your age" in normalized_text and not is_dob_question)
         )
+        is_postal_question = (
+            normalized_key in {"ZIP", "ZIP_CODE", "ZIPCODES", "POSTAL_CODE"}
+            or "zipcode" in normalized_text
+            or "zip code" in normalized_text
+            or "postal code" in normalized_text
+        )
         options = []
         age_ranges = []
         allowed_values = _rfg_qualifying_option_values(question) if is_rfg else None
@@ -833,6 +839,8 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         elif is_age_question:
             input_kind = "number"
             display_text = "What is your age?"
+        elif is_postal_question:
+            input_kind = "text"
         elif "date" in lowered_type:
             input_kind = "date_mask"
         elif "multi" in lowered_type:
@@ -945,7 +953,25 @@ def _collect_prescreener_answers(request, survey):
                 and int(option["ageStart"]) <= numeric_value <= int(option["ageEnd"])
                 and option.get("OptionId") is not None
             ]
-            upstream_values = matched or [str(numeric_value)]
+            exact_option_ids = [
+                str(option.get("OptionId"))
+                for option in question.options
+                if option.get("OptionId") is not None
+                and str(option.get("OptionText") or "").strip().casefold()
+                == values[0].casefold()
+            ]
+            upstream_values = matched or exact_option_ids or [str(numeric_value)]
+
+        if prepared["input_kind"] not in {"radio", "checkbox", "number"}:
+            exact_option_ids = [
+                str(option.get("OptionId"))
+                for option in question.options
+                if option.get("OptionId") is not None
+                and str(option.get("OptionText") or "").strip().casefold()
+                == values[0].casefold()
+            ]
+            if exact_option_ids:
+                upstream_values = exact_option_ids
 
         answers[str(question.pk)] = {
             "question_id": question.question_id,

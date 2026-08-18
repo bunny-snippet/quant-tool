@@ -213,31 +213,47 @@ def create_attempt(survey: Survey, platform_user, ip_address: str | None, client
 
 
 def build_outbound_url(entry_link: str, rid: str, answers: dict) -> str:
-    """Use the exact allocated entry link, replacing PID and adding trackId/profile answers."""
+    """Build an InnovateMR entry URL from validated profiling answers.
+
+    InnovateMR accepts profiling data as ``QuestionKey=AnswerOptionID`` query
+    parameters. Replace stale profile parameters already present in the
+    allocated link, and never let targeting data override routing identifiers.
+    """
     parts = urlsplit(entry_link)
     query = parse_qsl(parts.query, keep_blank_values=True)
     outbound: list[tuple[str, str]] = []
     has_pid = False
 
+    reserved_keys = {"pid", "trackid", "survnum", "supcode"}
+    profile_pairs: list[tuple[str, str]] = []
+    profile_keys: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
+    for answer in answers.values():
+        question_key = str(answer.get("question_key") or "").strip()
+        if not question_key or question_key.casefold() in reserved_keys:
+            continue
+        for value in answer.get("upstream_values") or []:
+            if value is None or str(value).strip() == "":
+                continue
+            pair = (question_key, str(value).strip())
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            profile_pairs.append(pair)
+            profile_keys.add(question_key.casefold())
+
     for key, value in query:
-        lowered = key.lower()
+        lowered = key.casefold()
         if lowered == "pid":
             outbound.append((key, rid))
             has_pid = True
-        elif lowered != "trackid":
+        elif lowered != "trackid" and lowered not in profile_keys:
             outbound.append((key, value))
 
     if not has_pid:
         outbound.append(("PID", rid))
     outbound.append(("trackId", rid))
-
-    for answer in answers.values():
-        question_key = answer.get("question_key")
-        upstream_values = answer.get("upstream_values") or []
-        if not question_key:
-            continue
-        for value in upstream_values:
-            outbound.append((str(question_key), str(value)))
+    outbound.extend(profile_pairs)
 
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(outbound), parts.fragment))
 

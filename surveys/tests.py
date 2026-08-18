@@ -27,7 +27,7 @@ from .services import (
     replace_survey_details,
     sync_surveys,
 )
-from .survey_flow import create_attempt
+from .survey_flow import build_outbound_url, create_attempt
 
 
 def xlsx_rows(response, sheet_number=1):
@@ -572,6 +572,54 @@ class SurveyFlowTests(TestCase):
         self.assertEqual(attempt.exit_device, "Mobile")
         self.assertEqual(attempt.exit_os, "Android 14")
         self.assertIsNotNone(attempt.loi_seconds)
+
+    def test_innovate_profile_mapping_replaces_stale_values_and_protects_routing_keys(self):
+        outbound = build_outbound_url(
+            "https://edgeapi.innovatemr.net/startSurvey?survNum=test&supCode=1150&PID=old&trackId=old&GENDER=1",
+            "Aa1Bb2Cc3D",
+            {
+                "gender": {"question_key": "GENDER", "upstream_values": ["2"]},
+                "multi": {"question_key": "HOBBIES", "upstream_values": ["4", "4", "7"]},
+                "reserved": {"question_key": "PID", "upstream_values": ["unsafe"]},
+            },
+        )
+
+        params = parse_qs(urlsplit(outbound).query)
+        self.assertEqual(params["PID"], ["Aa1Bb2Cc3D"])
+        self.assertEqual(params["trackId"], ["Aa1Bb2Cc3D"])
+        self.assertEqual(params["GENDER"], ["2"])
+        self.assertEqual(params["HOBBIES"], ["4", "7"])
+
+    def test_innovate_numeric_option_text_is_sent_as_answer_option_id(self):
+        zipcode = TargetingQuestion.objects.create(
+            survey=self.survey,
+            question_id=11,
+            key="ZIPCODES",
+            text="What is your zipcode?",
+            question_type="Numeric Open Ended",
+            category="Demographic",
+            options=[{"OptionId": 77, "OptionText": "90012"}],
+        )
+        start = self.client.get(reverse("survey-start"), {
+            "surveyId": self.survey.source_id,
+            "supplierCode": "1000",
+            "userId": self.platform_user.pk,
+            "code": self.survey.local_id,
+        })
+        rid = parse_qs(urlsplit(start["Location"]).query)["rid"][0]
+        submit = self.client.post(reverse("survey-start"), {
+            "rid": rid,
+            f"question_{self.question.pk}": "1",
+            f"question_{zipcode.pk}": "90012",
+        })
+
+        self.assertEqual(
+            submit.status_code,
+            302,
+            msg=str(submit.context and submit.context.get("errors")),
+        )
+        params = parse_qs(urlsplit(submit["Location"]).query)
+        self.assertEqual(params["ZIPCODES"], ["77"])
 
     def test_status_requires_known_rid(self):
         response = self.client.get(reverse("survey-status"), {"status": "3", "rid": "Aa1Bb2Cc3D"})
