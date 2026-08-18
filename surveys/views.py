@@ -1208,7 +1208,13 @@ def survey_start(request):
             try:
                 if settings.PRESCREENER_VAULT_ENABLED:
                     capture_prescreener_submission(
-                        attempt, answers_with_entry_postal_code(attempt, answers)
+                        attempt,
+                        answers_with_entry_postal_code(attempt, answers),
+                        allow_draft_replace=(
+                            attempt.status == SurveyAttempt.Status.INITIATED
+                            and not attempt.redirected_at
+                            and not attempt.outbound_url
+                        ),
                     )
                 provider = None
                 if provider_code in {"rfg", "toluna"}:

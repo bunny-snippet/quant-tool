@@ -1,9 +1,10 @@
 import copy
 import re
+import time
 from datetime import date, datetime
 
 from django.conf import settings
-from django.db import transaction
+from django.db import OperationalError, close_old_connections, transaction
 from django.utils import timezone
 
 from surveys.survey_flow import ensure_attempt_prescreener_uid
@@ -18,6 +19,9 @@ class PrescreenerVaultError(RuntimeError):
 
 class PrescreenerVaultDisabled(PrescreenerVaultError):
     pass
+
+
+RETRYABLE_MYSQL_ERROR_CODES = {1205, 1213, 2006, 2013}
 
 
 def operational_answer_value(answers):
@@ -208,8 +212,43 @@ def wrong_target_country_answers(attempt, location):
     return answers
 
 
-def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
-    """Persist one immutable, idempotent RID/UID submission in the vault."""
+def _write_answer_rows(submission, snapshots, survey):
+    """Write normalized child rows for one already-created vault submission."""
+    for source_snapshot in snapshots:
+        snapshot = dict(source_snapshot)
+        normalized_values = snapshot.pop("normalized_values")
+        answer = PrescreenerAnswer.objects.using(DATABASE_ALIAS).create(
+            submission=submission,
+            **snapshot,
+        )
+        source_values = snapshot["answer_values"] or snapshot["upstream_values"]
+        labels = snapshot["answer_labels"] or source_values
+        for value_position, value in enumerate(source_values, start=1):
+            label = labels[value_position - 1] if value_position <= len(labels) else value
+            normalized = (
+                normalized_values[value_position - 1]
+                if value_position <= len(normalized_values)
+                else _normalize_profile_value(snapshot["canonical_attribute"], label)
+            )
+            PrescreenerAnswerValue.objects.using(DATABASE_ALIAS).create(
+                answer=answer,
+                position=value_position,
+                value=str(value),
+                label=str(label),
+                normalized_value=normalized,
+                canonical_attribute=snapshot["canonical_attribute"],
+                country_code=survey.country_code.upper(),
+            )
+
+
+def capture_prescreener_submission(attempt, answers, *, submitted_at=None, allow_draft_replace=False):
+    """Persist an idempotent RID/UID submission in the isolated vault.
+
+    A provider failure can leave a captured row while the operational attempt
+    is still pre-redirect. In that state only, the caller may replace the same
+    RID/UID draft with corrected answers. Once an invite/outbound URL exists,
+    callers keep the original immutable behavior.
+    """
     if not settings.PRESCREENER_VAULT_ENABLED:
         raise PrescreenerVaultDisabled("The prescreener vault is not enabled.")
     if not answers:
@@ -222,14 +261,37 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
     survey = attempt.survey
     raw_answers = copy.deepcopy(answers)
 
-    try:
+    def persist_once():
         with transaction.atomic(using=DATABASE_ALIAS):
-            existing = PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(uid=uid).first()
+            existing = PrescreenerSubmission.objects.using(DATABASE_ALIAS).select_for_update().filter(uid=uid).first()
             if existing:
                 if existing.rid != attempt.rid:
                     raise PrescreenerVaultError("Vault UID is already mapped to a different RID.")
                 if existing.raw_answers != raw_answers:
-                    raise PrescreenerVaultError("This RID/UID already has a different immutable submission.")
+                    if not allow_draft_replace:
+                        raise PrescreenerVaultError("This RID/UID already has a different immutable submission.")
+                    existing.question_answers.all().delete()
+                    existing.country = survey.country
+                    existing.country_code = survey.country_code.upper()
+                    existing.language = survey.language
+                    existing.language_code = survey.language_code
+                    existing.respondent_age = age
+                    existing.respondent_age_group = age_group
+                    existing.respondent_gender = gender
+                    existing.respondent_ethnicity = ethnicity
+                    existing.respondent_postal_code = postal_code
+                    existing.profile_dimensions = dimensions
+                    existing.raw_answers = raw_answers
+                    existing.answer_count = len(snapshots)
+                    existing.submitted_at = submitted_at
+                    existing.save(using=DATABASE_ALIAS, update_fields=[
+                        "country", "country_code", "language", "language_code",
+                        "respondent_age", "respondent_age_group", "respondent_gender",
+                        "respondent_ethnicity", "respondent_postal_code", "profile_dimensions",
+                        "raw_answers", "answer_count", "submitted_at",
+                    ])
+                    _write_answer_rows(existing, snapshots, survey)
+                    return existing, False
                 return existing, False
             rid_owner = PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(rid=attempt.rid).first()
             if rid_owner:
@@ -252,31 +314,24 @@ def capture_prescreener_submission(attempt, answers, *, submitted_at=None):
                 answer_count=len(snapshots),
                 submitted_at=submitted_at,
             )
-            for snapshot in snapshots:
-                normalized_values = snapshot.pop("normalized_values")
-                answer = PrescreenerAnswer.objects.using(DATABASE_ALIAS).create(
-                    submission=submission,
-                    **snapshot,
-                )
-                source_values = snapshot["answer_values"] or snapshot["upstream_values"]
-                labels = snapshot["answer_labels"] or source_values
-                for value_position, value in enumerate(source_values, start=1):
-                    label = labels[value_position - 1] if value_position <= len(labels) else value
-                    normalized = (
-                        normalized_values[value_position - 1]
-                        if value_position <= len(normalized_values)
-                        else _normalize_profile_value(snapshot["canonical_attribute"], label)
-                    )
-                    PrescreenerAnswerValue.objects.using(DATABASE_ALIAS).create(
-                        answer=answer,
-                        position=value_position,
-                        value=str(value),
-                        label=str(label),
-                        normalized_value=normalized,
-                        canonical_attribute=snapshot["canonical_attribute"],
-                        country_code=survey.country_code.upper(),
-                    )
+            _write_answer_rows(submission, snapshots, survey)
             return submission, True
+
+    try:
+        # Concurrent pre-screen submissions can briefly hit an InnoDB
+        # deadlock/lock timeout. Each write is idempotent by UID and enclosed
+        # in its own transaction, so a short bounded retry is safe and keeps a
+        # transient database lock away from the respondent UI.
+        for retry_number, delay in enumerate((0, 0.05, 0.15, 0.35)):
+            if delay:
+                time.sleep(delay)
+            try:
+                return persist_once()
+            except OperationalError as exc:
+                error_code = exc.args[0] if exc.args else None
+                if error_code not in RETRYABLE_MYSQL_ERROR_CODES or retry_number == 3:
+                    raise
+                close_old_connections()
     except PrescreenerVaultError:
         raise
     except Exception as exc:

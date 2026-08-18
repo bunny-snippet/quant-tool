@@ -6,12 +6,14 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from vendors.models import Client, ClientIntegration
 from vendors.serializers import ClientIntegrationSerializer
+from prescreener_vault.constants import DATABASE_ALIAS
+from prescreener_vault.models import PrescreenerSubmission
 
 from .models import Survey, SurveyAttempt, TolunaMember, TolunaReferenceQuestion
 from .provider_services import sync_client_integration
@@ -88,6 +90,7 @@ QUOTAS = {
     "TOLUNA_PANEL_EN_US": "panel-guid",
 }, clear=False)
 class TolunaProviderTests(TestCase):
+    databases = {"default", DATABASE_ALIAS}
     def setUp(self):
         client = Client.objects.create(code="toluna", name="Toluna", provider_code="toluna")
         self.integration = ClientIntegration.objects.create(
@@ -282,6 +285,82 @@ class TolunaProviderTests(TestCase):
 
         replay = self.client.post(url, {"rid": attempt.rid})
         self.assertEqual(replay.status_code, 409)
+
+    @override_settings(PRESCREENER_VAULT_ENABLED=True)
+    @patch("surveys.views.get_provider")
+    def test_complete_prescreener_vault_member_confirmation_and_redirect_flow(self, get_provider_mock):
+        bootstrap = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)),
+        )
+        normalized = bootstrap.normalize_inventory_item(bootstrap.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        bootstrap.refresh_details(survey)
+        user = get_user_model().objects.create_user(
+            username="toluna-flow", email="toluna-flow@example.test", password="test-password"
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Flw123AbC9",
+            prescreener_uid="Lm1n-Op2q-Rs3t-Uv4w",
+            survey=survey,
+            platform_user=user,
+            user_id=str(user.pk),
+        )
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        invite = {
+            "SurveyId": 71, "WaveID": 72, "QuotaID": 900,
+            "MemberAmount": 0, "PartnerAmount": 3.25,
+            "URL": "https://router.toluna.test/invite?token=full-flow", "LOI": 7, "IR": 40,
+        }
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(None, 201), FakeResponse(invite)),
+        )
+        get_provider_mock.return_value = provider
+
+        response = self.client.post(reverse("survey-start"), {
+            "rid": attempt.rid,
+            f"question_{questions[1001538].pk}": "27",
+            f"question_{questions[1001007].pk}": "2000247",
+        })
+
+        self.assertRedirects(
+            response,
+            f"{reverse('toluna-member-ready')}?rid={attempt.rid}",
+            fetch_redirect_response=False,
+        )
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.INITIATED)
+        self.assertIsNotNone(attempt.submitted_at)
+        self.assertIsNone(attempt.redirected_at)
+        self.assertTrue(attempt.outbound_url)
+        self.assertTrue(
+            PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(
+                rid=attempt.rid,
+                uid=attempt.prescreener_uid,
+                respondent_age=27,
+                respondent_gender="male",
+            ).exists()
+        )
+
+        ready = self.client.get(reverse("toluna-member-ready"), {"rid": attempt.rid})
+        self.assertContains(ready, attempt.prescreener_uid)
+        self.assertContains(ready, provider.last_member_summary["birth_date"])
+
+        continued = self.client.post(reverse("toluna-member-ready"), {"rid": attempt.rid})
+        self.assertRedirects(
+            continued,
+            attempt.outbound_url,
+            fetch_redirect_response=False,
+        )
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertIsNotNone(attempt.redirected_at)
 
     def test_toluna_validation_error_exposes_only_safe_diagnostic_fields(self):
         provider = TolunaProvider(
