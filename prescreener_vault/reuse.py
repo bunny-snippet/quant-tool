@@ -44,47 +44,68 @@ def _target_from_baseline(integration, baseline):
     ))
 
 
-def _monthly_target(integration, reference=None):
+def _monthly_baseline(integration, reference=None):
+    """Use prior-month volume, or live current-month volume for first-month bootstrap."""
+
     previous_start, current_start, period_start = _calendar_bounds(reference)
-    baseline = SurveyAttempt.objects.filter(
+    previous_attempts = SurveyAttempt.objects.filter(
         survey__integration_id=integration.pk,
         initiated_at__gte=previous_start,
         initiated_at__lt=current_start,
     ).count()
+    if previous_attempts > 0:
+        return period_start, previous_attempts, previous_attempts, "previous_month"
+    current_attempts = SurveyAttempt.objects.filter(
+        survey__integration_id=integration.pk,
+        initiated_at__gte=current_start,
+    ).count()
+    return period_start, previous_attempts, current_attempts, "current_month_bootstrap"
+
+
+def _monthly_target(integration, reference=None):
+    period_start, _, baseline, _ = _monthly_baseline(integration, reference)
     return period_start, baseline, _target_from_baseline(integration, baseline)
 
 
 def profile_reuse_month_status(integration, reference=None):
-    _, _, period_start = _calendar_bounds(reference)
+    period_start, previous_attempts, live_baseline, baseline_source = _monthly_baseline(
+        integration, reference
+    )
     counter = ProfileReuseMonthlyCounter.objects.filter(
         integration_id=integration.pk, period_start=period_start
     ).first()
     if counter:
-        baseline = counter.baseline_attempts
+        baseline = (
+            max(counter.baseline_attempts, live_baseline)
+            if baseline_source == "current_month_bootstrap"
+            else live_baseline
+        )
         target = _target_from_baseline(integration, baseline)
         used = counter.allocated_reuses
     else:
-        _, baseline, target = _monthly_target(integration, reference)
+        baseline = live_baseline
+        target = _target_from_baseline(integration, baseline)
         used = 0
     return {
-        "period": period_start.isoformat(), "previous_month_attempts": baseline,
+        "period": period_start.isoformat(), "previous_month_attempts": previous_attempts,
+        "baseline_attempts": baseline, "baseline_source": baseline_source,
         "target_reuses": target, "used_reuses": used,
         "remaining_reuses": max(0, target - used),
     }
 
 
 def _claim_month_slot(integration):
-    _, _, period_start = _calendar_bounds()
+    period_start, _, live_baseline, baseline_source = _monthly_baseline(integration)
     with transaction.atomic():
         counter, created = ProfileReuseMonthlyCounter.objects.select_for_update().get_or_create(
             integration_id=integration.pk, period_start=period_start,
             defaults={"baseline_attempts": 0, "target_reuses": 0},
         )
-        if created:
-            _, baseline, _ = _monthly_target(integration)
-            counter.baseline_attempts = baseline
-        else:
-            baseline = counter.baseline_attempts
+        if created or baseline_source == "previous_month":
+            counter.baseline_attempts = live_baseline
+        elif live_baseline > counter.baseline_attempts:
+            counter.baseline_attempts = live_baseline
+        baseline = counter.baseline_attempts
         target = _target_from_baseline(integration, baseline)
         counter.target_reuses = target
         if target <= 0:

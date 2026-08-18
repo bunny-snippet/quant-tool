@@ -118,3 +118,42 @@ class ReusableProfileQueueTests(TestCase):
         exhausted = create_attempt(self.survey, self.user, "8.8.8.8")
         self.assertIsNone(maybe_assign_reusable_profile(exhausted, self.answers()))
         self.assertEqual(profile_reuse_month_status(self.integration)["target_reuses"], 1)
+
+    def test_first_month_uses_current_attempts_as_rolling_bootstrap(self):
+        client = Client.objects.create(code="new-client", name="New client")
+        integration = ClientIntegration.objects.create(
+            client=client, name="New production", provider_code="toluna",
+            base_url="https://new-provider.example/api", profile_reuse_enabled=True,
+            profile_reuse_eligible_after_days=1, profile_reuse_monthly_percentage=100,
+            profile_reuse_country_codes=["US"], profile_reuse_age_groups=["18-24"],
+            profile_reuse_genders=["male"],
+        )
+        survey = Survey.objects.create(
+            integration=integration, source_id=99102, name="First month survey",
+            status=Survey.Status.LIVE, company_name="New client", country="United States",
+            country_code="US", language="English", language_code="EN",
+            entry_link="https://new-provider.example/start",
+        )
+        age = TargetingQuestion.objects.create(
+            survey=survey, question_id=1, key="AGE", text="What is your age?",
+            question_type="Numeric", category="Demographic",
+        )
+        gender = TargetingQuestion.objects.create(
+            survey=survey, question_id=2, key="GENDER", text="What is your gender?",
+            question_type="Single Punch", category="Demographic",
+            options=[{"OptionId": 1, "OptionText": "Male"}],
+        )
+        self.candidate("Zz11-Yy22-Xx33-Ww44", "OldRid0098", submitted_days=90)
+        attempt = create_attempt(survey, self.user, "8.8.8.8")
+        answers = {
+            str(age.pk): {"values": ["23"], "upstream_values": ["23"]},
+            str(gender.pk): {"values": ["1"], "upstream_values": ["1"]},
+        }
+
+        self.assertIsNotNone(maybe_assign_reusable_profile(attempt, answers))
+        status = profile_reuse_month_status(integration)
+        self.assertEqual(status["previous_month_attempts"], 0)
+        self.assertEqual(status["baseline_source"], "current_month_bootstrap")
+        self.assertEqual(status["baseline_attempts"], 1)
+        self.assertEqual(status["target_reuses"], 1)
+        self.assertEqual(status["used_reuses"], 1)
