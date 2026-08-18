@@ -21,6 +21,7 @@ from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaProvider
 from .serializers import SurveyListSerializer, SurveyQuotaSerializer
+from .views import _prescreener_questions
 
 
 class FakeResponse:
@@ -121,6 +122,36 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(TolunaReferenceQuestion.objects.filter(integration=self.integration).count(), 2)
         self.assertNotIn("panel-guid", str(rows))
         self.assertEqual(session.calls[2][2]["headers"]["API_AUTH_KEY"], "api-key")
+
+    def test_generic_typed_question_with_options_is_selectable(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="dummy-options",
+            company_name="Toluna",
+            name="Option rendering test",
+            status=Survey.Status.LIVE,
+        )
+        TargetingQuestion.objects.create(
+            survey=survey,
+            question_id=919191,
+            key="REGION",
+            text="What is your region?",
+            question_type="Dummy",
+            category="Provider qualification",
+            options=[
+                {"OptionId": "north", "OptionText": "North"},
+                {"OptionId": "south", "OptionText": "South"},
+            ],
+        )
+
+        question = _prescreener_questions(survey)[0]
+
+        self.assertEqual(question["input_kind"], "radio")
+        self.assertEqual(
+            [(item["value"], item["label"]) for item in question["options"]],
+            [("north", "North"), ("south", "South")],
+        )
 
     @patch("surveys.provider_services.get_provider")
     def test_inventory_sync_persists_stable_fallback_timestamps(self, get_provider_mock):

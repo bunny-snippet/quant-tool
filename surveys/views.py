@@ -839,6 +839,11 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             input_kind = "checkbox"
         elif "single" in lowered_type and options:
             input_kind = "radio"
+        elif options:
+            # A few providers return a closed choice list with a generic or
+            # ``Dummy`` type. Options are authoritative, so render a safe
+            # selectable control instead of asking for arbitrary free text.
+            input_kind = "radio"
         elif question.key.upper() == "AGE" or "numeric" in lowered_type:
             input_kind = "number"
         else:
