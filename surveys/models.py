@@ -433,7 +433,7 @@ class ProfileReuseMonthlyCounter(models.Model):
 
 
 class ProfileReuseEvent(models.Model):
-    """Audit one journey that used an older vault UID instead of its new UID."""
+    """Audit one journey that reused an existing vault RID/UID profile pair."""
 
     integration = models.ForeignKey(
         "vendors.ClientIntegration",
@@ -446,6 +446,7 @@ class ProfileReuseEvent(models.Model):
         related_name="profile_reuse_event",
     )
     registered_uid = models.CharField(max_length=19, db_index=True)
+    reused_rid = models.CharField(max_length=10, db_index=True)
     reused_uid = models.CharField(max_length=19, db_index=True)
     source_registered_at = models.DateTimeField()
     source_usage_number = models.PositiveIntegerField()

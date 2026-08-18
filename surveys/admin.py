@@ -67,10 +67,10 @@ class ProfileReuseMonthlyCounterAdmin(admin.ModelAdmin):
 @admin.register(ProfileReuseEvent)
 class ProfileReuseEventAdmin(admin.ModelAdmin):
     list_display = [
-        "attempt", "integration", "registered_uid", "reused_uid",
+        "attempt", "integration", "registered_uid", "reused_rid", "reused_uid",
         "country_code", "age_group", "gender", "source_usage_number", "created_at",
     ]
-    search_fields = ["attempt__rid", "registered_uid", "reused_uid"]
+    search_fields = ["attempt__rid", "registered_uid", "reused_rid", "reused_uid"]
     list_filter = ["integration", "country_code", "age_group", "gender", "created_at"]
     readonly_fields = [field.name for field in ProfileReuseEvent._meta.fields]
 

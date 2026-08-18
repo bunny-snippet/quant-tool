@@ -1223,7 +1223,29 @@ def survey_start(request):
         answers, errors = _collect_prescreener_answers(request, attempt.survey)
         if not errors:
             try:
-                if settings.PRESCREENER_VAULT_ENABLED:
+                provider = None
+                if provider_code in {"rfg", "toluna"}:
+                    provider = get_provider(attempt.survey.integration)
+                if provider_code == "rfg":
+                    eligible, reason = provider.validate_prescreener(attempt.survey, answers)
+                    if not eligible:
+                        if settings.PRESCREENER_VAULT_ENABLED:
+                            capture_prescreener_submission(
+                                attempt,
+                                answers_with_entry_postal_code(attempt, answers),
+                                allow_draft_replace=True,
+                            )
+                        _finish_local_rfg_attempt(
+                            attempt, answers, request, result="7", reason=reason
+                        )
+                        return HttpResponseRedirect(_rfg_result_url(attempt.rid, "7"))
+
+                # Reuse is decided before vault capture. When an older matching
+                # profile is selected, its original RID + UID row remains the
+                # only Panelist record and only its Visits counter increments.
+                # The attempt RID remains unique for callback/status tracking.
+                reuse_event = maybe_assign_reusable_profile(attempt, answers)
+                if settings.PRESCREENER_VAULT_ENABLED and reuse_event is None:
                     capture_prescreener_submission(
                         attempt,
                         answers_with_entry_postal_code(attempt, answers),
@@ -1233,16 +1255,8 @@ def survey_start(request):
                             and not attempt.outbound_url
                         ),
                     )
-                provider = None
-                if provider_code in {"rfg", "toluna"}:
-                    provider = get_provider(attempt.survey.integration)
+
                 if provider_code == "rfg":
-                    eligible, reason = provider.validate_prescreener(attempt.survey, answers)
-                    if not eligible:
-                        _finish_local_rfg_attempt(
-                            attempt, answers, request, result="7", reason=reason
-                        )
-                        return HttpResponseRedirect(_rfg_result_url(attempt.rid, "7"))
                     if provider.duplicate_check(
                         attempt.survey,
                         attempt,
@@ -1258,10 +1272,6 @@ def survey_start(request):
                         )
                         return HttpResponseRedirect(_rfg_result_url(attempt.rid, "8"))
                 if not errors:
-                    # The attempt always retains its newly registered UID. A
-                    # client policy may separately assign an older matching UID
-                    # to the provider-facing identity.
-                    maybe_assign_reusable_profile(attempt, answers)
                     with transaction.atomic():
                         locked = SurveyAttempt.objects.select_for_update().select_related(
                             "survey", "survey__integration"

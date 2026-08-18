@@ -151,6 +151,12 @@ def _undo_vault_reservation(uid):
 
 
 def maybe_assign_reusable_profile(attempt, answers):
+    """Reuse one existing vault RID/UID pair and increment only its Visits.
+
+    The journey retains its own unique SurveyAttempt RID for unambiguous
+    callbacks. The selected vault row is not duplicated or rewritten.
+    """
+
     integration = getattr(attempt.survey, "integration", None)
     if not settings.PRESCREENER_VAULT_ENABLED or integration is None or not integration.profile_reuse_enabled:
         return None
@@ -189,7 +195,8 @@ def maybe_assign_reusable_profile(attempt, answers):
                 raise RuntimeError("This attempt already has a provider profile UID.")
             event = ProfileReuseEvent.objects.create(
                 integration_id=integration.pk, attempt_id=attempt.pk,
-                registered_uid=attempt.prescreener_uid, reused_uid=candidate.uid,
+                registered_uid=attempt.prescreener_uid,
+                reused_rid=candidate.rid, reused_uid=candidate.uid,
                 source_registered_at=candidate.submitted_at,
                 source_usage_number=candidate.usage_count,
                 country_code=signature["country_code"], age_group=signature["age_group"],

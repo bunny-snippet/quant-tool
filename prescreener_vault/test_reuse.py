@@ -73,11 +73,33 @@ class ReusableProfileQueueTests(TestCase):
             attempt.refresh_from_db()
             selected.append(attempt.provider_profile_uid)
             self.assertNotEqual(attempt.prescreener_uid, attempt.provider_profile_uid)
+            self.assertEqual(event.reused_rid, first.rid if len(selected) != 2 else second.rid)
         self.assertEqual(selected, [first.uid, second.uid, first.uid])
         first.refresh_from_db(using=DATABASE_ALIAS)
         second.refresh_from_db(using=DATABASE_ALIAS)
         self.assertEqual((first.usage_count, second.usage_count), (3, 2))
         self.assertEqual(ProfileReuseEvent.objects.count(), 3)
+
+    def test_reuse_keeps_original_vault_pair_and_only_increments_visits(self):
+        candidate = self.candidate(
+            "Qq11-Rr22-Ss33-Tt44", "OldRid0099", submitted_days=90
+        )
+        attempt = create_attempt(self.survey, self.user, "8.8.8.8")
+        original_count = PrescreenerSubmission.objects.using(DATABASE_ALIAS).count()
+
+        event = maybe_assign_reusable_profile(attempt, self.answers())
+        self.assertIsNotNone(event)
+        self.assertEqual(
+            PrescreenerSubmission.objects.using(DATABASE_ALIAS).count(), original_count
+        )
+        candidate.refresh_from_db(using=DATABASE_ALIAS)
+        self.assertEqual((event.reused_rid, event.reused_uid), (candidate.rid, candidate.uid))
+        self.assertEqual(candidate.usage_count, 2)
+
+        retry_event = maybe_assign_reusable_profile(attempt, self.answers())
+        candidate.refresh_from_db(using=DATABASE_ALIAS)
+        self.assertEqual(retry_event.pk, event.pk)
+        self.assertEqual(candidate.usage_count, 2)
 
     def test_days_demographics_and_monthly_budget_are_enforced(self):
         self.candidate("Ii99-Jj00-Kk11-Ll22", "OldRid0003", submitted_days=5)
