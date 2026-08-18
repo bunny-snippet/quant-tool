@@ -66,15 +66,19 @@ def effective_permission_codes(user) -> set[str]:
     if profile and profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
         codes.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
         codes = {code for code in codes if not code.startswith("organization.")}
-    if not is_super_admin_account(user):
-        codes = {code for code in codes if not code.startswith("dashboard.")}
     return codes
 
 
 def has_function_access(user, code: str) -> bool:
-    if code == "dashboard.view":
-        return is_super_admin_account(user)
-    return bool(user and user.is_authenticated and user.is_active and (user.is_superuser or code in effective_permission_codes(user)))
+    return bool(
+        user
+        and user.is_authenticated
+        and user.is_active
+        and (
+            user.is_superuser
+            or code in effective_permission_codes(user)
+        )
+    )
 
 
 def function_permission_required(code: str):
