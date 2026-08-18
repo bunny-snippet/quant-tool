@@ -215,8 +215,9 @@ def create_attempt(survey: Survey, platform_user, ip_address: str | None, client
 def build_outbound_url(entry_link: str, rid: str, answers: dict) -> str:
     """Build an InnovateMR entry URL from validated profiling answers.
 
-    InnovateMR accepts profiling data as ``QuestionKey=AnswerOptionID`` query
-    parameters. Replace stale profile parameters already present in the
+    InnovateMR accepts profiling data as question-key query parameters. Closed
+    choices carry their AnswerOptionID; open-ended questions carry the actual
+    respondent value. Replace stale profile parameters already present in the
     allocated link, and never let targeting data override routing identifiers.
     """
     parts = urlsplit(entry_link)

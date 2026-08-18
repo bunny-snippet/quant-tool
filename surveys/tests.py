@@ -590,7 +590,16 @@ class SurveyFlowTests(TestCase):
         self.assertEqual(params["GENDER"], ["2"])
         self.assertEqual(params["HOBBIES"], ["4", "7"])
 
-    def test_innovate_numeric_option_text_is_sent_as_answer_option_id(self):
+    def test_innovate_open_ended_age_and_zip_are_sent_as_actual_values(self):
+        age = TargetingQuestion.objects.create(
+            survey=self.survey,
+            question_id=1,
+            key="AGE",
+            text="What is your age?",
+            question_type="Numeric Open Ended",
+            category="Demographic",
+            options=[{"OptionId": 2, "ageStart": 18, "ageEnd": 34}],
+        )
         zipcode = TargetingQuestion.objects.create(
             survey=self.survey,
             question_id=11,
@@ -610,6 +619,7 @@ class SurveyFlowTests(TestCase):
         submit = self.client.post(reverse("survey-start"), {
             "rid": rid,
             f"question_{self.question.pk}": "1",
+            f"question_{age.pk}": "24",
             f"question_{zipcode.pk}": "90012",
         })
 
@@ -619,7 +629,8 @@ class SurveyFlowTests(TestCase):
             msg=str(submit.context and submit.context.get("errors")),
         )
         params = parse_qs(urlsplit(submit["Location"]).query)
-        self.assertEqual(params["ZIPCODES"], ["77"])
+        self.assertEqual(params["AGE"], ["24"])
+        self.assertEqual(params["ZIPCODES"], ["90012"])
 
     def test_status_requires_known_rid(self):
         response = self.client.get(reverse("survey-status"), {"status": "3", "rid": "Aa1Bb2Cc3D"})
