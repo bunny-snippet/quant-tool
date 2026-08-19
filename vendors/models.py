@@ -326,6 +326,10 @@ class OrganizationClientAccess(models.Model):
         validators=[MinValueValidator(Decimal("0.00"))],
         help_text="Optional source-CPI ceiling inherited by child units.",
     )
+    inherit_cpi_range = models.BooleanField(
+        default=True,
+        help_text="When enabled, a child rule keeps the closest parent rule's CPI range.",
+    )
     is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

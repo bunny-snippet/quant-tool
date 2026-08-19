@@ -753,10 +753,21 @@ class OrganizationHierarchyTests(TestCase):
             {row["source_id"] for row in api.get(reverse("survey-list")).data["results"]},
             {self.survey_a.source_id},
         )
-        OrganizationClientAccess.objects.create(
-            organization_unit=sub_branch, client=self.client_a,
-            min_cpi=Decimal("4.00"), max_cpi=Decimal("8.00"), created_by=self.owner,
+        sub_policy = OrganizationClientAccess.objects.create(
+            organization_unit=sub_branch, client=self.client_a, created_by=self.owner,
         )
+        OrganizationClientAccess.objects.create(
+            organization_unit=shift, client=self.client_a, created_by=self.owner,
+        )
+        employee = get_user_model().objects.get(pk=employee.pk); api.force_authenticate(employee)
+        self.assertEqual(
+            {row["source_id"] for row in api.get(reverse("survey-list")).data["results"]},
+            {self.survey_a.source_id},
+        )
+        sub_policy.min_cpi = Decimal("4.00")
+        sub_policy.max_cpi = Decimal("8.00")
+        sub_policy.inherit_cpi_range = False
+        sub_policy.save(update_fields=["min_cpi", "max_cpi", "inherit_cpi_range", "updated_at"])
         employee = get_user_model().objects.get(pk=employee.pk); api.force_authenticate(employee)
         self.assertEqual(api.get(reverse("survey-list")).data["count"], 0)
         with self.assertRaisesMessage(AllocationUnavailable, "outside"):

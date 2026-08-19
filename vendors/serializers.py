@@ -552,7 +552,8 @@ class OrganizationClientAccessSerializer(serializers.ModelSerializer):
         model = OrganizationClientAccess
         fields = [
             "id", "organization_unit", "workspace_owner", "workspace_owner_name", "unit_name", "unit_type",
-            "unit_path", "client", "client_name", "min_cpi", "max_cpi", "is_active", "created_by",
+            "unit_path", "client", "client_name", "min_cpi", "max_cpi", "inherit_cpi_range",
+            "is_active", "created_by",
             "created_at", "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]
@@ -576,6 +577,9 @@ class OrganizationClientAccessSerializer(serializers.ModelSerializer):
             client=client,
             min_cpi=attrs.get("min_cpi", getattr(self.instance, "min_cpi", None)),
             max_cpi=attrs.get("max_cpi", getattr(self.instance, "max_cpi", None)),
+            inherit_cpi_range=attrs.get(
+                "inherit_cpi_range", getattr(self.instance, "inherit_cpi_range", True)
+            ),
             is_active=attrs.get("is_active", getattr(self.instance, "is_active", True)),
         )
         if self.instance:

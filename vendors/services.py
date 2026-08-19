@@ -207,16 +207,22 @@ def organization_client_policies_for_user(user) -> dict[int, OrganizationClientP
         current_unit = current_unit.parent
     rules = OrganizationClientAccess.objects.filter(
         organization_unit_id__in=ancestry, client__is_active=True,
-    ).values("organization_unit_id", "client_id", "is_active", "min_cpi", "max_cpi")
+    ).values(
+        "organization_unit_id", "client_id", "is_active", "min_cpi", "max_cpi", "inherit_cpi_range",
+    )
     rules_by_unit = {}
     for rule in rules:
         rules_by_unit.setdefault(rule["organization_unit_id"], []).append(rule)
     policies = {}
     for unit_id in reversed(ancestry):
         for rule in rules_by_unit.get(unit_id, []):
+            parent_policy = policies.get(rule["client_id"])
+            inherit_cpi_range = bool(rule["inherit_cpi_range"] and parent_policy is not None)
             policies[rule["client_id"]] = OrganizationClientPolicy(
                 client_id=rule["client_id"], is_active=rule["is_active"],
-                min_cpi=rule["min_cpi"], max_cpi=rule["max_cpi"], source_unit_id=unit_id,
+                min_cpi=parent_policy.min_cpi if inherit_cpi_range else rule["min_cpi"],
+                max_cpi=parent_policy.max_cpi if inherit_cpi_range else rule["max_cpi"],
+                source_unit_id=unit_id,
             )
     user._organization_client_policies_cache = policies
     return policies
