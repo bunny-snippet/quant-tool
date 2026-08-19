@@ -213,6 +213,19 @@ class FunctionAccessTests(TestCase):
         self.assertContains(response, "<th>Market</th>", html=True)
         self.assertNotContains(response, 'id="syncButton"')
 
+    def test_project_client_name_permission_controls_page_payload(self):
+        permission = AccessFunction.objects.get(code="projects.column.client_name")
+        response = self.client.get(reverse("projects"))
+        self.assertContains(response, '<script id="projectClientNameAccess" type="application/json">true</script>', html=True)
+
+        UserFunctionOverride.objects.create(
+            user=self.user,
+            function=permission,
+            effect=UserFunctionOverride.Effect.DENY,
+        )
+        response = self.client.get(reverse("projects"))
+        self.assertContains(response, '<script id="projectClientNameAccess" type="application/json">false</script>', html=True)
+
     def test_project_export_and_cpi_filter_support_role_and_user_overrides(self):
         response = self.client.get(reverse("projects"))
         self.assertContains(response, 'id="exportProjects"')

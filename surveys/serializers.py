@@ -259,6 +259,15 @@ class SurveyListSerializer(serializers.ModelSerializer):
             "progress_percent",
         ]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and not has_function_access(request.user, "projects.column.client_name"):
+            data["client_name"] = ""
+            data["display_company_name"] = ""
+            data["company_name"] = ""
+        return data
+
     def get_country_label(self, obj) -> str:
         return " ".join(part for part in [obj.country_code, obj.language_code] if part) or obj.country
 

@@ -356,6 +356,7 @@ def projects_page(request):
         "company_filter_param": "client_name" if is_client_scoped_panel else "company",
         "company_filter_default": "All clients",
         "project_columns": project_columns, "project_column_count": max(1, len(project_columns)),
+        "can_view_project_client_name": "projects.column.client_name" in codes,
         "project_filters": project_filters,
         "can_sync": "sync.run" in codes,
         "can_export_projects": "projects.export" in codes,
@@ -2256,9 +2257,17 @@ def _excel_datetime(value):
 
 
 def _survey_excel_rows(queryset, request, columns):
+    can_view_client_name = has_function_access(request.user, "projects.column.client_name")
+    survey_headers = ["Survey ID", "Survey name"]
+    survey_widths = [16, 32]
+    if can_view_client_name:
+        survey_headers.append("Client")
+        survey_widths.append(21)
+    survey_headers.append("Buyer ID")
+    survey_widths.append(15)
     headers_by_column = {
         "project_id": ["Project ID"],
-        "survey": ["Survey ID", "Survey name", "Client", "Buyer ID"],
+        "survey": survey_headers,
         "market": ["Country code", "Country", "Language code", "Language"],
         "completes": ["Sample size", "Completes", "Remaining", "Progress (%)"],
         "cpi": ["CPI"],
@@ -2267,7 +2276,7 @@ def _survey_excel_rows(queryset, request, columns):
         "modified": ["Status", "Source created at", "Source modified at", "Record created at", "Record updated at"],
     }
     widths_by_column = {
-        "project_id": [19], "survey": [16, 32, 21, 15], "market": [13, 20, 14, 18],
+        "project_id": [19], "survey": survey_widths, "market": [13, 20, 14, 18],
         "completes": [13, 12, 12, 14], "cpi": [11], "loi_ir": [15, 18, 14],
         "entry_link": [48], "modified": [14, 22, 22, 22, 22],
     }
@@ -2281,11 +2290,11 @@ def _survey_excel_rows(queryset, request, columns):
             data = SurveyListSerializer(survey, context=serializer_context).data
             values_by_column = {
                 "project_id": [data.get("local_id")],
-                "survey": [
-                    data.get("source_id"), data.get("name"),
-                    data.get("client_name") or data.get("display_company_name") or data.get("company_name"),
-                    data.get("buyer_id"),
-                ],
+                "survey": (
+                    [data.get("source_id"), data.get("name")]
+                    + ([data.get("client_name") or data.get("display_company_name") or data.get("company_name")] if can_view_client_name else [])
+                    + [data.get("buyer_id")]
+                ),
                 "market": [data.get("country_code"), data.get("country"), data.get("language_code"), data.get("language")],
                 "completes": [data.get("sample_size"), data.get("completes"), data.get("remaining"), data.get("progress_percent")],
                 "cpi": [data.get("cpi")],

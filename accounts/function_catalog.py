@@ -51,6 +51,7 @@ FUNCTION_CATALOG = (
     ("projects.control.page_size", "Change rows per page", "Projects - Page controls", "Change the number of project rows displayed per page.", ALL_ROLES),
     ("projects.control.pagination", "Use pagination", "Projects - Page controls", "Move between pages of project rows.", ALL_ROLES),
     ("projects.column.project_id", "Show Project ID column", "Projects - Table columns", "Display the internal project identifier.", ALL_ROLES),
+    ("projects.column.client_name", "Show Client name in Project table", "Projects - Table columns", "Display the client name below Project ID in the desktop table, mobile cards, survey-details drawer and Projects export.", ALL_ROLES + ("external-vendor",)),
     ("projects.column.survey", "Show Survey column", "Projects - Table columns", "Display survey ID, name and client.", ALL_ROLES),
     ("projects.column.market", "Show Market column", "Projects - Table columns", "Display country and language.", ALL_ROLES),
     ("projects.column.completes", "Show Completes column", "Projects - Table columns", "Display completion progress and sample size.", ALL_ROLES),

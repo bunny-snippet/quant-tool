@@ -5,6 +5,7 @@
   if (!$('surveyRows')) return;
   const projectColumns = new Set(JSON.parse($('projectColumnAccess')?.textContent || '[]'));
   const canOpenProjectStudies = JSON.parse($('projectStudyLinkAccess')?.textContent || 'false');
+  const canViewProjectClientName = JSON.parse($('projectClientNameAccess')?.textContent || 'false');
   const visibleColumnCount = Math.max(1, projectColumns.size);
   document.querySelector('.survey-table').style.minWidth = `${Math.max(620, visibleColumnCount * 112)}px`;
 
@@ -306,7 +307,7 @@
     const percent = Math.min(100, Number(survey.progress_percent || 0));
     const cells = [];
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${projectIdControl(survey)}<small>${escapeHtml(clientName)}</small></div></td>`);
+    if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${projectIdControl(survey)}${canViewProjectClientName ? `<small>${escapeHtml(clientName)}</small>` : ''}</div></td>`);
     if (projectColumns.has('survey')) cells.push(`<td><div class="survey-name"><strong>${escapeHtml(survey.source_id ?? '—')}</strong><span>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</span></div></td>`);
     if (projectColumns.has('market')) cells.push(`<td><span class="market-pill">${escapeHtml(survey.country_code || '—')} <i>${escapeHtml(survey.language_code || '')}</i></span><small class="country-name">${escapeHtml(survey.country || '')}</small></td>`);
     if (projectColumns.has('completes')) cells.push(`<td><div class="complete-value"><strong>${survey.completes.toLocaleString()} / ${survey.sample_size.toLocaleString()}</strong><span><i style="width:${percent}%"></i></span></div></td>`);
@@ -321,7 +322,7 @@
   function cardTemplate(survey) {
     if (!projectColumns.size) return '<article class="survey-card"><div class="column-denied">No project columns are assigned to your account.</div></article>';
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
-    const top = `${projectColumns.has('project_id') ? `${projectIdControl(survey)}<small class="project-card-client">${escapeHtml(clientName)}</small>` : ''}${projectColumns.has('modified') ? `<span class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</span>` : ''}`;
+    const top = `${projectColumns.has('project_id') ? `${projectIdControl(survey)}${canViewProjectClientName ? `<small class="project-card-client">${escapeHtml(clientName)}</small>` : ''}` : ''}${projectColumns.has('modified') ? `<span class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</span>` : ''}`;
     const metrics = [];
     if (projectColumns.has('market')) metrics.push(`<span><small>Market</small><b>${escapeHtml(survey.country_code || '—')} ${escapeHtml(survey.language_code || '')}</b></span>`);
     if (projectColumns.has('completes')) metrics.push(`<span><small>Completes</small><b>${survey.completes} / ${survey.sample_size}</b></span>`);
@@ -410,7 +411,8 @@
     state.detailErrors = { targeting: null, quotas: null };
     els.drawer.hidden = els.backdrop.hidden = false;
     document.body.classList.add('drawer-open');
-    els.drawerSurvey.innerHTML = `<div class="drawer-survey-primary"><strong>${escapeHtml(survey.display_company_name || survey.company_name || 'Survey client')}</strong><span>${escapeHtml(survey.country_label || 'Market unavailable')}</span></div><div class="drawer-project-code"><small>Project ID</small><b>${escapeHtml(survey.local_id)}</b></div>`;
+    const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
+    els.drawerSurvey.innerHTML = `<div class="drawer-survey-primary">${canViewProjectClientName ? `<strong>${escapeHtml(clientName)}</strong>` : ''}<span>${escapeHtml(survey.country_label || 'Market unavailable')}</span></div><div class="drawer-project-code"><small>Project ID</small><b>${escapeHtml(survey.local_id)}</b></div>`;
     setActiveTab('targeting');
     requestAnimationFrame(() => { els.drawer.classList.add('open'); els.backdrop.classList.add('open'); });
     loadDrawerDetails(survey);

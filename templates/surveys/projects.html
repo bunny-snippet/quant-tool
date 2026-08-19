@@ -5,6 +5,7 @@
 {% block content %}
 {{ project_columns|json_script:"projectColumnAccess" }}
 {{ can_open_project_studies|json_script:"projectStudyLinkAccess" }}
+{{ can_view_project_client_name|json_script:"projectClientNameAccess" }}
 <section class="page-intro">
   <div><p class="eyebrow">Survey operations</p><h1>All surveys</h1></div>
   <div class="page-intro-actions">
@@ -166,4 +167,4 @@
   <div class="drawer-content" id="drawerContent"></div>
 </aside>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=23" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=24" defer></script>{% endblock %}

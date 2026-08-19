@@ -452,6 +452,18 @@ class SurveyAPITests(TestCase):
         denied_rows = xlsx_rows(denied_response)
         self.assertNotIn("CPI", denied_rows[0])
 
+        UserFunctionOverride.objects.create(
+            user=self.user,
+            function=AccessFunction.objects.get(code="projects.column.client_name"),
+            effect=UserFunctionOverride.Effect.DENY,
+        )
+        client_denied_rows = xlsx_rows(self.api.get(reverse("survey-export")))
+        self.assertNotIn("Client", client_denied_rows[0])
+        client_denied_list = self.api.get(reverse("survey-list"))
+        self.assertEqual(client_denied_list.data["results"][0]["client_name"], "")
+        self.assertEqual(client_denied_list.data["results"][0]["display_company_name"], "")
+        self.assertEqual(client_denied_list.data["results"][0]["company_name"], "")
+
     def test_detail_actions_return_cached_data(self):
         quota = self.api.get(reverse("survey-quotas", kwargs={"local_id": self.survey.local_id}))
         targeting = self.api.get(reverse("survey-targeting", kwargs={"local_id": self.survey.local_id}))
