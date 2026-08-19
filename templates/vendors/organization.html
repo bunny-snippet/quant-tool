@@ -2,7 +2,7 @@
 {% load static %}
 {% block title %}Organization · Survey Workspace{% endblock %}
 {% block header_title %}Organization{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/organization.css' %}?v=3">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/organization.css' %}?v=4">{% endblock %}
 {% block content %}
 <div class="csrf-source" hidden>{% csrf_token %}</div>
 {{ organization_unit_columns|json_script:"organizationUnitColumnAccess" }}
@@ -45,7 +45,7 @@
   </section>{% endif %}
 
   {% if can_view_client_access %}<section class="organization-panel {% if first_organization_tab == 'client-access' %}active{% endif %}" data-organization-panel="client-access" {% if first_organization_tab != 'client-access' %}hidden{% endif %}>
-    <header class="organization-panel-head"><div><h2>Client visibility</h2><p>The nearest configured level wins: Shift grants override Sub-branch and Branch grants. A blank level inherits from its closest configured parent.</p></div>{% if can_manage_unit_clients %}<button class="primary-button compact" type="button" data-create-client-access>Assign client <span>+</span></button>{% endif %}</header>
+    <header class="organization-panel-head"><div><h2>Client access hierarchy</h2><p>Branch policies flow into every child. Sub-branches and Shifts can independently block a client or override its CPI range.</p></div>{% if can_manage_unit_clients %}<button class="primary-button compact" type="button" data-create-client-access>Assign client <span>+</span></button>{% endif %}</header>
     <div class="access-grid" id="organizationClientRows"><div class="organization-loading"><i></i>Loading client grants…</div></div>
   </section>{% endif %}
 
@@ -78,7 +78,9 @@
     <div class="organization-modal-body"><div class="organization-form-grid">
       <label class="wide"><span>Organization unit</span><select name="organization_unit" required></select></label>
       <label class="wide"><span>Client</span><select name="client" required></select><small>Internal suppliers can only route clients already allocated to their supplier account.</small></label>
-    </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Active visibility grant</span><small>Child units inherit every active ancestor grant.</small></label><div class="organization-error" data-client-access-error hidden></div></div>
+      <label><span>Minimum source CPI ($)</span><input name="min_cpi" type="number" min="0" step="0.01" placeholder="No minimum"></label>
+      <label><span>Maximum source CPI ($)</span><input name="max_cpi" type="number" min="0" step="0.01" placeholder="No maximum"></label>
+    </div><label class="organization-toggle"><input name="is_active" type="checkbox" checked><span>Allow client at this level</span><small>Turn this off to block an inherited client only for this unit and its children.</small></label><div class="organization-error" data-client-access-error hidden></div></div>
     <footer>{% if can_remove_unit_clients %}<button class="organization-danger" type="button" data-remove-current-client-access hidden>Remove access</button>{% endif %}<span class="organization-footer-spacer"></span><button class="organization-secondary" type="button" data-close-organization-modal>Cancel</button><button class="primary-button" type="submit"><span data-client-access-submit>Assign client</span></button></footer>
   </form>
 </section>
@@ -98,4 +100,4 @@
 
 <div class="organization-toast" data-organization-toast aria-live="polite"></div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=9" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/organization.js' %}?v=10" defer></script>{% endblock %}

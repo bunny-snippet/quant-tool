@@ -126,7 +126,10 @@ class Survey(models.Model):
 
     class Meta:
         ordering = ["-source_modified_at", "-created_at"]
-        indexes = [models.Index(fields=["status", "country_code"])]
+        indexes = [
+            models.Index(fields=["status", "country_code"]),
+            models.Index(fields=["client", "cpi"]),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["integration", "source_id"], name="unique_integration_survey_source"),
             models.UniqueConstraint(fields=["integration", "source_key"], name="unique_integration_survey_key"),

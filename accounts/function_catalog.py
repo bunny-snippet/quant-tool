@@ -190,6 +190,7 @@ FUNCTION_CATALOG = (
     ("organization.column.unit.actions", "Show Unit actions column", "Organization - Structure columns", "Display unit editing actions.", ADMIN_ROLES),
     ("organization.column.access.unit", "Show Client-access unit column", "Organization - Client access columns", "Display the assigned organization unit.", ADMIN_ROLES),
     ("organization.column.access.client", "Show Client-access client column", "Organization - Client access columns", "Display the visible client.", ADMIN_ROLES),
+    ("organization.column.access.cpi", "Show Client-access CPI range", "Organization - Client access columns", "Display inherited minimum and maximum source CPI policy.", ADMIN_ROLES),
     ("organization.column.access.status", "Show Client-access status column", "Organization - Client access columns", "Display client-grant state.", ADMIN_ROLES),
     ("organization.column.access.actions", "Show Client-access actions column", "Organization - Client access columns", "Display client-grant editing actions.", ADMIN_ROLES),
 

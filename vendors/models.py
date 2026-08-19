@@ -316,6 +316,16 @@ class OrganizationClientAccess(models.Model):
         related_name="client_access_rules",
     )
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="organization_access_rules")
+    min_cpi = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Optional source-CPI floor inherited by child units.",
+    )
+    max_cpi = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Optional source-CPI ceiling inherited by child units.",
+    )
     is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -334,6 +344,10 @@ class OrganizationClientAccess(models.Model):
                 fields=["organization_unit", "client"],
                 name="unique_client_access_per_organization_unit",
             ),
+            models.CheckConstraint(
+                condition=Q(min_cpi__isnull=True) | Q(max_cpi__isnull=True) | Q(min_cpi__lte=F("max_cpi")),
+                name="organization_client_cpi_range_valid",
+            ),
         ]
         indexes = [
             models.Index(fields=["organization_unit", "is_active"]),
@@ -349,6 +363,8 @@ class OrganizationClientAccess(models.Model):
             errors["client"] = "Select a client."
         if errors:
             raise ValidationError(errors)
+        if self.min_cpi is not None and self.max_cpi is not None and self.min_cpi > self.max_cpi:
+            raise ValidationError({"max_cpi": "Maximum CPI must be greater than or equal to minimum CPI."})
         owner = self.organization_unit.workspace_owner
         profile = getattr(owner, "employee_profile", None)
         if getattr(profile, "account_type", "") == "internal_vendor":
@@ -496,6 +512,16 @@ class VendorClientAllocation(models.Model):
         validators=PERCENTAGE_VALIDATORS,
         help_text="Optional client-specific cut. Blank uses the supplier commercial default.",
     )
+    min_cpi = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Optional source-CPI floor for this supplier/client grant.",
+    )
+    max_cpi = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Optional source-CPI ceiling for this supplier/client grant.",
+    )
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
@@ -521,6 +547,10 @@ class VendorClientAllocation(models.Model):
                 condition=Q(reserved_quantity__lte=F("quantity_limit") - F("consumed_quantity")),
                 name="client_reserved_within_remaining",
             ),
+            models.CheckConstraint(
+                condition=Q(min_cpi__isnull=True) | Q(max_cpi__isnull=True) | Q(min_cpi__lte=F("max_cpi")),
+                name="vendor_client_cpi_range_valid",
+            ),
         ]
         indexes = [models.Index(fields=["vendor", "is_active"]), models.Index(fields=["client", "is_active"])]
 
@@ -543,6 +573,8 @@ class VendorClientAllocation(models.Model):
             raise ValidationError({"vendor": "Client allocations can only be assigned to supplier accounts."})
         if account_type == "internal_vendor" and self.cpi_cut_override_percent not in {None, Decimal("0.00")}:
             raise ValidationError({"cpi_cut_override_percent": "Internal suppliers cannot have a CPI cut."})
+        if self.min_cpi is not None and self.max_cpi is not None and self.min_cpi > self.max_cpi:
+            raise ValidationError({"max_cpi": "Maximum CPI must be greater than or equal to minimum CPI."})
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
         if self.consumed_quantity + self.reserved_quantity > self.quantity_limit:

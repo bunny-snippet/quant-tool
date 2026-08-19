@@ -49,6 +49,36 @@ class VendorSurveyContext:
     payable_cpi: Decimal | None
 
 
+@dataclass(frozen=True)
+class OrganizationClientPolicy:
+    """The closest explicit rule for one client in a user's unit ancestry."""
+    client_id: int
+    is_active: bool
+    min_cpi: Decimal | None
+    max_cpi: Decimal | None
+    source_unit_id: int
+
+
+def _cpi_in_range(value, minimum, maximum) -> bool:
+    if value is None:
+        return minimum is None and maximum is None
+    return not ((minimum is not None and value < minimum) or (maximum is not None and value > maximum))
+
+
+def _survey_policy_q(policies, *, cpi_field="cpi"):
+    combined = Q(pk__in=[])
+    for policy in policies:
+        if not policy.is_active:
+            continue
+        clause = Q(client_id=policy.client_id)
+        if policy.min_cpi is not None:
+            clause &= Q(**{f"{cpi_field}__gte": policy.min_cpi})
+        if policy.max_cpi is not None:
+            clause &= Q(**{f"{cpi_field}__lte": policy.max_cpi})
+        combined |= clause
+    return combined
+
+
 def organization_unit_rollup_counts(workspace_owner_ids) -> dict[str, dict[int, int]]:
     """Aggregate unique members and client grants from children into each parent."""
 
@@ -63,13 +93,12 @@ def organization_unit_rollup_counts(workspace_owner_ids) -> dict[str, dict[int, 
         .values("organization_unit_id")
         .annotate(total=Count("id"))
     }
-    direct_clients: dict[int, set[int]] = {}
-    for unit_id, client_id in OrganizationClientAccess.objects.filter(
+    direct_client_rules: dict[int, dict[int, bool]] = {}
+    for unit_id, client_id, is_active in OrganizationClientAccess.objects.filter(
         organization_unit_id__in=unit_ids,
-        is_active=True,
         client__is_active=True,
-    ).values_list("organization_unit_id", "client_id"):
-        direct_clients.setdefault(unit_id, set()).add(client_id)
+    ).values_list("organization_unit_id", "client_id", "is_active"):
+        direct_client_rules.setdefault(unit_id, {})[client_id] = is_active
 
     children: dict[int, list[int]] = {}
     for row in units:
@@ -78,14 +107,28 @@ def organization_unit_rollup_counts(workspace_owner_ids) -> dict[str, dict[int, 
 
     member_rollups: dict[int, int] = {}
     client_rollups: dict[int, set[int]] = {}
+    effective_clients: dict[int, set[int]] = {}
+
+    def apply_inheritance(unit_id: int, inherited: dict[int, bool], trail=frozenset()):
+        if unit_id in trail:
+            return
+        policies = dict(inherited)
+        policies.update(direct_client_rules.get(unit_id, {}))
+        effective_clients[unit_id] = {client_id for client_id, allowed in policies.items() if allowed}
+        for child_id in children.get(unit_id, []):
+            apply_inheritance(child_id, policies, trail | {unit_id})
+
+    roots = [row["id"] for row in units if row["parent_id"] not in unit_ids]
+    for root_id in roots:
+        apply_inheritance(root_id, {})
 
     def visit(unit_id: int, trail: frozenset[int] = frozenset()) -> tuple[int, set[int]]:
         if unit_id in member_rollups:
             return member_rollups[unit_id], client_rollups[unit_id]
         if unit_id in trail:
-            return direct_members.get(unit_id, 0), set(direct_clients.get(unit_id, set()))
+            return direct_members.get(unit_id, 0), set(effective_clients.get(unit_id, set()))
         members = direct_members.get(unit_id, 0)
-        clients = set(direct_clients.get(unit_id, set()))
+        clients = set(effective_clients.get(unit_id, set()))
         next_trail = trail | {unit_id}
         for child_id in children.get(unit_id, []):
             child_members, child_clients = visit(child_id, next_trail)
@@ -102,7 +145,10 @@ def organization_unit_rollup_counts(workspace_owner_ids) -> dict[str, dict[int, 
         "members": member_rollups,
         "clients": {unit_id: len(client_ids) for unit_id, client_ids in client_rollups.items()},
         "direct_members": {unit_id: direct_members.get(unit_id, 0) for unit_id in unit_ids},
-        "direct_clients": {unit_id: len(direct_clients.get(unit_id, set())) for unit_id in unit_ids},
+        "direct_clients": {
+            unit_id: sum(1 for allowed in direct_client_rules.get(unit_id, {}).values() if allowed)
+            for unit_id in unit_ids
+        },
     }
 
 
@@ -139,53 +185,59 @@ def _available_quantity_q(prefix="") -> Q:
     })
 
 
-def organization_client_ids_for_user(user) -> set[int] | None:
-    """Return the nearest explicit unit grant set for an assigned employee.
-
-    An exact Shift grant overrides broader Sub-branch/Branch grants. When the
-    Shift has no direct grants, the closest ancestor with grants is inherited.
-    Root and unassigned accounts remain unscoped for backward compatibility.
-    """
-
-    if hasattr(user, "_organization_client_ids_cache"):
-        return user._organization_client_ids_cache
+def organization_client_policies_for_user(user) -> dict[int, OrganizationClientPolicy] | None:
+    """Resolve per-client Branch -> Sub-branch -> Shift inheritance."""
+    if hasattr(user, "_organization_client_policies_cache"):
+        return user._organization_client_policies_cache
     profile = EmployeeProfile.objects.select_related(
         "organization_unit__parent__parent"
     ).filter(user=user).first()
     if not profile or not profile.organization_unit_id:
-        user._organization_client_ids_cache = None
+        user._organization_client_policies_cache = None
         return None
     current_unit = profile.organization_unit
+    ancestry = []
     visited_units = set()
     while current_unit and current_unit.pk not in visited_units:
         visited_units.add(current_unit.pk)
         if not current_unit.is_active:
-            user._organization_client_ids_cache = set()
-            return set()
-        direct_client_ids = set(
-            OrganizationClientAccess.objects.filter(
-                organization_unit=current_unit,
-                client__is_active=True,
-                is_active=True,
-            ).values_list("client_id", flat=True)
-        )
-        if direct_client_ids:
-            user._organization_client_ids_cache = direct_client_ids
-            return direct_client_ids
+            user._organization_client_policies_cache = {}
+            return {}
+        ancestry.append(current_unit.pk)
         current_unit = current_unit.parent
-    user._organization_client_ids_cache = set()
-    return set()
+    rules = OrganizationClientAccess.objects.filter(
+        organization_unit_id__in=ancestry, client__is_active=True,
+    ).values("organization_unit_id", "client_id", "is_active", "min_cpi", "max_cpi")
+    rules_by_unit = {}
+    for rule in rules:
+        rules_by_unit.setdefault(rule["organization_unit_id"], []).append(rule)
+    policies = {}
+    for unit_id in reversed(ancestry):
+        for rule in rules_by_unit.get(unit_id, []):
+            policies[rule["client_id"]] = OrganizationClientPolicy(
+                client_id=rule["client_id"], is_active=rule["is_active"],
+                min_cpi=rule["min_cpi"], max_cpi=rule["max_cpi"], source_unit_id=unit_id,
+            )
+    user._organization_client_policies_cache = policies
+    return policies
+
+
+def organization_client_ids_for_user(user) -> set[int] | None:
+    policies = organization_client_policies_for_user(user)
+    if policies is None:
+        return None
+    return {client_id for client_id, policy in policies.items() if policy.is_active}
 
 
 def scope_surveys_for_user(queryset, user):
     """Expose every project under a client grant; project rules are overrides."""
 
     vendor_id = vendor_scope_user_id(user)
-    organization_client_ids = organization_client_ids_for_user(user)
+    organization_policies = organization_client_policies_for_user(user)
     if not vendor_id:
-        if organization_client_ids is None:
+        if organization_policies is None:
             return queryset
-        return queryset.filter(client_id__in=organization_client_ids).distinct()
+        return queryset.filter(_survey_policy_q(organization_policies.values())).distinct()
     now = timezone.now()
     client_allocations = list(
         VendorClientAllocation.objects.filter(
@@ -202,7 +254,10 @@ def scope_surveys_for_user(queryset, user):
     if not client_allocations:
         return queryset.none()
     allocation_ids = [row.pk for row in client_allocations]
-    client_ids = [row.client_id for row in client_allocations]
+    supplier_policies = [OrganizationClientPolicy(
+        client_id=row.client_id, is_active=True, min_cpi=row.min_cpi,
+        max_cpi=row.max_cpi, source_unit_id=0,
+    ) for row in client_allocations]
     all_project_rules = VendorSurveyAllocation.objects.filter(
         client_allocation_id__in=allocation_ids, survey_id=OuterRef("pk")
     )
@@ -213,7 +268,7 @@ def scope_surveys_for_user(queryset, user):
         .select_related("client_allocation", "client_allocation__vendor", "client_allocation__vendor__employee_profile")
     )
     scoped = (
-        queryset.filter(client_id__in=client_ids, remaining__gt=0)
+        queryset.filter(_survey_policy_q(supplier_policies), remaining__gt=0)
         .annotate(
             request_has_project_rule=Exists(all_project_rules),
             request_has_available_project_rule=Exists(available_rules.filter(survey_id=OuterRef("pk"))),
@@ -231,8 +286,8 @@ def scope_surveys_for_user(queryset, user):
         )
         .distinct()
     )
-    if organization_client_ids is not None:
-        scoped = scoped.filter(client_id__in=organization_client_ids)
+    if organization_policies is not None:
+        scoped = scoped.filter(_survey_policy_q(organization_policies.values()))
     return scoped
 
 
@@ -252,9 +307,13 @@ def scope_surveys_for_api_key(queryset, api_key):
 def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True, for_update=False):
     """Resolve the supplier client grant and optional per-project override."""
 
-    organization_client_ids = organization_client_ids_for_user(user)
-    if organization_client_ids is not None and survey.client_id not in organization_client_ids:
-        raise AllocationUnavailable("This client is not assigned to the user's organization unit.")
+    organization_policies = organization_client_policies_for_user(user)
+    if organization_policies is not None:
+        organization_policy = organization_policies.get(survey.client_id)
+        if not organization_policy or not organization_policy.is_active:
+            raise AllocationUnavailable("This client is not assigned to the user's organization unit.")
+        if not _cpi_in_range(survey.cpi, organization_policy.min_cpi, organization_policy.max_cpi):
+            raise AllocationUnavailable("This project's CPI is outside the organization unit's allowed range.")
     vendor_id = vendor_scope_user_id(user)
     if not vendor_id:
         return None
@@ -274,6 +333,8 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
     ).first()
     if not client_allocation or not _is_active_now(client_allocation, now):
         raise AllocationUnavailable("This client is not allocated to the supplier.")
+    if not _cpi_in_range(survey.cpi, client_allocation.min_cpi, client_allocation.max_cpi):
+        raise AllocationUnavailable("This project's CPI is outside the supplier's client policy.")
     if require_capacity and client_allocation.remaining_quantity < 1:
         raise AllocationUnavailable("Client quantity is exhausted.")
 

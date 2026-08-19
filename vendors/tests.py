@@ -259,7 +259,7 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(response.status_code, 201)
         directory = owner_api.get(reverse("vendor-directory-list"))
         self.assertEqual(directory.status_code, 200)
-        self.assertEqual(directory.data["count"], 2)
+        self.assertEqual(directory.data["count"], 1)
 
         employee_api = APIClient()
         employee_api.force_authenticate(self.employee)
@@ -342,6 +342,21 @@ class VendorFoundationTests(TestCase):
         ids = {row["source_id"] for row in api.get(reverse("survey-list")).data["results"]}
         self.assertEqual(ids, {88004})
 
+    def test_external_client_cpi_range_filters_list_and_direct_start(self):
+        self.external_client_allocation.min_cpi = Decimal("11.00")
+        self.external_client_allocation.max_cpi = Decimal("20.00")
+        self.external_client_allocation.save(update_fields=["min_cpi", "max_cpi"])
+        UserFunctionOverride.objects.create(
+            user=self.external,
+            function=AccessFunction.objects.get(code="projects.view"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        api = APIClient()
+        api.force_authenticate(self.external)
+        self.assertEqual(api.get(reverse("survey-list")).data["count"], 0)
+        with self.assertRaisesMessage(AllocationUnavailable, "outside"):
+            resolve_vendor_survey_context(self.external, self.survey)
+
     def test_allocation_manager_can_open_workspace_and_use_safe_options(self):
         for code in ("allocations.view", "vendors.tab.clients", "vendors.column.client.client"):
             UserFunctionOverride.objects.create(
@@ -357,7 +372,7 @@ class VendorFoundationTests(TestCase):
         self.assertNotContains(page, "Project allocations")
         options = self.client.get(reverse("vendor-management-options"))
         self.assertEqual(options.status_code, 200)
-        self.assertEqual(len(options.json()["vendors"]), 2)
+        self.assertEqual(len(options.json()["vendors"]), 1)
         self.assertIn(self.client_record.pk, {item["id"] for item in options.json()["clients"]})
         self.assertEqual(self.client.get(reverse("vendor-survey-allocation-list")).status_code, 403)
 
@@ -691,7 +706,7 @@ class OrganizationHierarchyTests(TestCase):
         with self.assertRaisesMessage(AllocationUnavailable, "not assigned"):
             resolve_vendor_survey_context(employee, self.survey_b)
 
-    def test_shift_client_grants_override_broader_branch_grants(self):
+    def test_shift_client_rule_overrides_only_the_same_inherited_client(self):
         branch, _, shift = self.create_tree(self.owner, "shift-override")
         OrganizationClientAccess.objects.bulk_create([
             OrganizationClientAccess(
@@ -701,7 +716,7 @@ class OrganizationHierarchyTests(TestCase):
                 organization_unit=branch, client=self.client_b, created_by=self.owner,
             ),
             OrganizationClientAccess(
-                organization_unit=shift, client=self.client_a, created_by=self.owner,
+                organization_unit=shift, client=self.client_b, is_active=False, created_by=self.owner,
             ),
         ])
         employee = get_user_model().objects.create_user("shift-override-employee")
@@ -722,6 +737,30 @@ class OrganizationHierarchyTests(TestCase):
         )
         with self.assertRaisesMessage(AllocationUnavailable, "not assigned"):
             resolve_vendor_survey_context(employee, self.survey_b)
+
+    def test_child_inherits_parent_cpi_range_and_can_override_it(self):
+        branch, sub_branch, shift = self.create_tree(self.owner, "cpi-policy")
+        OrganizationClientAccess.objects.create(
+            organization_unit=branch, client=self.client_a,
+            min_cpi=Decimal("2.00"), max_cpi=Decimal("3.50"), created_by=self.owner,
+        )
+        employee = get_user_model().objects.create_user("cpi-policy-employee")
+        EmployeeProfile.objects.filter(user=employee).update(
+            organization_unit=shift, created_by=self.owner, role=Role.objects.get(slug="employee"),
+        )
+        api = APIClient(); api.force_authenticate(employee)
+        self.assertEqual(
+            {row["source_id"] for row in api.get(reverse("survey-list")).data["results"]},
+            {self.survey_a.source_id},
+        )
+        OrganizationClientAccess.objects.create(
+            organization_unit=sub_branch, client=self.client_a,
+            min_cpi=Decimal("4.00"), max_cpi=Decimal("8.00"), created_by=self.owner,
+        )
+        employee = get_user_model().objects.get(pk=employee.pk); api.force_authenticate(employee)
+        self.assertEqual(api.get(reverse("survey-list")).data["count"], 0)
+        with self.assertRaisesMessage(AllocationUnavailable, "outside"):
+            resolve_vendor_survey_context(employee, self.survey_a)
 
     def test_shift_members_and_clients_roll_up_to_parent_totals(self):
         branch, sub_branch, shift = self.create_tree(self.owner, "rollup")
@@ -747,6 +786,19 @@ class OrganizationHierarchyTests(TestCase):
         self.assertEqual(units[branch.pk]["direct_client_count"], 0)
         self.assertEqual(units[shift.pk]["direct_member_count"], 2)
         self.assertEqual(units[shift.pk]["direct_client_count"], 1)
+
+    def test_branch_client_is_counted_as_inherited_for_every_child(self):
+        branch, sub_branch, shift = self.create_tree(self.owner, "inherited-count")
+        OrganizationClientAccess.objects.create(
+            organization_unit=branch, client=self.client_a, created_by=self.owner,
+        )
+        response = self.owner_api.get(reverse("organization-unit-list"))
+        units = {row["id"]: row for row in response.data["results"]}
+        for unit in (branch, sub_branch, shift):
+            self.assertEqual(units[unit.pk]["client_count"], 1)
+        self.assertEqual(units[branch.pk]["direct_client_count"], 1)
+        self.assertEqual(units[sub_branch.pk]["direct_client_count"], 0)
+        self.assertEqual(units[shift.pk]["direct_client_count"], 0)
 
     def test_user_creation_assigns_team_leads_and_employees_to_shifts(self):
         branch, _, shift = self.create_tree(self.owner, "people")

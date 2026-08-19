@@ -552,7 +552,8 @@ class OrganizationClientAccessSerializer(serializers.ModelSerializer):
         model = OrganizationClientAccess
         fields = [
             "id", "organization_unit", "workspace_owner", "workspace_owner_name", "unit_name", "unit_type",
-            "unit_path", "client", "client_name", "is_active", "created_by", "created_at", "updated_at",
+            "unit_path", "client", "client_name", "min_cpi", "max_cpi", "is_active", "created_by",
+            "created_at", "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]
 
@@ -573,6 +574,8 @@ class OrganizationClientAccessSerializer(serializers.ModelSerializer):
             pk=getattr(self.instance, "pk", None),
             organization_unit=unit,
             client=client,
+            min_cpi=attrs.get("min_cpi", getattr(self.instance, "min_cpi", None)),
+            max_cpi=attrs.get("max_cpi", getattr(self.instance, "max_cpi", None)),
             is_active=attrs.get("is_active", getattr(self.instance, "is_active", True)),
         )
         if self.instance:
@@ -606,8 +609,8 @@ class VendorCommercialProfileSerializer(serializers.ModelSerializer):
         vendor = attrs.get("vendor", getattr(self.instance, "vendor", None))
         cut = attrs.get("default_cpi_cut_percent", getattr(self.instance, "default_cpi_cut_percent", Decimal("0.00")))
         profile = EmployeeProfile.objects.filter(user=vendor).first()
-        if not is_valid_supplier_profile(profile):
-            raise serializers.ValidationError({"vendor": "Select an internal or external supplier account."})
+        if not profile or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
+            raise serializers.ValidationError({"vendor": "Select an external supplier account."})
         if profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut != Decimal("0.00"):
             raise serializers.ValidationError({"default_cpi_cut_percent": "Internal supplier cut must be zero."})
         delivery_mode = attrs.get("delivery_mode", getattr(self.instance, "delivery_mode", VendorCommercialProfile.DeliveryMode.PANEL))
@@ -709,7 +712,8 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
         fields = [
             "id", "vendor", "vendor_name", "account_type", "client", "client_name", "quantity_limit",
             "reserved_quantity", "consumed_quantity", "remaining_quantity", "cpi_cut_override_percent",
-            "effective_cpi_cut_percent", "api_key_scopes", "starts_at", "ends_at", "is_active", "created_by",
+            "effective_cpi_cut_percent", "min_cpi", "max_cpi", "api_key_scopes", "starts_at", "ends_at",
+            "is_active", "created_by",
             "created_at", "updated_at",
         ]
         read_only_fields = ["reserved_quantity", "consumed_quantity", "created_at", "updated_at"]
@@ -734,10 +738,14 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
         quantity_limit = attrs.get("quantity_limit", getattr(self.instance, "quantity_limit", 0))
         cut = attrs.get("cpi_cut_override_percent", getattr(self.instance, "cpi_cut_override_percent", None))
         profile = EmployeeProfile.objects.filter(user=vendor).first()
-        if not is_valid_supplier_profile(profile):
-            raise serializers.ValidationError({"vendor": "Select an internal or external supplier account."})
+        if not profile or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
+            raise serializers.ValidationError({"vendor": "Select an external supplier account."})
         if profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut not in {None, Decimal("0.00")}:
             raise serializers.ValidationError({"cpi_cut_override_percent": "Internal supplier cut must be zero."})
+        min_cpi = attrs.get("min_cpi", getattr(self.instance, "min_cpi", None))
+        max_cpi = attrs.get("max_cpi", getattr(self.instance, "max_cpi", None))
+        if min_cpi is not None and max_cpi is not None and min_cpi > max_cpi:
+            raise serializers.ValidationError({"max_cpi": "Maximum CPI must be greater than or equal to minimum CPI."})
         instance = self.instance
         used = (instance.consumed_quantity + instance.reserved_quantity) if instance else 0
         if quantity_limit < used:

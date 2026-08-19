@@ -14,7 +14,7 @@
 </section>
 
 {% if vendor_cards %}<section class="vendor-overview" aria-label="Supplier overview">
-  {% if 'vendors' in vendor_cards %}<article><span class="vendor-metric-icon vendors">V</span><div><small>Suppliers</small><strong id="vendorCount">—</strong><em>Internal and external</em></div></article>{% endif %}
+  {% if 'vendors' in vendor_cards %}<article><span class="vendor-metric-icon vendors">V</span><div><small>Suppliers</small><strong id="vendorCount">—</strong><em>External delivery partners</em></div></article>{% endif %}
   {% if 'client_grants' in vendor_cards %}<article><span class="vendor-metric-icon clients">C</span><div><small>Client grants</small><strong id="allocationCount">—</strong><em>Active assignments</em></div></article>{% endif %}
   {% if 'quantity' in vendor_cards %}<article><span class="vendor-metric-icon capacity">Q</span><div><small>Available quantity</small><strong id="remainingQuantity">—</strong><em>Across visible clients</em></div></article>{% endif %}
   {% if 'projects' in vendor_cards %}<article><span class="vendor-metric-icon rules">P</span><div><small>Allocated projects</small><strong id="surveyRuleCount">—</strong><em>Visible project caps</em></div></article>{% endif %}
@@ -38,7 +38,7 @@
   </div>
 
   {% if can_view_vendors %}<section class="vendor-tab-panel {% if first_vendor_tab == 'vendors' %}active{% endif %}" data-vendor-panel="vendors" {% if first_vendor_tab != 'vendors' %}hidden{% endif %}>
-    <header class="vendor-panel-head"><div><h2>Commercial policies</h2><p>Internal suppliers always retain source CPI. External suppliers use the configured cut.</p></div></header>
+      <header class="vendor-panel-head"><div><h2>Commercial policies</h2><p>External suppliers receive only their assigned clients, CPI range, capacity and delivery mode.</p></div></header>
     <div class="vendor-table-wrap"><table class="vendor-table"><thead><tr>{% if 'name' in vendor_columns %}<th>Supplier</th>{% endif %}{% if 'type' in vendor_columns %}<th>Type</th>{% endif %}{% if 'cpi' in vendor_columns %}<th>Average CPI cut</th>{% endif %}{% if 'clients' in vendor_columns %}<th>Clients</th>{% endif %}{% if 'status' in vendor_columns %}<th>Status</th>{% endif %}{% if 'actions' in vendor_columns %}<th><span class="sr-only">Actions</span></th>{% endif %}</tr></thead><tbody id="vendorRows"><tr><td colspan="{{ vendor_column_count }}"><div class="vendor-loading"><i></i>Loading suppliers…</div></td></tr></tbody></table></div>
     <div class="vendor-cards" id="vendorCards"></div>
   </section>{% endif %}
@@ -102,6 +102,8 @@
         </label>
         <label><span>Total complete limit</span><input name="client_quantity_limit" type="number" min="0" step="1" required></label>
         <label><span>CPI cut override (%)</span><input name="client_cpi_cut" type="number" min="0" max="100" step="0.01" placeholder="Use supplier default"></label>
+        <label><span>Minimum source CPI ($)</span><input name="client_min_cpi" type="number" min="0" step="0.01" placeholder="No minimum"></label>
+        <label><span>Maximum source CPI ($)</span><input name="client_max_cpi" type="number" min="0" step="0.01" placeholder="No maximum"></label>
         <label><span>Starts at</span><input name="client_starts_at" type="datetime-local"></label>
         <label><span>Ends at</span><input name="client_ends_at" type="datetime-local"></label>
         <p class="vendor-form-note wide">Each selected client exposes all of its live projects automatically. This limit is shared across every project of that client; Survey allocations are optional per-project overrides.</p>
@@ -152,4 +154,4 @@
   </form>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=10" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=11" defer></script>{% endblock %}

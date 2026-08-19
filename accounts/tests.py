@@ -181,16 +181,16 @@ class FunctionAccessTests(TestCase):
         self.assertEqual(self.client.get(reverse("projects")).status_code, 403)
         self.assertRedirects(self.client.get(reverse("home")), reverse("traffic-reports"), fetch_redirect_response=False)
 
-    def test_dashboard_is_hard_restricted_to_super_admin_accounts(self):
+    def test_dashboard_access_follows_role_or_user_function_permission(self):
         dashboard = AccessFunction.objects.get(code="dashboard.view")
         UserFunctionOverride.objects.update_or_create(
             user=self.user, function=dashboard, defaults={"effect": "allow"}
         )
-        self.assertFalse(has_function_access(self.user, "dashboard.view"))
-        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 403)
+        self.assertTrue(has_function_access(self.user, "dashboard.view"))
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
         api = APIClient()
         api.force_authenticate(self.user)
-        self.assertEqual(api.get(reverse("dashboard-api")).status_code, 403)
+        self.assertEqual(api.get(reverse("dashboard-api")).status_code, 200)
 
         owner = get_user_model().objects.create_user(username="role-super-admin", password="password-123")
         owner.employee_profile.role = Role.objects.get(slug="super-admin")

@@ -158,6 +158,12 @@
     return `<div class="vendor-money"><strong>${escapeHtml(record.effective_cpi_cut_percent ?? 0)}%</strong><small>${own === null || own === undefined ? inheritedLabel : 'override'}</small></div>`;
   }
 
+  function cpiRangeMarkup(record) {
+    const minimum = record.min_cpi == null ? 'Any' : `$${record.min_cpi}`;
+    const maximum = record.max_cpi == null ? 'Any' : `$${record.max_cpi}`;
+    return `<div class="vendor-money"><strong>${escapeHtml(minimum)} – ${escapeHtml(maximum)}</strong><small>source CPI range</small></div>`;
+  }
+
   function emptyRow(columns, message) {
     return `<tr><td colspan="${columns}"><div class="vendor-empty">${escapeHtml(message)}</div></td></tr>`;
   }
@@ -207,14 +213,14 @@
       if (clientColumns.has('vendor')) cells.push(`<td><strong>${escapeHtml(row.vendor_name)}</strong><br>${typeBadge(row.account_type)}</td>`);
       if (clientColumns.has('client')) cells.push(`<td><strong>${escapeHtml(row.client_name)}</strong><br><small>${stateBadge(row.is_active)}</small></td>`);
       if (clientColumns.has('quantity')) cells.push(`<td>${quantityMarkup(row)}</td>`);
-      if (clientColumns.has('cpi')) cells.push(`<td>${cutMarkup(row, 'supplier default')}</td>`);
+      if (clientColumns.has('cpi')) cells.push(`<td>${cutMarkup(row, 'supplier default')}${cpiRangeMarkup(row)}</td>`);
       if (clientColumns.has('window')) cells.push(`<td><div class="vendor-window"><span>${dateTime(row.starts_at)}</span><span>to ${dateTime(row.ends_at)}</span></div></td>`);
       if (clientColumns.has('actions')) cells.push(`<td>${actionButton('client', row.id, canAllocateClient, 'View')}</td>`);
       return `<tr>${cells.join('') || '<td><div class="vendor-empty">No client-allocation columns assigned.</div></td>'}</tr>`;
     }).join('') || emptyRow(Math.max(1, clientColumns.size), 'No client allocations yet.');
     $('#clientAllocationCards').innerHTML = state.clientAllocations.map((row) => {
       const head = `${clientColumns.has('vendor') ? `<strong>${escapeHtml(row.vendor_name)}</strong>` : ''}${clientColumns.has('client') ? `<small>${escapeHtml(row.client_name)}</small>` : ''}`;
-      const details = `${clientColumns.has('quantity') ? `<span>Available<strong>${number(row.remaining_quantity)}</strong></span><span>Limit<strong>${number(row.quantity_limit)}</strong></span>` : ''}${clientColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span>` : ''}${clientColumns.has('vendor') ? `<span>Type<strong>${escapeHtml(accountLabel(row.account_type))}</strong></span>` : ''}${clientColumns.has('window') ? `<span>Window<strong>${dateTime(row.starts_at)} to ${dateTime(row.ends_at)}</strong></span>` : ''}`;
+      const details = `${clientColumns.has('quantity') ? `<span>Available<strong>${number(row.remaining_quantity)}</strong></span><span>Limit<strong>${number(row.quantity_limit)}</strong></span>` : ''}${clientColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span><span>Source CPI range<strong>${escapeHtml(row.min_cpi ?? 'Any')} – ${escapeHtml(row.max_cpi ?? 'Any')}</strong></span>` : ''}${clientColumns.has('vendor') ? `<span>Type<strong>${escapeHtml(accountLabel(row.account_type))}</strong></span>` : ''}${clientColumns.has('window') ? `<span>Window<strong>${dateTime(row.starts_at)} to ${dateTime(row.ends_at)}</strong></span>` : ''}`;
       return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${clientColumns.has('client') ? stateBadge(row.is_active) : ''}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}</div>` : ''}${clientColumns.has('quantity') ? quantityMarkup(row) : ''}${clientColumns.has('actions') ? actionButton('client', row.id, canAllocateClient, 'View') : ''}</article>`;
     }).join('');
   }
@@ -425,6 +431,8 @@
       field('client_vendor').disabled = true;
       field('client_quantity_limit').value = record.quantity_limit;
       field('client_cpi_cut').value = record.cpi_cut_override_percent ?? '';
+      field('client_min_cpi').value = record.min_cpi ?? '';
+      field('client_max_cpi').value = record.max_cpi ?? '';
       field('client_starts_at').value = toInputDateTime(record.starts_at);
       field('client_ends_at').value = toInputDateTime(record.ends_at);
       field('is_active').checked = record.is_active;
@@ -434,6 +442,7 @@
         <article><span>Supplier</span><strong>${escapeHtml(record.vendor_name)}</strong></article>
         <article><span>Client</span><strong>${escapeHtml(record.client_name)}</strong></article>
         <article><span>Effective CPI cut</span><strong>${escapeHtml(record.effective_cpi_cut_percent)}%</strong></article>
+        <article><span>Source CPI range</span><strong>${escapeHtml(record.min_cpi ?? 'Any')} – ${escapeHtml(record.max_cpi ?? 'Any')}</strong></article>
         <article><span>API access</span><strong>${escapeHtml(apiScopes.map((item) => item.name).join(', ') || 'No API key')}</strong></article>`;
       summary.hidden = false;
     }
@@ -608,6 +617,8 @@
         vendor: Number(field('client_vendor').value), client: clientIds[0],
         quantity_limit: Number(field('client_quantity_limit').value),
         cpi_cut_override_percent: field('client_cpi_cut').disabled ? null : nullableNumber(field('client_cpi_cut').value),
+        min_cpi: nullableNumber(field('client_min_cpi').value),
+        max_cpi: nullableNumber(field('client_max_cpi').value),
         starts_at: toApiDateTime(field('client_starts_at').value), ends_at: toApiDateTime(field('client_ends_at').value),
         is_active: field('is_active').checked,
       };
