@@ -63,6 +63,34 @@ def _normalize_profile_value(attribute: str, value) -> str:
     return cleaned.lower()[:191]
 
 
+def _canonical_dimension_key(value) -> str:
+    return _clean_token(value)
+
+
+def _provider_mapping_index(survey, questions):
+    """Load provider-neutral question and option mappings once per submission."""
+
+    if not questions or not getattr(survey, "integration_id", None):
+        return {}
+    try:
+        from surveys.models import ProviderQuestionMapping
+    except ImportError:
+        return {}
+
+    mappings = (
+        ProviderQuestionMapping.objects.filter(
+            provider_code=str(survey.integration.provider_code or "").strip().lower(),
+            country_code__iexact=str(survey.country_code or ""),
+            language_code__iexact=str(survey.language_code or ""),
+            external_question_id__in=[str(item.question_id) for item in questions.values()],
+            is_active=True,
+        )
+        .select_related("canonical_question")
+        .prefetch_related("option_mappings__canonical_option")
+    )
+    return {str(mapping.external_question_id): mapping for mapping in mappings}
+
+
 def _age_group(age: int | None) -> str:
     if age is None:
         return ""
@@ -102,6 +130,7 @@ def _question_snapshots(attempt, answers):
         str(question.pk): question
         for question in attempt.survey.targeting_questions.filter(pk__in=question_ids)
     }
+    provider_mappings = _provider_mapping_index(attempt.survey, questions)
     snapshots = []
     dimensions = {
         "country": [attempt.survey.country_code or attempt.survey.country] if (attempt.survey.country_code or attempt.survey.country) else [],
@@ -124,10 +153,33 @@ def _question_snapshots(attempt, answers):
         labels = [option_map.get(value, value) for value in values]
         question_key = str(payload.get("question_key") or (question.key if question else ""))
         question_text = str(payload.get("question_text") or (question.text if question else ""))
-        question_type = str(question.question_type if question else "")
-        question_category = str(question.category if question else "")
-        canonical = _canonical_attribute(question_key, question_text, question_category)
-        reusable_values = labels or values or upstream_values
+        question_type = str(payload.get("question_type") or (question.question_type if question else ""))
+        question_category = str(payload.get("question_category") or (question.category if question else ""))
+        mapping = provider_mappings.get(str(question.question_id)) if question else None
+        explicit_canonical = (
+            (question.raw_data or {}).get("canonical_key") if question else ""
+        ) or (mapping.canonical_question.code if mapping else "")
+        canonical = _canonical_dimension_key(
+            explicit_canonical
+            or _canonical_attribute(question_key, question_text, question_category)
+            or (f"{attempt.survey.integration.provider_code}_{question.question_id}" if question else "")
+        )
+        mapped_values = []
+        if mapping:
+            option_values = {
+                str(item.external_value): str(
+                    item.canonical_value
+                    or (item.canonical_option.normalized_value if item.canonical_option_id else "")
+                    or (item.canonical_option.code if item.canonical_option_id else "")
+                )
+                for item in mapping.option_mappings.all()
+                if item.is_active
+            }
+            for value in values + upstream_values:
+                mapped = option_values.get(str(value))
+                if mapped and mapped not in mapped_values:
+                    mapped_values.append(mapped)
+        reusable_values = mapped_values or labels or values or upstream_values
         normalized_values = [_normalize_profile_value(canonical, value) for value in reusable_values]
         normalized_values = [value for value in normalized_values if value]
         if canonical and normalized_values:

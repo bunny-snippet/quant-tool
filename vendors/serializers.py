@@ -143,6 +143,8 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
             "profile_reuse_age_groups", "profile_reuse_genders",
             "profile_rereuse_enabled", "profile_rereuse_percentage",
             "profile_rereuse_cooldown_days", "profile_reuse_status",
+            "profile_reuse_first_delay_minutes", "profile_reuse_min_interval_minutes",
+            "profile_reuse_max_uses_per_window", "profile_reuse_window_minutes",
             "profile_reuse_available_country_codes",
             "api_token", "has_credential", "masked_credential", "supplier_code", "scheduled_sync_enabled",
             "inventory_endpoint", "paged_inventory_endpoint", "quota_endpoint_template",
@@ -200,20 +202,6 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         if not isinstance(genders, list) or any(value not in {"male", "female"} for value in genders):
             raise serializers.ValidationError({"profile_reuse_genders": "Select male, female, or both."})
         attrs["profile_reuse_genders"] = [value for value in ("male", "female") if value in genders]
-        rereuse_enabled = attrs.get(
-            "profile_rereuse_enabled",
-            getattr(self.instance, "profile_rereuse_enabled", False),
-        )
-        rereuse_percentage = Decimal(str(attrs.get(
-            "profile_rereuse_percentage",
-            getattr(self.instance, "profile_rereuse_percentage", Decimal("50.00")),
-        ) or 0))
-        if rereuse_enabled and not (Decimal("0") < rereuse_percentage < Decimal("100")):
-            raise serializers.ValidationError({
-                "profile_rereuse_percentage": (
-                    "When returning-profile reuse is enabled, choose a split above 0 and below 100."
-                )
-            })
         provider = str(attrs.get("provider_code", getattr(self.instance, "provider_code", ""))).lower()
         provider_key = provider.replace("-", "").replace("_", "")
         base_url = str(attrs.get("base_url", getattr(self.instance, "base_url", ""))).rstrip("/")

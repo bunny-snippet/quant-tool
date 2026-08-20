@@ -115,6 +115,29 @@ class ClientIntegration(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(730)],
         help_text="Minimum cooldown after a profile reuse before it can be used again.",
     )
+    profile_reuse_first_delay_minutes = models.PositiveIntegerField(
+        default=86400,
+        validators=[MinValueValidator(1), MaxValueValidator(1051200)],
+        help_text=(
+            "Minimum age of a newly registered profile before its first reuse, "
+            "stored in minutes so the policy can be expressed in minutes, hours, or days."
+        ),
+    )
+    profile_reuse_min_interval_minutes = models.PositiveIntegerField(
+        default=43200,
+        validators=[MinValueValidator(1), MaxValueValidator(1051200)],
+        help_text="Minimum time between two reuses of the same UID.",
+    )
+    profile_reuse_max_uses_per_window = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(1000)],
+        help_text="Maximum reuses allowed for one UID inside the configured rolling window.",
+    )
+    profile_reuse_window_minutes = models.PositiveIntegerField(
+        default=1440,
+        validators=[MinValueValidator(1), MaxValueValidator(1051200)],
+        help_text="Rolling window used by the per-UID reuse limit.",
+    )
     encrypted_api_token = models.TextField(blank=True, editable=False)
     credential_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
     credential_last_four = models.CharField(max_length=4, blank=True, editable=False)

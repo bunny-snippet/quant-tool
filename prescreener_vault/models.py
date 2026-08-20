@@ -45,6 +45,10 @@ class PrescreenerSubmission(models.Model):
                 fields=["source_client_code", "country_code", "respondent_age_group", "respondent_gender", "usage_count"],
                 name="vault_client_reuse_idx",
             ),
+            models.Index(
+                fields=["source_client_code", "country_code", "respondent_gender", "respondent_age"],
+                name="vault_reuse_age_idx",
+            ),
         ]
 
 

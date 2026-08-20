@@ -450,6 +450,12 @@ class ProfileReuseEvent(models.Model):
         on_delete=models.PROTECT,
         related_name="profile_reuse_event",
     )
+    survey = models.ForeignKey(
+        Survey,
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_events",
+        help_text="Denormalized project identity used for permanent same-project exclusion.",
+    )
     registered_uid = models.CharField(max_length=19, db_index=True)
     reused_rid = models.CharField(max_length=10, db_index=True)
     reused_uid = models.CharField(max_length=19, db_index=True)
@@ -471,4 +477,61 @@ class ProfileReuseEvent(models.Model):
         indexes = [
             models.Index(fields=["integration", "created_at"]),
             models.Index(fields=["integration", "country_code", "age_group", "gender"]),
+            models.Index(fields=["integration", "reused_uid", "created_at"]),
         ]
+
+
+class ProfileReuseState(models.Model):
+    """Operational lock row that serializes concurrent reuse of one UID."""
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_states",
+    )
+    reused_uid = models.CharField(max_length=19)
+    last_reused_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    total_reuses = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "reused_uid"],
+                name="unique_profile_reuse_state",
+            ),
+        ]
+        indexes = [models.Index(fields=["integration", "last_reused_at"])]
+
+
+class ProfileReuseProjectUsage(models.Model):
+    """Permanent no-repeat lock for one client UID on one survey project."""
+
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_project_usages",
+    )
+    survey = models.ForeignKey(
+        Survey,
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_project_usages",
+    )
+    reused_uid = models.CharField(max_length=19)
+    first_attempt = models.ForeignKey(
+        SurveyAttempt,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="profile_reuse_project_locks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "survey", "reused_uid"],
+                name="unique_profile_uid_per_project",
+            ),
+        ]
+        indexes = [models.Index(fields=["integration", "survey"])]
