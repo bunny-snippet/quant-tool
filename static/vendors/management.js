@@ -145,14 +145,6 @@
     return `<span class="vendor-state${active ? '' : ' inactive'}">${active ? 'Active' : 'Inactive'}</span>`;
   }
 
-  function quantityMarkup(record) {
-    const limit = Number(record.quantity_limit || 0);
-    const used = Number(record.consumed_quantity || 0);
-    const reserved = Number(record.reserved_quantity || 0);
-    const percent = limit ? Math.min(100, ((used + reserved) / limit) * 100) : 0;
-    return `<div class="quantity-cell"><div class="quantity-line"><strong>${number(record.remaining_quantity)} left</strong><span>${number(used)} used · ${number(reserved)} held / ${number(limit)}</span></div><div class="quantity-bar"><i style="width:${percent}%"></i></div></div>`;
-  }
-
   function cutMarkup(record, inheritedLabel = 'effective') {
     const own = record.cpi_cut_override_percent;
     return `<div class="vendor-money"><strong>${escapeHtml(record.effective_cpi_cut_percent ?? 0)}%</strong><small>${own === null || own === undefined ? inheritedLabel : 'override'}</small></div>`;
@@ -175,7 +167,6 @@
   function renderOverview() {
     if ($('#vendorCount')) $('#vendorCount').textContent = number(state.vendors.length);
     if ($('#allocationCount')) $('#allocationCount').textContent = number(state.clientAllocations.filter((row) => row.is_active).length);
-    if ($('#remainingQuantity')) $('#remainingQuantity').textContent = number(state.clientAllocations.reduce((total, row) => total + Number(row.remaining_quantity || 0), 0));
     if ($('#surveyRuleCount')) $('#surveyRuleCount').textContent = number(state.surveyAllocations.length);
   }
 
@@ -212,7 +203,6 @@
       const cells = [];
       if (clientColumns.has('vendor')) cells.push(`<td><strong>${escapeHtml(row.vendor_name)}</strong><br>${typeBadge(row.account_type)}</td>`);
       if (clientColumns.has('client')) cells.push(`<td><strong>${escapeHtml(row.client_name)}</strong><br><small>${stateBadge(row.is_active)}</small></td>`);
-      if (clientColumns.has('quantity')) cells.push(`<td>${quantityMarkup(row)}</td>`);
       if (clientColumns.has('cpi')) cells.push(`<td>${cutMarkup(row, 'supplier default')}${cpiRangeMarkup(row)}</td>`);
       if (clientColumns.has('window')) cells.push(`<td><div class="vendor-window"><span>${dateTime(row.starts_at)}</span><span>to ${dateTime(row.ends_at)}</span></div></td>`);
       if (clientColumns.has('actions')) cells.push(`<td>${actionButton('client', row.id, canAllocateClient, 'View')}</td>`);
@@ -220,8 +210,8 @@
     }).join('') || emptyRow(Math.max(1, clientColumns.size), 'No client allocations yet.');
     $('#clientAllocationCards').innerHTML = state.clientAllocations.map((row) => {
       const head = `${clientColumns.has('vendor') ? `<strong>${escapeHtml(row.vendor_name)}</strong>` : ''}${clientColumns.has('client') ? `<small>${escapeHtml(row.client_name)}</small>` : ''}`;
-      const details = `${clientColumns.has('quantity') ? `<span>Available<strong>${number(row.remaining_quantity)}</strong></span><span>Limit<strong>${number(row.quantity_limit)}</strong></span>` : ''}${clientColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span><span>Source CPI range<strong>${escapeHtml(row.min_cpi ?? 'Any')} – ${escapeHtml(row.max_cpi ?? 'Any')}</strong></span>` : ''}${clientColumns.has('vendor') ? `<span>Type<strong>${escapeHtml(accountLabel(row.account_type))}</strong></span>` : ''}${clientColumns.has('window') ? `<span>Window<strong>${dateTime(row.starts_at)} to ${dateTime(row.ends_at)}</strong></span>` : ''}`;
-      return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${clientColumns.has('client') ? stateBadge(row.is_active) : ''}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}</div>` : ''}${clientColumns.has('quantity') ? quantityMarkup(row) : ''}${clientColumns.has('actions') ? actionButton('client', row.id, canAllocateClient, 'View') : ''}</article>`;
+      const details = `${clientColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span><span>Source CPI range<strong>${escapeHtml(row.min_cpi ?? 'Any')} – ${escapeHtml(row.max_cpi ?? 'Any')}</strong></span>` : ''}${clientColumns.has('vendor') ? `<span>Type<strong>${escapeHtml(accountLabel(row.account_type))}</strong></span>` : ''}${clientColumns.has('window') ? `<span>Window<strong>${dateTime(row.starts_at)} to ${dateTime(row.ends_at)}</strong></span>` : ''}`;
+      return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${clientColumns.has('client') ? stateBadge(row.is_active) : ''}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}</div>` : ''}${clientColumns.has('actions') ? actionButton('client', row.id, canAllocateClient, 'View') : ''}</article>`;
     }).join('');
   }
 
@@ -232,14 +222,13 @@
       if (projectColumns.has('vendor')) cells.push(`<td><strong>${escapeHtml(row.vendor_name)}</strong></td>`);
       if (projectColumns.has('survey')) cells.push(`<td><strong>${escapeHtml(row.survey_local_id)}</strong><br><small>#${escapeHtml(row.survey_source_id)} · ${escapeHtml(row.survey_name || 'Survey')}</small></td>`);
       if (projectColumns.has('client')) cells.push(`<td>${escapeHtml(row.client_name)}</td>`);
-      if (projectColumns.has('quantity')) cells.push(`<td>${quantityMarkup(row)}</td>`);
       if (projectColumns.has('cpi')) cells.push(`<td>${cutMarkup(row, 'client policy')}</td>`);
       if (projectColumns.has('actions')) cells.push(`<td>${actionButton('survey', row.id, canAllocateProject)}</td>`);
       return `<tr>${cells.join('') || '<td><div class="vendor-empty">No project-allocation columns assigned.</div></td>'}</tr>`;
-    }).join('') || emptyRow(Math.max(1, projectColumns.size), 'No projects allocated. This supplier cannot see or start any client project yet.');
+    }).join('') || emptyRow(Math.max(1, projectColumns.size), 'No project exceptions. Every eligible project under allocated clients is currently available.');
     $('#surveyAllocationCards').innerHTML = state.surveyAllocations.map((row) => {
       const head = `${projectColumns.has('survey') ? `<strong>${escapeHtml(row.survey_local_id)}</strong>` : ''}${projectColumns.has('vendor') || projectColumns.has('client') ? `<small>${projectColumns.has('vendor') ? escapeHtml(row.vendor_name) : ''}${projectColumns.has('vendor') && projectColumns.has('client') ? ' · ' : ''}${projectColumns.has('client') ? escapeHtml(row.client_name) : ''}</small>` : ''}`;
-      const details = `${projectColumns.has('survey') ? `<span>Survey ID<strong>${escapeHtml(row.survey_source_id)}</strong></span>` : ''}${projectColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span>` : ''}${projectColumns.has('quantity') ? `<span>Available<strong>${number(row.remaining_quantity)}</strong></span><span>Limit<strong>${number(row.quantity_limit)}</strong></span>` : ''}`;
+      const details = `${projectColumns.has('survey') ? `<span>Survey ID<strong>${escapeHtml(row.survey_source_id)}</strong></span>` : ''}${projectColumns.has('cpi') ? `<span>CPI cut<strong>${escapeHtml(row.effective_cpi_cut_percent)}%</strong></span>` : ''}`;
       return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${stateBadge(row.is_active)}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}</div>` : ''}${projectColumns.has('actions') ? actionButton('survey', row.id, canAllocateProject) : ''}</article>`;
     }).join('');
   }
@@ -253,13 +242,14 @@
       if (apiColumns.has('created')) cells.push(`<td>${dateTime(key.created_at)}</td>`);
       if (apiColumns.has('last_used')) cells.push(`<td>${key.last_used_at ? dateTime(key.last_used_at) : 'Never'}</td>`);
       if (apiColumns.has('expires')) cells.push(`<td>${key.expires_at ? dateTime(key.expires_at) : 'No expiry'}</td>`);
-      if (apiColumns.has('actions')) cells.push(`<td>${key.is_active && canRevokeApiKey ? `<button class="vendor-action danger" type="button" data-revoke-api-key="${key.id}">Revoke</button>` : stateBadge(false)}</td>`);
+      if (apiColumns.has('actions')) cells.push(`<td><button class="vendor-action" type="button" data-edit-api-key="${key.id}">Configure</button>${key.is_active && canRevokeApiKey ? ` <button class="vendor-action danger" type="button" data-revoke-api-key="${key.id}">Revoke</button>` : ''}</td>`);
       return `<tr>${cells.join('') || '<td><div class="vendor-empty">No API-key columns assigned.</div></td>'}</tr>`;
     }).join('') || emptyRow(Math.max(1, apiColumns.size), 'No API keys issued yet.');
     $('#apiKeyCards').innerHTML = state.apiKeys.map((key) => {
       const head = `${apiColumns.has('key') ? `<strong>${escapeHtml(key.name)}</strong>` : ''}${apiColumns.has('vendor') ? `<small>${escapeHtml(key.vendor_name)}</small>` : ''}`;
       const details = `${apiColumns.has('key') ? `<span>Key<strong>${escapeHtml(key.masked_key)}</strong></span><span>Clients<strong>${escapeHtml((key.client_names || []).join(', ') || 'None')}</strong></span>` : ''}${apiColumns.has('last_used') ? `<span>Last used<strong>${key.last_used_at ? dateTime(key.last_used_at) : 'Never'}</strong></span>` : ''}${apiColumns.has('created') ? `<span>Created<strong>${dateTime(key.created_at)}</strong></span>` : ''}${apiColumns.has('expires') ? `<span>Expires<strong>${key.expires_at ? dateTime(key.expires_at) : 'Never'}</strong></span>` : ''}`;
-      return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${key.is_active ? stateBadge(true) : stateBadge(false)}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}</div>` : ''}${apiColumns.has('actions') && key.is_active && canRevokeApiKey ? `<button class="vendor-action danger" type="button" data-revoke-api-key="${key.id}">Revoke key</button>` : ''}</article>`;
+      const callback = key.callback_signing_enabled ? `Signed ••••${escapeHtml(key.callback_secret_last_four || '')}` : 'Unsigned';
+      return `<article class="vendor-card">${head ? `<div class="vendor-card-head"><div>${head}</div>${key.is_active ? stateBadge(true) : stateBadge(false)}</div>` : ''}${details ? `<div class="vendor-card-grid">${details}<span>Survey ID mode<strong>${escapeHtml(key.survey_id_mode === 'provider_survey_id' ? 'Provider survey ID' : 'Project ID')}</strong></span><span>Callbacks<strong>${callback}</strong></span></div>` : ''}${apiColumns.has('actions') ? `<button class="vendor-action" type="button" data-edit-api-key="${key.id}">Configure</button>${key.is_active && canRevokeApiKey ? ` <button class="vendor-action danger" type="button" data-revoke-api-key="${key.id}">Revoke key</button>` : ''}` : ''}</article>`;
     }).join('');
   }
 
@@ -287,7 +277,7 @@
       Number(row.vendor) === vendorId && row.is_active
     ));
     container.innerHTML = allocations.length ? allocations.map((row) => (
-      `<label><input type="checkbox" value="${row.id}"><span><strong>${escapeHtml(row.client_name)}</strong><small>${escapeHtml(row.effective_cpi_cut_percent)}% cut · ${number(row.remaining_quantity)} completes left</small></span></label>`
+      `<label><input type="checkbox" value="${row.id}"><span><strong>${escapeHtml(row.client_name)}</strong><small>${escapeHtml(row.effective_cpi_cut_percent)}% CPI cut · all eligible projects</small></span></label>`
     )).join('') : '<div class="vendor-choice-empty">Select an external supplier with an active client allocation.</div>';
   }
 
@@ -349,10 +339,7 @@
   }
 
   function updateSurveyRule() {
-    const parent = state.clientAllocations.find((item) => String(item.id) === field('client_allocation', 'survey').value);
-    const internal = parent?.account_type === 'internal_vendor';
-    field('survey_cpi_cut', 'survey').disabled = internal;
-    if (internal) field('survey_cpi_cut', 'survey').value = '';
+    loadProjectCatalog();
   }
 
   function resetForm(mode) {
@@ -362,7 +349,6 @@
     form.reset();
     $$('input,select', form).forEach((control) => { control.disabled = false; });
     field('record_id').value = '';
-    if (field('survey')) field('survey').value = '';
     if (field('is_active')) field('is_active').checked = true;
     state.selectedSurvey = null;
     if (mode === 'client') setClientSelection([], false);
@@ -373,12 +359,15 @@
     }
     if (mode === 'api_key') renderApiAllocationChoices();
     errorBox.hidden = true;
-    const results = $('#surveySearchResults');
-    if (results) results.hidden = true;
+    if (mode === 'survey') $('#projectCatalog').innerHTML = '<div class="vendor-loading"><i></i>Select a client allocation</div>';
     const issuedPanel = $('#issuedKeyPanel');
     if (issuedPanel) issuedPanel.hidden = true;
     const issuedValue = $('#issuedKeyValue');
     if (issuedValue) issuedValue.value = '';
+    const secretRow = $('#issuedCallbackSecretRow');
+    if (secretRow) secretRow.hidden = true;
+    const secretValue = $('#issuedCallbackSecretValue');
+    if (secretValue) secretValue.value = '';
     const submit = $('[data-vendor-submit]', form);
     submit.hidden = false;
     submit.disabled = false;
@@ -415,9 +404,27 @@
     updatePolicyRule(); showModal();
   }
 
-  function openApiKey() {
+  function openApiKey(recordId = null) {
     resetForm('api_key');
-    $('[data-vendor-submit]', form).textContent = 'Generate secure key';
+    const record = state.apiKeys.find((item) => Number(item.id) === Number(recordId));
+    if (record) {
+      field('record_id').value = record.id;
+      field('api_vendor').value = record.vendor;
+      field('api_vendor').disabled = true;
+      field('api_key_name').value = record.name;
+      field('api_key_expires_at').value = toInputDateTime(record.expires_at);
+      field('api_survey_id_mode').value = record.survey_id_mode || 'project_id';
+      field('api_complete_callback_url').value = record.complete_callback_url || '';
+      field('api_terminate_callback_url').value = record.terminate_callback_url || '';
+      field('api_quota_callback_url').value = record.quota_callback_url || '';
+      field('api_quality_callback_url').value = record.quality_callback_url || '';
+      field('api_callback_signing_enabled').checked = Boolean(record.callback_signing_enabled);
+      renderApiAllocationChoices();
+      const selected = new Set((record.client_allocations || []).map(Number));
+      $$('#apiClientAllocationChoices input[type="checkbox"]').forEach((item) => { item.checked = selected.has(Number(item.value)); });
+    }
+    $('#vendorApiKeyModalTitle').textContent = record ? 'Configure API delivery' : 'Generate API key';
+    $('[data-vendor-submit]', form).textContent = record ? 'Save configuration' : 'Generate secure key';
     showModal();
   }
 
@@ -429,7 +436,6 @@
       field('client_vendor').value = record.vendor;
       setClientSelection([record.client], true);
       field('client_vendor').disabled = true;
-      field('client_quantity_limit').value = record.quantity_limit;
       field('client_cpi_cut').value = record.cpi_cut_override_percent ?? '';
       field('client_min_cpi').value = record.min_cpi ?? '';
       field('client_max_cpi').value = record.max_cpi ?? '';
@@ -455,39 +461,29 @@
     resetForm('survey');
     const record = state.surveyAllocations.find((item) => Number(item.id) === Number(recordId));
     if (record) {
-      field('record_id').value = record.id;
       field('client_allocation').value = record.client_allocation;
-      field('client_allocation').disabled = true;
-      field('survey').value = record.survey;
-      field('survey_search').value = `${record.survey_local_id} · #${record.survey_source_id} · ${record.survey_name || 'Survey'}`;
-      field('survey_search').disabled = true;
-      state.selectedSurvey = { id: record.survey };
-      field('survey_quantity_limit').value = record.quantity_limit;
-      field('survey_cpi_cut').value = record.cpi_cut_override_percent ?? '';
-      field('survey_starts_at').value = toInputDateTime(record.starts_at);
-      field('survey_ends_at').value = toInputDateTime(record.ends_at);
-      field('is_active').checked = record.is_active;
     }
-    $('[data-modal-title]', modal).textContent = record ? 'Edit project allocation' : 'Allocate a project';
-    $('[data-vendor-submit]', form).textContent = record ? 'Save project allocation' : 'Create project allocation';
-    updateSurveyRule(); showModal();
+    $('[data-modal-title]', modal).textContent = 'Manage project access';
+    showModal();
+    if (field('client_allocation').value) loadProjectCatalog();
   }
 
-  function surveyResultMarkup(survey) {
-    return `<button type="button" data-select-survey="${survey.id}"><span><strong>${escapeHtml(survey.local_id)} · #${escapeHtml(survey.source_id)}</strong><small>${escapeHtml(survey.name || 'Survey')} · ${escapeHtml(survey.country_label || '')}</small></span><b>${escapeHtml(survey.cpi ?? '—')}</b></button>`;
+  function projectCatalogMarkup(row) {
+    return `<article class="vendor-project-row"><div><strong>${escapeHtml(row.project_id)}</strong><span>${escapeHtml(row.survey_id)} · ${escapeHtml(row.name || 'Survey')} · ${escapeHtml(row.country || '—')}</span></div><label class="vendor-project-switch"><input type="checkbox" data-project-access="${row.id}"${row.assigned ? ' checked' : ''}><span></span><b>${row.assigned ? 'Assigned' : 'Removed'}</b></label></article>`;
   }
 
-  async function searchSurveys() {
-    const query = field('survey_search').value.trim();
-    const parent = state.clientAllocations.find((item) => String(item.id) === field('client_allocation').value);
-    const results = $('#surveySearchResults');
-    if (!parent || query.length < 2) { results.hidden = true; return; }
+  async function loadProjectCatalog() {
+    const allocationId = Number(field('client_allocation', 'survey')?.value || 0);
+    const container = $('#projectCatalog');
+    if (!allocationId) { container.innerHTML = '<div class="vendor-empty">Select a supplier client allocation.</div>'; return; }
+    container.innerHTML = '<div class="vendor-loading"><i></i>Loading client projects…</div>';
+    const query = field('survey_search', 'survey').value.trim();
     try {
-      const data = await api(`/api/v1/surveys/?page_size=10&client=${encodeURIComponent(parent.client)}&search=${encodeURIComponent(query)}`);
-      const surveys = data.results || data;
-      results.innerHTML = surveys.length ? surveys.map(surveyResultMarkup).join('') : '<div class="vendor-empty">No matching survey</div>';
-      results.hidden = false;
-    } catch (error) { toast(error.message, true); }
+      const data = await api(`/api/v1/vendors/survey-allocations/catalog/?client_allocation=${allocationId}&page_size=100&search=${encodeURIComponent(query)}`);
+      container.innerHTML = data.results.length ? data.results.map(projectCatalogMarkup).join('') : '<div class="vendor-empty">No matching projects.</div>';
+    } catch (error) {
+      container.innerHTML = `<div class="vendor-empty">${escapeHtml(error.message)}</div>`;
+    }
   }
 
   async function reloadData() {
@@ -533,9 +529,11 @@
     const policy = event.target.closest('button[data-edit-policy]');
     const client = event.target.closest('[data-edit-client]');
     const survey = event.target.closest('[data-edit-survey]');
+    const apiKey = event.target.closest('[data-edit-api-key]');
     if (policy && canEditPolicy) { event.preventDefault(); openPolicy(policy.dataset.editPolicy); return; }
     if (client && canAllocateClient) { event.preventDefault(); openClientAllocation(client.dataset.editClient); return; }
     if (survey && canAllocateProject) { event.preventDefault(); openSurveyAllocation(survey.dataset.editSurvey); return; }
+    if (apiKey && canCreateApiKey) { event.preventDefault(); openApiKey(apiKey.dataset.editApiKey); return; }
     const revokeKey = event.target.closest('button[data-revoke-api-key]');
     if (revokeKey && canRevokeApiKey && confirm('Revoke this API key permanently?')) {
       api(`/api/v1/vendors/api-keys/${revokeKey.dataset.revokeApiKey}/`, { method: 'DELETE' })
@@ -550,22 +548,33 @@
   field('client_vendor', 'client').addEventListener('change', updateClientRule);
   field('api_vendor', 'api_key').addEventListener('change', renderApiAllocationChoices);
   field('client_allocation', 'survey').addEventListener('change', () => {
-    field('survey', 'survey').value = ''; field('survey_search', 'survey').value = ''; state.selectedSurvey = null;
-    updateSurveyRule();
+    field('survey_search', 'survey').value = '';
+    loadProjectCatalog();
   });
   field('survey_search', 'survey').addEventListener('input', () => {
-    field('survey', 'survey').value = ''; state.selectedSurvey = null;
-    clearTimeout(state.searchTimer); state.searchTimer = setTimeout(searchSurveys, 260);
+    clearTimeout(state.searchTimer); state.searchTimer = setTimeout(loadProjectCatalog, 260);
   });
-  $('#surveySearchResults').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-select-survey]');
-    if (!button) return;
-    const label = button.querySelector('strong').textContent;
-    const subtitle = button.querySelector('small').textContent.split(' · ')[0];
-    field('survey').value = button.dataset.selectSurvey;
-    field('survey_search').value = `${label} · ${subtitle}`;
-    state.selectedSurvey = { id: Number(button.dataset.selectSurvey) };
-    $('#surveySearchResults').hidden = true;
+  $('#projectCatalog').addEventListener('change', async (event) => {
+    const toggle = event.target.closest('[data-project-access]');
+    if (!toggle) return;
+    toggle.disabled = true;
+    try {
+      await api('/api/v1/vendors/survey-allocations/set-access/', {
+        method: 'POST',
+        body: JSON.stringify({
+          client_allocation: Number(field('client_allocation', 'survey').value),
+          survey: Number(toggle.dataset.projectAccess),
+          assigned: toggle.checked,
+        }),
+      });
+      toast(toggle.checked ? 'Project restored.' : 'Project removed.');
+      await reloadData();
+      await loadProjectCatalog();
+    } catch (error) {
+      toggle.checked = !toggle.checked;
+      toggle.disabled = false;
+      toast(error.message, true);
+    }
   });
   clientPicker.querySelector('.vendor-client-picker-trigger').addEventListener('click', () => {
     const open = !clientPicker.classList.contains('open');
@@ -591,6 +600,10 @@
     await navigator.clipboard.writeText($('#issuedKeyValue').value);
     toast('API key copied. Store it securely.');
   });
+  $('#copyIssuedCallbackSecret').addEventListener('click', async () => {
+    await navigator.clipboard.writeText($('#issuedCallbackSecretValue').value);
+    toast('Callback hash secret copied. Store it securely.');
+  });
 
   async function submitVendorForm(event) {
     event.preventDefault();
@@ -615,7 +628,6 @@
       if (!clientIds.length) { errorBox.textContent = 'Select at least one client.'; errorBox.hidden = false; return; }
       payload = {
         vendor: Number(field('client_vendor').value), client: clientIds[0],
-        quantity_limit: Number(field('client_quantity_limit').value),
         cpi_cut_override_percent: field('client_cpi_cut').disabled ? null : nullableNumber(field('client_cpi_cut').value),
         min_cpi: nullableNumber(field('client_min_cpi').value),
         max_cpi: nullableNumber(field('client_max_cpi').value),
@@ -623,17 +635,9 @@
         is_active: field('is_active').checked,
       };
     } else if (mode === 'survey') {
-      if (!field('survey').value) { errorBox.textContent = 'Select a survey from the search results.'; errorBox.hidden = false; return; }
-      url = `/api/v1/vendors/survey-allocations/${id ? `${id}/` : ''}`;
-      payload = {
-        client_allocation: Number(field('client_allocation').value), survey: Number(field('survey').value),
-        quantity_limit: Number(field('survey_quantity_limit').value),
-        cpi_cut_override_percent: field('survey_cpi_cut').disabled ? null : nullableNumber(field('survey_cpi_cut').value),
-        starts_at: toApiDateTime(field('survey_starts_at').value), ends_at: toApiDateTime(field('survey_ends_at').value),
-        is_active: field('is_active').checked,
-      };
+      return;
     } else {
-      url = '/api/v1/vendors/api-keys/';
+      url = `/api/v1/vendors/api-keys/${id ? `${id}/` : ''}`;
       const allocationIds = selectedApiAllocationIds();
       if (!allocationIds.length) {
         errorBox.textContent = 'Select at least one client for this API key.'; errorBox.hidden = false; return;
@@ -642,6 +646,12 @@
         vendor: Number(field('api_vendor').value), name: field('api_key_name').value.trim(),
         client_allocations: allocationIds,
         expires_at: toApiDateTime(field('api_key_expires_at').value),
+        survey_id_mode: field('api_survey_id_mode').value,
+        complete_callback_url: field('api_complete_callback_url').value.trim(),
+        terminate_callback_url: field('api_terminate_callback_url').value.trim(),
+        quota_callback_url: field('api_quota_callback_url').value.trim(),
+        quality_callback_url: field('api_quality_callback_url').value.trim(),
+        callback_signing_enabled: field('api_callback_signing_enabled').checked,
       };
     }
     try {
@@ -654,12 +664,20 @@
         }
       } else result = await api(url, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       if (mode === 'api_key') {
-        $('#issuedKeyValue').value = result.api_key;
-        $('#issuedKeyPanel').hidden = false;
-        $$('input,select', form).forEach((control) => { control.disabled = true; });
-        submit.hidden = true;
-        toast('API key generated. Copy it now.');
-        await reloadData();
+        if (result.api_key || result.callback_secret) {
+          $('#issuedKeyValue').value = result.api_key || 'Existing API key unchanged';
+          $('#issuedKeyPanel').hidden = false;
+          if (result.callback_secret) {
+            $('#issuedCallbackSecretValue').value = result.callback_secret;
+            $('#issuedCallbackSecretRow').hidden = false;
+          }
+          $$('input,select', form).forEach((control) => { control.disabled = true; });
+          submit.hidden = true;
+          toast(result.api_key ? 'API key generated. Copy it now.' : 'Signing secret generated. Copy it now.');
+          await reloadData();
+        } else {
+          closeModal(); toast('API delivery configuration saved.'); await reloadData();
+        }
       } else {
         const count = mode === 'client' && !id ? selectedClientIds().length : 1;
         closeModal(); toast(id ? 'Changes saved.' : (count > 1 ? `${count} client allocations created.` : 'Configuration created.')); await reloadData();

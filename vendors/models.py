@@ -469,6 +469,10 @@ class VendorCommercialProfile(models.Model):
 class VendorAPIKey(models.Model):
     """Revocable, hashed API credential for one external supplier account."""
 
+    class SurveyIdMode(models.TextChoices):
+        PROJECT_ID = "project_id", "Project ID (recommended)"
+        PROVIDER_SURVEY_ID = "provider_survey_id", "Provider survey ID"
+
     vendor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -478,12 +482,28 @@ class VendorAPIKey(models.Model):
         "VendorClientAllocation",
         blank=True,
         related_name="api_keys",
-        help_text="Client grants this key may expose. Project visibility and caps still follow the live allocation rules.",
+        help_text="Client grants this key may expose. Per-project access exclusions still follow the live allocation rules.",
     )
     name = models.CharField(max_length=120)
     prefix = models.CharField(max_length=16, db_index=True)
     last_four = models.CharField(max_length=4)
     key_hash = models.CharField(max_length=64, unique=True, editable=False)
+    survey_id_mode = models.CharField(
+        max_length=24,
+        choices=SurveyIdMode.choices,
+        default=SurveyIdMode.PROJECT_ID,
+        help_text="Controls which identifier is exposed as survey_id in this key's inventory.",
+    )
+    complete_callback_url = models.URLField(max_length=1000, blank=True)
+    terminate_callback_url = models.URLField(max_length=1000, blank=True)
+    quota_callback_url = models.URLField(max_length=1000, blank=True)
+    quality_callback_url = models.URLField(max_length=1000, blank=True)
+    callback_signing_enabled = models.BooleanField(
+        default=False,
+        help_text="Append an HMAC-SHA256 hash to callbacks sent to this supplier.",
+    )
+    encrypted_callback_secret = models.TextField(blank=True, editable=False)
+    callback_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
     is_active = models.BooleanField(default=True, db_index=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
@@ -509,6 +529,24 @@ class VendorAPIKey(models.Model):
     def masked_key(self):
         return f"{self.prefix}••••{self.last_four}"
 
+    @property
+    def callback_configured(self):
+        return any((
+            self.complete_callback_url,
+            self.terminate_callback_url,
+            self.quota_callback_url,
+            self.quality_callback_url,
+        ))
+
+    def callback_url_for_status(self, status_code: str) -> str:
+        status_code = str(status_code)
+        return {
+            "1": self.complete_callback_url,
+            "2": self.terminate_callback_url,
+            "3": self.quota_callback_url,
+            "4": self.quality_callback_url,
+        }.get(status_code, self.terminate_callback_url)
+
     def clean(self):
         super().clean()
         account_type = getattr(getattr(self.vendor, "employee_profile", None), "account_type", "")
@@ -520,7 +558,11 @@ class VendorAPIKey(models.Model):
 
 
 class VendorClientAllocation(models.Model):
-    """Client eligibility, shared complete ceiling and client-level CPI policy."""
+    """Client eligibility and client-level CPI policy.
+
+    Legacy quantity columns remain only for historical compatibility and are
+    deliberately excluded from current supplier delivery decisions.
+    """
 
     vendor = models.ForeignKey(
         settings.AUTH_USER_MODEL,

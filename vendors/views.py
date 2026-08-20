@@ -20,6 +20,7 @@ from accounts.access import (
     has_function_access,
 )
 from accounts.models import EmployeeProfile
+from surveys.models import Survey
 
 from .access import (
     organization_workspace_owner_ids,
@@ -66,11 +67,11 @@ def vendor_management_page(request):
         if f"vendors.column.vendor.{name}" in codes
     ]
     client_columns = [
-        name for name in ("vendor", "client", "quantity", "cpi", "window", "actions")
+        name for name in ("vendor", "client", "cpi", "window", "actions")
         if f"vendors.column.client.{name}" in codes
     ]
     project_columns = [
-        name for name in ("vendor", "survey", "client", "quantity", "cpi", "actions")
+        name for name in ("vendor", "survey", "client", "cpi", "actions")
         if f"vendors.column.project.{name}" in codes
     ]
     api_columns = [
@@ -84,7 +85,7 @@ def vendor_management_page(request):
     return render(request, "vendors/management.html", {
         "active_page": "vendors",
         "vendor_cards": [
-            name for name in ("vendors", "client_grants", "quantity", "projects")
+            name for name in ("vendors", "client_grants", "projects")
             if f"vendors.card.{name}" in codes
         ],
         "can_view_vendors": "vendors.tab.policies" in codes,
@@ -665,8 +666,8 @@ class VendorAPIKeyViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier client grants and quantities"),
-    create=extend_schema(tags=["Suppliers & allocations"], summary="Allocate a client and quantity to a supplier"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier client grants"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Allocate a client to a supplier"),
     retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a supplier client allocation"),
     update=extend_schema(tags=["Suppliers & allocations"], summary="Replace a supplier client allocation"),
     partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a supplier client allocation"),
@@ -685,17 +686,17 @@ class VendorClientAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["vendor", "client", "vendor__employee_profile__account_type", "is_active"]
     search_fields = ["vendor__username", "vendor__first_name", "vendor__last_name", "client__name", "client__code"]
-    ordering_fields = ["created_at", "updated_at", "quantity_limit", "consumed_quantity"]
+    ordering_fields = ["created_at", "updated_at", "client__name"]
     ordering = ["client__name", "vendor__username"]
     vendor_scope_filter = "vendor_id"
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier project allocations and complete caps"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Allocate a visible project with a complete cap"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier project access overrides"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Create a project access override"),
     retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a project allocation"),
     update=extend_schema(tags=["Vendors & allocations"], summary="Replace a project allocation"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a project allocation or cap"),
+    partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a project access override"),
     destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a project allocation"),
 )
 class VendorSurveyAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
@@ -715,9 +716,115 @@ class VendorSurveyAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
         "client_allocation__vendor__username", "client_allocation__vendor__first_name",
         "client_allocation__vendor__last_name", "survey__local_id", "survey__source_id", "survey__name",
     ]
-    ordering_fields = ["created_at", "updated_at", "quantity_limit", "consumed_quantity"]
+    ordering_fields = ["created_at", "updated_at", "survey__local_id", "survey__source_key"]
     ordering = ["survey__source_id", "client_allocation__vendor__username"]
     vendor_scope_filter = "client_allocation__vendor_id"
+
+    @action(detail=False, methods=["get"], url_path="catalog")
+    def catalog(self, request):
+        """Return every client project; missing overrides mean access is on."""
+
+        if vendor_scope_user_id(request.user):
+            raise PermissionDenied("Only the owner workspace can manage supplier project access.")
+        try:
+            allocation_id = int(request.query_params.get("client_allocation", ""))
+        except (TypeError, ValueError):
+            return Response({"detail": "client_allocation is required."}, status=status.HTTP_400_BAD_REQUEST)
+        allocation = VendorClientAllocation.objects.select_related("client", "vendor").filter(
+            pk=allocation_id,
+            vendor__employee_profile__account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+        ).first()
+        if not allocation:
+            return Response({"detail": "Client allocation was not found."}, status=status.HTTP_404_NOT_FOUND)
+        surveys = Survey.objects.filter(client_id=allocation.client_id).order_by("local_id")
+        search = str(request.query_params.get("search") or "").strip()
+        if search:
+            surveys = surveys.filter(
+                Q(local_id__icontains=search)
+                | Q(source_key__icontains=search)
+                | Q(name__icontains=search)
+            )
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = min(100, max(10, int(request.query_params.get("page_size", 30))))
+        except (TypeError, ValueError):
+            page, page_size = 1, 30
+        total = surveys.count()
+        rows = list(surveys[(page - 1) * page_size:page * page_size])
+        rules = {
+            rule.survey_id: rule
+            for rule in VendorSurveyAllocation.objects.filter(
+                client_allocation=allocation,
+                survey_id__in=[row.pk for row in rows],
+            )
+        }
+        return Response({
+            "count": total,
+            "page": page,
+            "page_size": page_size,
+            "results": [
+                {
+                    "id": row.pk,
+                    "project_id": row.local_id,
+                    "survey_id": str(row.source_identifier),
+                    "name": row.name,
+                    "country": row.country_code or row.country,
+                    "status": row.status,
+                    "assigned": bool(rules[row.pk].is_active) if row.pk in rules else True,
+                    "override_id": rules[row.pk].pk if row.pk in rules else None,
+                }
+                for row in rows
+            ],
+        })
+
+    @action(detail=False, methods=["post"], url_path="set-access")
+    def set_access(self, request):
+        """Enable or exclude one project beneath an existing client grant."""
+
+        if vendor_scope_user_id(request.user):
+            raise PermissionDenied("Only the owner workspace can manage supplier project access.")
+        try:
+            allocation_id = int(request.data.get("client_allocation"))
+            survey_id = int(request.data.get("survey"))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "client_allocation and survey are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        assigned = request.data.get("assigned")
+        if not isinstance(assigned, bool):
+            return Response({"detail": "assigned must be true or false."}, status=status.HTTP_400_BAD_REQUEST)
+        allocation = VendorClientAllocation.objects.filter(
+            pk=allocation_id,
+            vendor__employee_profile__account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+        ).first()
+        survey = Survey.objects.filter(pk=survey_id).first()
+        if not allocation or not survey or survey.client_id != allocation.client_id:
+            return Response({"detail": "Project does not belong to this client allocation."}, status=status.HTTP_400_BAD_REQUEST)
+        rule = VendorSurveyAllocation.objects.filter(
+            client_allocation=allocation,
+            survey=survey,
+        ).first()
+        if assigned:
+            if rule:
+                rule.is_active = True
+                rule.save(update_fields=["is_active", "updated_at"])
+        elif rule:
+            rule.is_active = False
+            rule.save(update_fields=["is_active", "updated_at"])
+        else:
+            rule = VendorSurveyAllocation.objects.create(
+                client_allocation=allocation,
+                survey=survey,
+                is_active=False,
+                created_by=request.user,
+            )
+        return Response({
+            "client_allocation": allocation.pk,
+            "survey": survey.pk,
+            "assigned": assigned,
+            "override_id": rule.pk if rule else None,
+        })
 
 
 @extend_schema_view(

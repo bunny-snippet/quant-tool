@@ -16,6 +16,25 @@ def _fernet() -> Fernet:
     return Fernet(key)
 
 
+def encrypt_secret(value: str) -> str:
+    """Encrypt a supplier-facing shared secret with the deployment key."""
+
+    value = str(value or "").strip()
+    return _fernet().encrypt(value.encode("utf-8")).decode("ascii") if value else ""
+
+
+def decrypt_secret(value: str) -> str:
+    """Decrypt a supplier-facing shared secret without exposing it in models/admin."""
+
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
+    except InvalidToken as exc:
+        raise ValueError("Stored supplier callback secret cannot be decrypted. Check the encryption key.") from exc
+
+
 def token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.strip().encode("utf-8")).hexdigest() if token.strip() else ""
 

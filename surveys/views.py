@@ -8,6 +8,7 @@ from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.db import DatabaseError, transaction
 from django.db.models import Count, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
@@ -45,6 +46,9 @@ from vendors.services import (
     scope_surveys_for_user,
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
+from vendors.credentials import decrypt_secret
+from vendors.models import VendorAPIKey
+from vendors.security import decode_delivery_token, sign_supplier_callback
 
 from .filters import SurveyAttemptFilter, SurveyFilter
 from .dashboard import (
@@ -1213,6 +1217,9 @@ def _finish_wrong_target_country_attempt(attempt, request, location):
 def survey_start(request):
     if request.method == "GET" and not request.GET.get("rid"):
         required_params = {"surveyId", "supplierCode", "userId", "code"}
+        has_delivery_parameter = "delivery" in request.GET
+        if has_delivery_parameter:
+            required_params.add("delivery")
         if not _has_exact_query(request, required_params):
             return _invalid_survey_link(request)
 
@@ -1220,6 +1227,7 @@ def survey_start(request):
         supplier_code = request.GET.get("supplierCode", "").strip()
         internal_code = request.GET.get("code", "").strip()
         user_id = request.GET.get("userId", "").strip()
+        delivery_token = request.GET.get("delivery", "").strip()
         if (
             not survey_id
             or len(survey_id) > 160
@@ -1229,6 +1237,25 @@ def survey_start(request):
         ):
             return _invalid_survey_link(request)
 
+        delivery_api_key = None
+        delivery_survey_id = None
+        if has_delivery_parameter:
+            try:
+                delivery = decode_delivery_token(delivery_token)
+                delivery_api_key = VendorAPIKey.objects.select_related(
+                    "vendor", "vendor__employee_profile", "vendor__vendor_commercial_profile"
+                ).get(pk=int(delivery["api_key_id"]))
+                delivery_survey_id = int(delivery["survey_id"])
+            except (KeyError, TypeError, ValueError, signing.BadSignature, VendorAPIKey.DoesNotExist):
+                return _invalid_survey_link(request)
+            if (
+                not delivery_api_key.is_active
+                or delivery_api_key.revoked_at
+                or (delivery_api_key.expires_at and delivery_api_key.expires_at <= timezone.now())
+                or str(delivery_api_key.vendor_id) != user_id
+            ):
+                return _invalid_survey_link(request)
+
         platform_user = get_user_model().objects.filter(pk=int(user_id), is_active=True).first()
         if (
             platform_user is None
@@ -1237,12 +1264,24 @@ def survey_start(request):
         ):
             return _invalid_survey_link(request)
 
-        survey = scope_surveys_for_user(
+        survey_queryset = scope_surveys_for_user(
             Survey.objects.select_related("integration", "client"), platform_user
-        ).filter(
-            source_key=survey_id, local_id=internal_code, status=Survey.Status.LIVE
+        )
+        if delivery_api_key:
+            survey_queryset = scope_surveys_for_api_key(survey_queryset, delivery_api_key)
+        survey = survey_queryset.filter(
+            local_id=internal_code,
+            status=Survey.Status.LIVE,
+            **({"pk": delivery_survey_id} if delivery_survey_id else {}),
         ).first()
         if survey is None:
+            return _invalid_survey_link(request)
+        expected_survey_id = (
+            survey.local_id
+            if delivery_api_key and delivery_api_key.survey_id_mode == VendorAPIKey.SurveyIdMode.PROJECT_ID
+            else str(survey.source_identifier)
+        )
+        if survey_id != expected_survey_id:
             return _invalid_survey_link(request)
         is_rfg = bool(
             survey.integration_id and survey.integration.provider_code == "rfg"
@@ -1252,7 +1291,7 @@ def survey_start(request):
         )
         if not survey.entry_link and not is_dynamic_provider:
             return _invalid_survey_link(request)
-        expected_supplier_code = survey.integration.supplier_code if survey.integration_id else settings.PUBLIC_SUPPLIER_CODE
+        expected_supplier_code = settings.PUBLIC_SUPPLIER_CODE
         if supplier_code != expected_supplier_code:
             return _invalid_survey_link(request)
 
@@ -1321,6 +1360,19 @@ def survey_start(request):
                         allocation_context.survey_allocation,
                         client_allocation=allocation_context.client_allocation,
                     )
+                if delivery_api_key:
+                    delivery_config = {
+                        "survey_id_mode": delivery_api_key.survey_id_mode,
+                        "survey_id": expected_survey_id,
+                        "project_id": survey.local_id,
+                        "supplier_id": delivery_api_key.vendor_id,
+                    }
+                    SurveyAttempt.objects.filter(pk=attempt.pk).update(
+                        supplier_api_key_id=delivery_api_key.pk,
+                        supplier_delivery_config=delivery_config,
+                    )
+                    attempt.supplier_api_key_id = delivery_api_key.pk
+                    attempt.supplier_delivery_config = delivery_config
         except AllocationUnavailable as exc:
             return _invalid_survey_link(request, str(exc), status_code=409)
         if targeting_warning:
@@ -1720,6 +1772,43 @@ class RFGCallbackAPIView(APIView):
         return Response({"ok": True, "rid": rid, "status": locked.status})
 
 
+def _external_supplier_result_url(attempt, status_code: str) -> str:
+    """Forward a recorded result to the issuing external supplier."""
+
+    if not attempt.supplier_api_key_id:
+        return ""
+    api_key = VendorAPIKey.objects.filter(pk=attempt.supplier_api_key_id).first()
+    if not api_key:
+        return ""
+    callback_url = api_key.callback_url_for_status(status_code)
+    if not callback_url:
+        return ""
+    outcome = provider_outcome(attempt)
+    delivery = attempt.supplier_delivery_config or {}
+    parameters = {
+        "status": str(status_code),
+        "surveyId": str(delivery.get("survey_id") or attempt.survey.local_id),
+        "projectId": attempt.survey.local_id,
+        "rid": attempt.rid,
+        "pid": getattr(attempt, "pid", "") or attempt.rid,
+        "statusSource": attempt.status_source or "browser_callback",
+        "termReason": outcome.get("reason", ""),
+        "termCategory": outcome.get("category", ""),
+    }
+    if api_key.callback_signing_enabled:
+        try:
+            secret = decrypt_secret(api_key.encrypted_callback_secret)
+        except ValueError:
+            logger.exception("Could not decrypt supplier callback secret api_key=%s", api_key.pk)
+            return ""
+        if not secret:
+            logger.error("Supplier callback signing is enabled without a secret api_key=%s", api_key.pk)
+            return ""
+        parameters["hash"] = sign_supplier_callback(parameters, secret)
+    separator = "&" if "?" in callback_url else "?"
+    return f"{callback_url}{separator}{urlencode(parameters)}"
+
+
 @require_http_methods(["GET"])
 def survey_status(request):
     status_code = request.GET.get("status", "").strip()
@@ -1801,6 +1890,9 @@ def survey_status(request):
                 "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
             ])
             finalize_attempt_capacity(attempt)
+        supplier_callback_url = _external_supplier_result_url(attempt, status_code)
+        if supplier_callback_url:
+            return HttpResponseRedirect(supplier_callback_url)
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES.get(attempt.status, page)
         else:

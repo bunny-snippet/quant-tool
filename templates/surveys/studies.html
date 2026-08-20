@@ -89,7 +89,7 @@
     <label id="attemptStatusLabel">Status</label>
     <div class="multi-select" data-multi-filter="status">
       <button class="multi-trigger" type="button" aria-labelledby="attemptStatusLabel" aria-expanded="false"><span>All statuses</span><i>⌄</i></button>
-      <div class="multi-menu" hidden>{% for value, label in attempt_statuses %}<label><input type="checkbox" value="{{ value }}"><span>{{ label }}</span></label>{% endfor %}</div>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search status…" aria-label="Search statuses" autocomplete="off"></div><div class="multi-options">{% for value, label in attempt_statuses %}<label><input type="checkbox" value="{{ value }}"><span>{{ label }}</span></label>{% endfor %}</div><p class="multi-no-results" hidden>No matching status</p></div>
     </div>
   </div>{% endif %}
   {% if study_filters.country %}<div class="field multi-field">
@@ -107,14 +107,14 @@
     <label id="studyClientLabel">Client</label>
     <div class="multi-select" data-multi-filter="client">
       <button class="multi-trigger" type="button" aria-labelledby="studyClientLabel" aria-expanded="false"><span>All clients</span><i>⌄</i></button>
-      <div class="multi-menu" hidden><div class="multi-options">{% for client in study_clients %}<label><input type="checkbox" value="{{ client.survey__client_id }}"><span>{{ client.survey__client__name }}</span></label>{% empty %}<span class="filter-empty">No clients yet</span>{% endfor %}</div></div>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search client…" aria-label="Search clients" autocomplete="off"></div><div class="multi-options">{% for client in study_clients %}<label><input type="checkbox" value="{{ client.survey__client_id }}"><span>{{ client.survey__client__name }}</span></label>{% empty %}<span class="filter-empty">No clients yet</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching client</p></div>
     </div>
   </div>{% endif %}
   {% if study_filters.buyer %}<div class="field multi-field">
     <label id="studyBuyerLabel">Sub-client / Buyer ID</label>
     <div class="multi-select" data-multi-filter="buyer_id">
       <button class="multi-trigger" type="button" aria-labelledby="studyBuyerLabel" aria-expanded="false"><span>All buyer IDs</span><i>⌄</i></button>
-      <div class="multi-menu" hidden><div class="multi-options">{% for buyer in study_buyers %}<label data-client-id="{{ buyer.survey__client_id|default:'' }}"><input type="checkbox" value="{{ buyer.survey__buyer_id }}"><span>{{ buyer.survey__buyer_id }}</span></label>{% empty %}<span class="filter-empty">No buyer IDs yet</span>{% endfor %}</div></div>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search buyer ID…" aria-label="Search buyer IDs" autocomplete="off"></div><div class="multi-options">{% for buyer in study_buyers %}<label data-client-id="{{ buyer.survey__client_id|default:'' }}"><input type="checkbox" value="{{ buyer.survey__buyer_id }}"><span>{{ buyer.survey__buyer_id }}</span></label>{% empty %}<span class="filter-empty">No buyer IDs yet</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching buyer ID</p></div>
     </div>
   </div>{% endif %}
   {% if study_filters.date %}<div class="field">

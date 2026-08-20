@@ -352,6 +352,19 @@ class SurveyAttempt(models.Model):
         related_name="attempts",
         on_delete=models.PROTECT,
     )
+    supplier_api_key_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        editable=False,
+        help_text="API key that issued this respondent entry link, stored without coupling attempt history to key deletion.",
+    )
+    supplier_delivery_config = models.JSONField(
+        default=dict,
+        blank=True,
+        editable=False,
+        help_text="Immutable non-secret external-supplier delivery snapshot for this journey.",
+    )
     user_id = models.CharField(max_length=160, db_index=True)
     supplier_code = models.CharField(max_length=40, blank=True)
     source_cpi_snapshot = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)

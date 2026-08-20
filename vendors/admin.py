@@ -49,48 +49,39 @@ class VendorCommercialProfileAdmin(admin.ModelAdmin):
 
 @admin.register(VendorAPIKey)
 class VendorAPIKeyAdmin(admin.ModelAdmin):
-    list_display = ["vendor", "name", "masked_key", "is_active", "expires_at", "last_used_at", "created_at"]
+    list_display = ["vendor", "name", "masked_key", "survey_id_mode", "callback_signing_enabled", "is_active", "expires_at", "last_used_at", "created_at"]
     search_fields = ["vendor__username", "vendor__email", "name", "prefix"]
     list_filter = ["is_active", "created_at", "expires_at"]
-    readonly_fields = ["prefix", "last_four", "key_hash", "last_used_at", "revoked_at", "created_at", "updated_at"]
+    readonly_fields = ["prefix", "last_four", "key_hash", "encrypted_callback_secret", "callback_secret_last_four", "last_used_at", "revoked_at", "created_at", "updated_at"]
 
 
 @admin.register(VendorClientAllocation)
 class VendorClientAllocationAdmin(admin.ModelAdmin):
     list_display = [
-        "vendor", "client", "quantity_limit", "reserved_quantity", "consumed_quantity",
-        "remaining", "cpi_cut_override_percent", "is_active",
+        "vendor", "client", "cpi_cut_override_percent", "min_cpi", "max_cpi", "is_active",
     ]
     search_fields = ["vendor__username", "vendor__email", "client__name", "client__code"]
     list_filter = ["client", "is_active"]
-    readonly_fields = ["reserved_quantity", "consumed_quantity", "created_at", "updated_at"]
-
-    @admin.display(description="Remaining")
-    def remaining(self, obj):
-        return obj.remaining_quantity
+    readonly_fields = ["created_at", "updated_at"]
+    exclude = ["quantity_limit", "reserved_quantity", "consumed_quantity"]
 
 
 @admin.register(VendorSurveyAllocation)
 class VendorSurveyAllocationAdmin(admin.ModelAdmin):
     list_display = [
-        "vendor_name", "survey", "quantity_limit", "reserved_quantity", "consumed_quantity",
-        "remaining", "cpi_cut_override_percent", "is_active",
+        "vendor_name", "survey", "cpi_cut_override_percent", "is_active",
     ]
     search_fields = [
         "client_allocation__vendor__username", "client_allocation__vendor__email",
         "survey__local_id", "survey__source_key", "survey__source_id", "survey__name",
     ]
     list_filter = ["client_allocation__client", "is_active"]
-    readonly_fields = ["reserved_quantity", "consumed_quantity", "created_at", "updated_at"]
+    readonly_fields = ["created_at", "updated_at"]
+    exclude = ["quantity_limit", "reserved_quantity", "consumed_quantity"]
 
     @admin.display(description="Vendor")
     def vendor_name(self, obj):
         return obj.vendor
-
-    @admin.display(description="Remaining")
-    def remaining(self, obj):
-        return obj.remaining_quantity
-
 
 @admin.register(AllocationReservation)
 class AllocationReservationAdmin(admin.ModelAdmin):

@@ -179,12 +179,6 @@ def _active_window_q(now, prefix="") -> Q:
     )
 
 
-def _available_quantity_q(prefix="") -> Q:
-    return Q(**{
-        f"{prefix}quantity_limit__gt": F(f"{prefix}consumed_quantity") + F(f"{prefix}reserved_quantity")
-    })
-
-
 def organization_client_policies_for_user(user) -> dict[int, OrganizationClientPolicy] | None:
     """Resolve per-client Branch -> Sub-branch -> Shift inheritance."""
     if hasattr(user, "_organization_client_policies_cache"):
@@ -254,7 +248,6 @@ def scope_surveys_for_user(queryset, user):
             is_active=True,
         )
         .filter(_active_window_q(now))
-        .filter(_available_quantity_q())
         .select_related("vendor", "vendor__employee_profile", "vendor__vendor_commercial_profile", "client")
     )
     if not client_allocations:
@@ -270,7 +263,6 @@ def scope_surveys_for_user(queryset, user):
     available_rules = (
         VendorSurveyAllocation.objects.filter(client_allocation_id__in=allocation_ids, is_active=True)
         .filter(_active_window_q(now))
-        .filter(_available_quantity_q())
         .select_related("client_allocation", "client_allocation__vendor", "client_allocation__vendor__employee_profile")
     )
     scoped = (
@@ -302,12 +294,32 @@ def scope_surveys_for_api_key(queryset, api_key):
 
     if not isinstance(api_key, VendorAPIKey):
         return queryset
-    client_ids = api_key.client_allocations.filter(
+    now = timezone.now()
+    allocations = api_key.client_allocations.filter(
         vendor_id=api_key.vendor_id,
         is_active=True,
         client__is_active=True,
-    ).values("client_id")
-    return queryset.filter(client_id__in=Subquery(client_ids)).distinct()
+    ).filter(_active_window_q(now))
+    client_ids = allocations.values("client_id")
+    allocation_ids = allocations.values("id")
+    all_project_rules = VendorSurveyAllocation.objects.filter(
+        client_allocation_id__in=Subquery(allocation_ids),
+        survey_id=OuterRef("pk"),
+    )
+    available_rules = VendorSurveyAllocation.objects.filter(
+        client_allocation_id__in=Subquery(allocation_ids),
+        survey_id=OuterRef("pk"),
+        is_active=True,
+    ).filter(_active_window_q(now))
+    return (
+        queryset.filter(client_id__in=Subquery(client_ids))
+        .annotate(
+            api_has_project_rule=Exists(all_project_rules),
+            api_has_available_project_rule=Exists(available_rules),
+        )
+        .filter(Q(api_has_project_rule=False) | Q(api_has_available_project_rule=True))
+        .distinct()
+    )
 
 
 def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True, for_update=False):
@@ -341,9 +353,6 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
         raise AllocationUnavailable("This client is not allocated to the supplier.")
     if not _cpi_in_range(survey.cpi, client_allocation.min_cpi, client_allocation.max_cpi):
         raise AllocationUnavailable("This project's CPI is outside the supplier's client policy.")
-    if require_capacity and client_allocation.remaining_quantity < 1:
-        raise AllocationUnavailable("Client quantity is exhausted.")
-
     survey_queryset = VendorSurveyAllocation.objects.select_related("client_allocation")
     if for_update:
         survey_queryset = survey_queryset.select_for_update()
@@ -353,8 +362,6 @@ def resolve_vendor_survey_context(user, survey: Survey, *, require_capacity=True
     ).first()
     if survey_allocation and not _is_active_now(survey_allocation, now):
         raise AllocationUnavailable("This project is disabled or outside its allocation dates.")
-    if require_capacity and survey_allocation and survey_allocation.remaining_quantity < 1:
-        raise AllocationUnavailable("Project complete cap is exhausted.")
     if require_capacity and survey.remaining < 1:
         raise AllocationUnavailable("Upstream survey quantity is exhausted.")
 
@@ -445,7 +452,6 @@ def annotate_survey_pricing_for_user(queryset, user, *, alias="visible_cpi"):
                     is_active=True,
                 )
                 .filter(_active_window_q(now))
-                .filter(_available_quantity_q())
                 .annotate(
                     resolved_cut=Coalesce(
                         "cpi_cut_override_percent",
@@ -468,9 +474,7 @@ def annotate_survey_pricing_for_user(queryset, user, *, alias="visible_cpi"):
                     is_active=True,
                 )
                 .filter(_active_window_q(now))
-                .filter(_available_quantity_q())
                 .filter(_active_window_q(now, "client_allocation__"))
-                .filter(_available_quantity_q("client_allocation__"))
                 .annotate(
                     resolved_cut=Coalesce(
                         "cpi_cut_override_percent",
@@ -516,7 +520,7 @@ def reserve_attempt_capacity(
     client_allocation: VendorClientAllocation | None = None,
     expires_at=None,
 ) -> AllocationReservation:
-    """Reserve one unit and freeze the attempt's supplier/client/CPI context.
+    """Freeze the attempt's supplier/client/CPI context.
 
     The caller may wrap attempt creation and this function in an outer atomic
     transaction when enforcement is connected to the respondent start flow.
@@ -558,10 +562,6 @@ def reserve_attempt_capacity(
         raise AllocationUnavailable("Client allocation is inactive or outside its active dates.")
     if locked_survey_allocation and not _is_active_now(locked_survey_allocation, now):
         raise AllocationUnavailable("Project allocation is inactive or outside its active dates.")
-    if client_allocation.remaining_quantity < 1:
-        raise AllocationUnavailable("Client quantity is exhausted.")
-    if locked_survey_allocation and locked_survey_allocation.remaining_quantity < 1:
-        raise AllocationUnavailable("Project complete cap is exhausted.")
     if attempt.survey.remaining < 1:
         raise AllocationUnavailable("Upstream survey quantity is exhausted.")
 
@@ -571,12 +571,6 @@ def reserve_attempt_capacity(
         cut = Decimal("0.00")
     source_cpi = attempt.survey.cpi
     final_cpi = payable_cpi(source_cpi, cut)
-
-    client_allocation.reserved_quantity += 1
-    client_allocation.save(update_fields=["reserved_quantity", "updated_at"])
-    if locked_survey_allocation:
-        locked_survey_allocation.reserved_quantity += 1
-        locked_survey_allocation.save(update_fields=["reserved_quantity", "updated_at"])
 
     SurveyAttempt.objects.filter(pk=attempt.pk).update(
         vendor=client_allocation.vendor,
@@ -605,7 +599,7 @@ def reserve_attempt_capacity(
 
 @transaction.atomic
 def finalize_attempt_capacity(attempt: SurveyAttempt) -> AllocationReservation | None:
-    """Consume a completion or release every other terminal outcome, idempotently."""
+    """Finalize the immutable allocation audit row, idempotently."""
 
     reservation = (
         AllocationReservation.objects.select_for_update()
@@ -615,34 +609,13 @@ def finalize_attempt_capacity(attempt: SurveyAttempt) -> AllocationReservation |
     if not reservation or reservation.status != AllocationReservation.Status.RESERVED:
         return reservation
 
-    client_allocation = VendorClientAllocation.objects.select_for_update().get(pk=reservation.client_allocation_id)
-    survey_allocation = (
-        VendorSurveyAllocation.objects.select_for_update().get(pk=reservation.survey_allocation_id)
-        if reservation.survey_allocation_id
-        else None
-    )
-    quantity = reservation.quantity
-    if client_allocation.reserved_quantity < quantity or (
-        survey_allocation and survey_allocation.reserved_quantity < quantity
-    ):
-        raise RuntimeError("Allocation counters are inconsistent with the reservation.")
-
-    client_allocation.reserved_quantity -= quantity
-    if survey_allocation:
-        survey_allocation.reserved_quantity -= quantity
     if attempt.status == SurveyAttempt.Status.COMPLETED:
-        client_allocation.consumed_quantity += quantity
-        if survey_allocation:
-            survey_allocation.consumed_quantity += quantity
         reservation.status = AllocationReservation.Status.CONSUMED
         reservation.reason = "Completed survey"
     else:
         reservation.status = AllocationReservation.Status.RELEASED
         reservation.reason = f"Released for attempt status {attempt.status}"
 
-    client_allocation.save(update_fields=["reserved_quantity", "consumed_quantity", "updated_at"])
-    if survey_allocation:
-        survey_allocation.save(update_fields=["reserved_quantity", "consumed_quantity", "updated_at"])
     reservation.finalized_at = timezone.now()
     reservation.save(update_fields=["status", "reason", "finalized_at", "updated_at"])
     return reservation
@@ -656,23 +629,6 @@ def expire_reservation(reservation: AllocationReservation) -> AllocationReservat
     if locked.expires_at > timezone.now():
         raise AllocationUnavailable("Reservation has not expired yet.")
 
-    client_allocation = VendorClientAllocation.objects.select_for_update().get(pk=locked.client_allocation_id)
-    survey_allocation = (
-        VendorSurveyAllocation.objects.select_for_update().get(pk=locked.survey_allocation_id)
-        if locked.survey_allocation_id
-        else None
-    )
-    quantity = locked.quantity
-    if client_allocation.reserved_quantity < quantity or (
-        survey_allocation and survey_allocation.reserved_quantity < quantity
-    ):
-        raise RuntimeError("Allocation counters are inconsistent with the reservation.")
-    client_allocation.reserved_quantity -= quantity
-    if survey_allocation:
-        survey_allocation.reserved_quantity -= quantity
-    client_allocation.save(update_fields=["reserved_quantity", "updated_at"])
-    if survey_allocation:
-        survey_allocation.save(update_fields=["reserved_quantity", "updated_at"])
     locked.status = AllocationReservation.Status.EXPIRED
     locked.reason = "Reservation expired before a terminal callback"
     locked.finalized_at = timezone.now()

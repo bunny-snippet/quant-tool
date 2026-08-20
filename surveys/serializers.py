@@ -6,6 +6,8 @@ from rest_framework import serializers
 
 from accounts.access import has_function_access
 from vendors.access import vendor_scope_user_id
+from vendors.models import VendorAPIKey
+from vendors.security import generate_delivery_token
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
 from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
@@ -235,6 +237,7 @@ class TargetingQuestionSerializer(serializers.ModelSerializer):
 
 class SurveyListSerializer(serializers.ModelSerializer):
     source_id = serializers.SerializerMethodField()
+    survey_id = serializers.SerializerMethodField(help_text="External delivery identifier selected on the authenticated API key.")
     provider_code = serializers.SerializerMethodField()
     client_name = serializers.CharField(source="client.name", read_only=True, allow_null=True)
     display_company_name = serializers.SerializerMethodField()
@@ -251,7 +254,7 @@ class SurveyListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Survey
         fields = [
-            "id", "local_id", "client", "client_name", "display_company_name", "source_id", "provider_code", "company_name", "name", "status", "sample_size", "completes", "remaining",
+            "id", "local_id", "client", "client_name", "display_company_name", "source_id", "survey_id", "provider_code", "company_name", "name", "status", "sample_size", "completes", "remaining",
             "starts", "cpi", "cpi_cut_percent", "vendor_pricing", "loi", "incidence_rate", "country", "country_code", "country_label",
             "language", "language_code", "group_type", "buyer_id", "survey_type", "device_type", "entry_link", "start_link", "has_quota",
             "source_created_at", "source_modified_at", "source_created_display", "source_modified_display",
@@ -273,6 +276,14 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
     def get_source_id(self, obj):
+        return obj.source_identifier
+
+    @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
+    def get_survey_id(self, obj):
+        request = self.context.get("request")
+        api_key = getattr(request, "auth", None) if request else None
+        if isinstance(api_key, VendorAPIKey) and api_key.survey_id_mode == VendorAPIKey.SurveyIdMode.PROJECT_ID:
+            return obj.local_id
         return obj.source_identifier
 
     def get_provider_code(self, obj) -> str:
@@ -322,17 +333,36 @@ class SurveyListSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated or not has_function_access(request.user, "survey_links.copy"):
             return None
-        is_dynamic_provider = bool(
-            obj.integration_id and obj.integration.provider_code in {"rfg", "toluna"}
+        supports_lazy_entry_link = bool(
+            obj.integration_id and obj.integration.provider_code in {"rfg", "toluna", "cint"}
         )
-        if not obj.entry_link and not is_dynamic_provider:
+        if obj.integration_id and obj.integration.provider_code == "cint":
+            redirect_state = obj.raw_data or {}
+            if not (
+                obj.entry_link
+                and redirect_state.get("_cint_redirect_verified_at")
+                and str(redirect_state.get("_cint_redirect_supplier_code") or "")
+                == str(obj.integration.supplier_code or "")
+            ):
+                return None
+        if not obj.entry_link and not supports_lazy_entry_link:
             return None
-        query = urlencode({
-            "surveyId": obj.source_identifier,
-            "supplierCode": obj.integration.supplier_code if obj.integration_id else settings.PUBLIC_SUPPLIER_CODE,
+        api_key = getattr(request, "auth", None)
+        external_delivery = isinstance(api_key, VendorAPIKey)
+        exposed_survey_id = (
+            obj.local_id
+            if external_delivery and api_key.survey_id_mode == VendorAPIKey.SurveyIdMode.PROJECT_ID
+            else obj.source_identifier
+        )
+        query_values = {
+            "surveyId": exposed_survey_id,
+            "supplierCode": settings.PUBLIC_SUPPLIER_CODE,
             "userId": request.user.pk,
             "code": obj.local_id,
-        })
+        }
+        if external_delivery:
+            query_values["delivery"] = generate_delivery_token(api_key.pk, obj.pk)
+        query = urlencode(query_values)
         path = f"{reverse('survey-start')}?{query}"
         return request.build_absolute_uri(path) if request else path
 

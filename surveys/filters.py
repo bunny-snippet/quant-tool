@@ -16,13 +16,23 @@ class SurveyFilter(django_filters.FilterSet):
     status = CharInFilter(field_name="status", lookup_expr="in", help_text="Comma-separated statuses: live,closed")
     company = CharInFilter(field_name="company_name", lookup_expr="in", help_text="Comma-separated supplier company names")
     buyer_id = CharInFilter(field_name="buyer_id", lookup_expr="in", help_text="Comma-separated provider buyer/sub-client IDs")
-    survey_type = CharInFilter(field_name="survey_type", lookup_expr="in", help_text="Comma-separated normalized types, e.g. B2B,B2C")
+    survey_type = CharInFilter(method="filter_survey_type", help_text="Comma-separated normalized types, e.g. B2B,B2C")
     created_from = django_filters.IsoDateTimeFilter(field_name="source_created_at", lookup_expr="gte")
     created_to = django_filters.IsoDateTimeFilter(field_name="source_created_at", lookup_expr="lte")
     modified_from = django_filters.IsoDateTimeFilter(field_name="source_modified_at", lookup_expr="gte")
     modified_to = django_filters.IsoDateTimeFilter(field_name="source_modified_at", lookup_expr="lte")
     min_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="gte")
     max_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="lte")
+
+    def filter_survey_type(self, queryset, _name, value):
+        values = value if isinstance(value, (list, tuple, set)) else str(value or "").split(",")
+        values = {str(item).strip().upper() for item in values if str(item).strip()}
+        if not values:
+            return queryset
+        query = Q(pk__in=[])
+        for item in values:
+            query |= Q(survey_type__iexact=item) | Q(group_type__iexact=item)
+        return queryset.filter(query)
 
     class Meta:
         model = Survey
