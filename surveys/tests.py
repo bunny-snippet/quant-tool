@@ -1539,6 +1539,64 @@ class TerminationReasonPageTests(TestCase):
         self.assertContains(response, "Quali1Ab2C")
         self.assertContains(response, "Details", count=3)
 
+    def test_traffic_style_filters_support_multiple_statuses_country_and_search(self):
+        self.survey.country_code = "US"
+        self.survey.country = "United States"
+        self.survey.buyer_id = "buyer-a"
+        self.survey.save(update_fields=["country_code", "country", "buyer_id"])
+        quota = SurveyAttempt.objects.create(
+            rid="Quota2Ab3D",
+            survey=self.survey,
+            platform_user=self.respondent,
+            status=SurveyAttempt.Status.OVER_QUOTA,
+            callback_at=timezone.now(),
+        )
+        SurveyAttempt.objects.create(
+            rid="Quali2Ab3D",
+            survey=self.survey,
+            platform_user=self.respondent,
+            status=SurveyAttempt.Status.QUALITY_TERMINATED,
+            callback_at=timezone.now(),
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("termination-reasons"), {
+            "search": self.survey.local_id,
+            "status": [SurveyAttempt.Status.TERMINATED, SurveyAttempt.Status.OVER_QUOTA],
+            "country": ["US"],
+            "buyer_id": ["buyer-a"],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["summary"]["total"], 2)
+        self.assertContains(response, self.attempt.rid)
+        self.assertContains(response, quota.rid)
+        self.assertNotContains(response, "Quali2Ab3D")
+        self.assertContains(response, "Sub-client / Buyer ID")
+        self.assertContains(response, "From date &amp; time")
+
+    def test_filtered_excel_contains_platform_and_provider_statuses(self):
+        self.attempt.upstream_transaction_data = {
+            "status": "Pre Survey Termination",
+            "termReason": "Off hours",
+        }
+        self.attempt.save(update_fields=["upstream_transaction_data"])
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("termination-reasons-export"),
+            {"status": SurveyAttempt.Status.TERMINATED, "search": self.attempt.rid},
+        )
+        rows = xlsx_rows(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+        self.assertIn("Platform status", rows[0])
+        self.assertIn("Provider status", rows[0])
+        self.assertIn("Terminated", rows[1])
+        self.assertIn("Pre Survey Termination", rows[1])
+        self.assertIn("Off hours", rows[1])
+
     def test_rfg_detail_uses_stored_provider_callback_reason(self):
         client = Client.objects.create(code="reason-rfg", name="Research For Good", provider_code="rfg")
         integration = ClientIntegration.objects.create(

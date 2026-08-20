@@ -513,6 +513,16 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 
 .reason-table-outcome{display:flex;min-width:180px;max-width:300px;flex-direction:column;align-items:flex-start;gap:6px}.reason-table-outcome small{display:-webkit-box;max-width:100%;overflow:hidden;color:#77849a;font-size:9px;line-height:1.35;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}.reason-card-cause{margin:10px 0 0!important;padding:9px 10px;border-radius:9px;background:#f7f9fc;color:#65748b!important;font-size:10px!important;line-height:1.45}
 
+/* Term Reports shares the scalable Traffic Reports filter system. */
+.reason-list-filters{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));align-items:end}
+.reason-list-filters .search-field{grid-column:span 2}
+.reason-list-filters .datetime-field{grid-column:span 2}
+.reason-list-filters .multi-menu{z-index:42}
+.reason-list-filters .reason-filter-button,.reason-list-filters .reason-clear-link{min-height:43px}
+.reason-platform-status{display:block!important;color:#687993!important;font-size:9px!important;font-weight:800;letter-spacing:.15px;-webkit-line-clamp:1!important}
+.reason-mobile-card>.reason-platform-status{margin-top:7px}
+@media(max-width:720px){.reason-list-filters .search-field{grid-column:1/-1}.reason-list-filters .datetime-field{grid-column:auto}}
+
 @media(max-width:1550px) and (min-width:901px){
   .page-studies .study-overview-compact{gap:7px}
   .page-studies .study-overview-compact>.revenue,.page-studies .study-overview-compact>.study-summary-card{padding-inline:9px}

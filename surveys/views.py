@@ -16,6 +16,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
@@ -226,8 +227,15 @@ TERM_REASON_COLUMN_PERMISSIONS = {
 
 TERM_REASON_FILTER_PERMISSIONS = {
     "rid": "termination_reasons.filter.rid",
+    "branch": "termination_reasons.filter.branch",
+    "sub_branch": "termination_reasons.filter.sub_branch",
+    "shift": "termination_reasons.filter.shift",
+    "user": "termination_reasons.filter.user",
     "status": "termination_reasons.filter.status",
+    "country": "termination_reasons.filter.country",
     "client": "termination_reasons.filter.client",
+    "buyer": "termination_reasons.filter.buyer",
+    "date": "termination_reasons.filter.date",
     "clear": "termination_reasons.filters.clear",
 }
 
@@ -617,43 +625,129 @@ def _refresh_provider_outcome(attempt, integration):
     attempt.save(update_fields=["upstream_transaction_data", "upstream_checked_at", "updated_at"])
 
 
+def _term_report_values(request, name):
+    """Return stable, de-duplicated values from repeated or CSV query params."""
+    values = []
+    for raw_value in request.GET.getlist(name):
+        for value in str(raw_value or "").split(","):
+            value = value.strip()
+            if value and value not in values:
+                values.append(value)
+    return values
+
+
+def _term_report_filter_state(request, filters_access):
+    selected = {
+        "search": request.GET.get("search", "").strip(),
+        "branch": _term_report_values(request, "branch"),
+        "sub_branch": _term_report_values(request, "sub_branch"),
+        "shift": _term_report_values(request, "shift"),
+        "user": _term_report_values(request, "user"),
+        "status": _term_report_values(request, "status"),
+        "country": _term_report_values(request, "country"),
+        "client": _term_report_values(request, "client"),
+        "buyer_id": _term_report_values(request, "buyer_id"),
+        "date_field": request.GET.get("date_field", "callback").strip() or "callback",
+        "date_from": request.GET.get("date_from", "").strip(),
+        "date_to": request.GET.get("date_to", "").strip(),
+    }
+    supplied_by_permission = {
+        "rid": selected["search"], "branch": selected["branch"],
+        "sub_branch": selected["sub_branch"], "shift": selected["shift"],
+        "user": selected["user"], "status": selected["status"],
+        "country": selected["country"], "client": selected["client"],
+        "buyer": selected["buyer_id"], "date": selected["date_from"] or selected["date_to"],
+    }
+    for filter_name, value in supplied_by_permission.items():
+        if value and not filters_access.get(filter_name, False):
+            raise PermissionDenied(f"Your account cannot use the {filter_name.replace('_', ' ')} filter.")
+    if selected["date_field"] not in {"initiated", "callback"}:
+        selected["date_field"] = "callback"
+    return selected
+
+
+def _term_report_base_queryset():
+    return SurveyAttempt.objects.select_related(
+        "survey__integration__client", "survey__client",
+        "platform_user__employee_profile__organization_unit__parent__parent",
+    ).filter(status__in=UNSUCCESSFUL_ATTEMPT_STATUSES)
+
+
+def _term_report_datetime(value, label):
+    if not value:
+        return None
+    parsed = parse_datetime(value)
+    if parsed is None:
+        raise PermissionDenied(f"{label} must use a valid date and time.")
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def _filtered_term_report_queryset(request, filters_access):
+    selected = _term_report_filter_state(request, filters_access)
+    queryset = _term_report_base_queryset()
+    search = selected["search"]
+    if search:
+        queryset = queryset.filter(
+            Q(rid__icontains=search)
+            | Q(prescreener_uid__icontains=search) | Q(provider_profile_uid__icontains=search)
+            | Q(survey__local_id__icontains=search) | Q(survey__source_key__icontains=search)
+            | Q(survey__buyer_id__icontains=search) | Q(survey__client__name__icontains=search)
+            | Q(platform_user__username__icontains=search) | Q(platform_user__first_name__icontains=search)
+            | Q(platform_user__last_name__icontains=search) | Q(platform_user__email__icontains=search)
+            | Q(initiation_ip__icontains=search) | Q(callback_ip__icontains=search)
+        )
+    filter_data = {
+        name: ",".join(selected[name])
+        for name in ("branch", "sub_branch", "shift", "user", "status", "country", "client", "buyer_id")
+        if selected[name]
+    }
+    queryset = SurveyAttemptFilter(filter_data, queryset=queryset).qs
+    lower = _term_report_datetime(selected["date_from"], "From date and time")
+    upper = _term_report_datetime(selected["date_to"], "To date and time")
+    if lower and upper and lower > upper:
+        raise PermissionDenied("From date and time cannot be after To date and time.")
+    date_column = "initiated_at" if selected["date_field"] == "initiated" else "callback_at"
+    if lower:
+        queryset = queryset.filter(**{f"{date_column}__gte": lower})
+    if upper:
+        queryset = queryset.filter(**{f"{date_column}__lte": upper})
+    return queryset, selected
+
+
+def _term_report_options(base_queryset, user):
+    hierarchy = user_hit_filter_options(user)
+    return {
+        **hierarchy,
+        "countries": list(base_queryset.exclude(survey__country_code="").values(
+            "survey__country_code", "survey__country"
+        ).distinct().order_by("survey__country_code")),
+        "clients": list(base_queryset.filter(survey__client__isnull=False).values(
+            "survey__client_id", "survey__client__name"
+        ).distinct().order_by("survey__client__name")),
+        "buyers": list(base_queryset.exclude(survey__buyer_id="").values(
+            "survey__client_id", "survey__buyer_id"
+        ).distinct().order_by("survey__buyer_id")),
+    }
+
+
 @function_permission_required("termination_reasons.view")
 def termination_reasons_page(request):
     codes = effective_permission_codes(request.user)
     filters_access = _component_access(codes, TERM_REASON_FILTER_PERMISSIONS)
     columns = _permitted_columns(codes, TERM_REASON_COLUMN_PERMISSIONS)
-    search = request.GET.get("search", "").strip()
-    status_filter = request.GET.get("status", "").strip()
-    client_filter = request.GET.get("client", "").strip()
+    queryset, selected = _filtered_term_report_queryset(request, filters_access)
     detail_rid = (request.GET.get("detail") or request.GET.get("rid") or "").strip()
     detail_attempt = None
     detail_outcome = None
     lookup_error = ""
 
-    if search and not filters_access["rid"]:
-        raise PermissionDenied("Your account cannot use the RID filter.")
-    if status_filter and not filters_access["status"]:
-        raise PermissionDenied("Your account cannot use the status filter.")
-    if client_filter and not filters_access["client"]:
-        raise PermissionDenied("Your account cannot use the client filter.")
     if detail_rid and "termination_reasons.action.details" not in codes:
         raise PermissionDenied("Your account cannot open outcome details.")
 
-    base_queryset = SurveyAttempt.objects.select_related(
-        "survey__integration__client", "survey__client", "platform_user"
-    ).filter(status__in=UNSUCCESSFUL_ATTEMPT_STATUSES)
-    client_options = list(
-        base_queryset.filter(survey__client__isnull=False)
-        .values("survey__client_id", "survey__client__name")
-        .distinct().order_by("survey__client__name")
-    )
-    queryset = base_queryset
-    if search:
-        queryset = queryset.filter(rid__icontains=search)
-    if status_filter in UNSUCCESSFUL_ATTEMPT_STATUSES:
-        queryset = queryset.filter(status=status_filter)
-    if client_filter.isdigit():
-        queryset = queryset.filter(survey__client_id=int(client_filter))
+    base_queryset = _term_report_base_queryset()
+    filter_options = _term_report_options(base_queryset, request.user)
 
     summary = queryset.aggregate(
         total=Count("id"),
@@ -719,11 +813,16 @@ def termination_reasons_page(request):
 
     return render(request, "surveys/termination_reasons.html", {
         "active_page": "termination-reasons",
-        "search_query": search,
-        "status_filter": status_filter,
-        "client_filter": client_filter,
-        "client_options": client_options,
-        "term_reason_clients": client_options,
+        "selected": selected,
+        "search_query": selected["search"],
+        "client_options": filter_options["clients"],
+        "term_reason_clients": filter_options["clients"],
+        "term_branches": filter_options["branches"],
+        "term_sub_branches": filter_options["sub_branches"],
+        "term_shifts": filter_options["shifts"],
+        "term_users": filter_options["users"],
+        "term_countries": filter_options["countries"],
+        "term_buyers": filter_options["buyers"],
         "attempt_statuses": list(UNSUCCESSFUL_STATUS_LABELS.items()),
         "summary": summary,
         "page_obj": page_obj,
@@ -739,8 +838,55 @@ def termination_reasons_page(request):
         "page_query": page_query,
         "lookup_error": lookup_error,
         "can_refresh_reasons": "termination_reasons.action.refresh" in codes,
+        "can_export_reasons": "termination_reasons.export" in codes,
         "reason_fields": _component_access(codes, TERM_REASON_FIELD_PERMISSIONS),
     })
+
+
+@function_permission_required("termination_reasons.export")
+def termination_reasons_export(request):
+    """Export the exact filtered Term Reports result set with both status layers."""
+    codes = effective_permission_codes(request.user)
+    filters_access = _component_access(codes, TERM_REASON_FILTER_PERMISSIONS)
+    queryset, _selected = _filtered_term_report_queryset(request, filters_access)
+    queryset = queryset.order_by("-callback_at", "-initiated_at")
+    headers = [
+        "RID", "PID", "UID", "Project ID", "Client survey ID", "Client", "Provider",
+        "Buyer ID", "Country", "Respondent", "Email", "Entry IP", "Exit IP",
+        "Platform status", "Provider status", "Term reason", "Term category",
+        "Status source", "Started at", "Ended at", "LOI (minutes)",
+    ]
+    widths = [15, 13, 22, 19, 20, 22, 18, 17, 13, 22, 30, 17, 17, 20, 27, 44, 22, 20, 24, 24, 15]
+
+    def rows():
+        for attempt in queryset.iterator(chunk_size=500):
+            outcome = provider_outcome(attempt)
+            survey = attempt.survey
+            client = survey.client or (survey.integration.client if survey.integration_id else None)
+            provider = survey.integration.provider_code if survey.integration_id else "innovatemr"
+            if attempt.platform_user_id:
+                respondent = attempt.platform_user.get_full_name() or attempt.platform_user.username
+                email = attempt.platform_user.email
+            else:
+                respondent = ""
+                email = ""
+            ended_at = attempt.callback_at or attempt.last_callback_at or attempt.initiated_at
+            yield [
+                attempt.rid, getattr(attempt, "pid", ""), attempt.provider_profile_uid or attempt.prescreener_uid or "",
+                survey.local_id, survey.source_key, client.name if client else survey.company_name,
+                provider, survey.buyer_id, survey.country_code or survey.country, respondent, email,
+                attempt.initiation_ip or "", attempt.callback_ip or "",
+                UNSUCCESSFUL_STATUS_LABELS.get(attempt.status, attempt.get_status_display()),
+                outcome.get("status") or "Not supplied", outcome.get("reason") or "",
+                outcome.get("category") or "", attempt.status_source,
+                _excel_datetime(attempt.initiated_at), _excel_datetime(ended_at),
+                round(attempt.loi_seconds / 60, 2) if attempt.loi_seconds is not None else "",
+            ]
+    local_now = timezone.localtime()
+    return build_excel_response(
+        f"term-reports-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+        [ExcelSheet("Term Reports", headers, rows(), widths)],
+    )
 
 
 def workspace_home(request):
