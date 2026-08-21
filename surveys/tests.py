@@ -585,6 +585,47 @@ class SurveyFlowTests(TestCase):
         self.assertEqual(attempt.exit_os, "Android 14")
         self.assertIsNotNone(attempt.loi_seconds)
 
+    @override_settings(ENFORCE_GLOBAL_UNIQUE_ENTRY_IP=True)
+    def test_duplicate_entry_ip_is_blocked_globally_before_prescreener(self):
+        first = self.client.get(reverse("survey-start"), {
+            "surveyId": self.survey.source_id,
+            "supplierCode": "1000",
+            "userId": str(self.platform_user.pk),
+            "code": self.survey.local_id,
+        }, REMOTE_ADDR="31.13.71.44")
+        self.assertEqual(first.status_code, 302)
+        first_rid = parse_qs(urlsplit(first["Location"]).query)["rid"][0]
+
+        other = Survey.objects.create(
+            source_id=32655972,
+            name="Another client survey",
+            status=Survey.Status.LIVE,
+            company_name="Another client",
+            country_code="US",
+            language_code="EN",
+            entry_link="https://edgeapi.innovatemr.net/startSurvey?survNum=other&supCode=1150&PID=[%%pid%%]",
+            source_modified_at=timezone.now(),
+            targeting_synced_at=timezone.now(),
+        )
+        second = self.client.get(reverse("survey-start"), {
+            "surveyId": other.source_id,
+            "supplierCode": "1000",
+            "userId": str(self.platform_user.pk),
+            "code": other.local_id,
+        }, REMOTE_ADDR="31.13.71.44")
+
+        self.assertEqual(second.status_code, 302)
+        second_query = parse_qs(urlsplit(second["Location"]).query)
+        self.assertEqual(second_query["status"], ["4"])
+        duplicate = SurveyAttempt.objects.get(rid=second_query["rid"][0])
+        self.assertNotEqual(duplicate.rid, first_rid)
+        self.assertEqual(duplicate.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(duplicate.status_source, "local_duplicate_ip_guard")
+        self.assertEqual(
+            duplicate.upstream_transaction_data["local_ip_guard"]["reason"],
+            "Duplicate IP address",
+        )
+
     def test_innovate_profile_mapping_replaces_stale_values_and_protects_routing_keys(self):
         outbound = build_outbound_url(
             "https://edgeapi.innovatemr.net/startSurvey?survNum=test&supCode=1150&PID=old&trackId=old&GENDER=1",

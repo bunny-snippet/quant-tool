@@ -103,8 +103,10 @@ from .rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 from .rfg_text import clean_rfg_display_text
 from .services import reconcile_attempt_status, replace_survey_quotas, replace_survey_targeting, sync_surveys
 from .survey_flow import (
+    attach_global_entry_ip_claim,
     backfill_attempt_entry_audit,
     build_outbound_url,
+    claim_global_entry_ip,
     create_attempt,
     get_request_client_data,
     get_request_ip,
@@ -1395,6 +1397,44 @@ def _finish_wrong_target_country_attempt(attempt, request, location):
     return locked
 
 
+def _finish_duplicate_ip_attempt(attempt, request, prior_attempt=None):
+    """Record an all-client duplicate entry IP as an immediate local S4."""
+
+    now = timezone.now()
+    with transaction.atomic():
+        locked = SurveyAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if locked.status != SurveyAttempt.Status.INITIATED:
+            return locked
+        client_data = get_request_client_data(request)
+        locked.submitted_at = now
+        locked.callback_at = now
+        locked.last_callback_at = now
+        locked.callback_ip = get_request_ip(request) or locked.initiation_ip
+        locked.exit_user_agent = client_data.get("user_agent", "")
+        locked.exit_browser = client_data.get("browser", "")
+        locked.exit_device = client_data.get("device", "")
+        locked.exit_os = client_data.get("os", "")
+        locked.exit_client_data = client_data
+        locked.status = SurveyAttempt.Status.QUALITY_TERMINATED
+        locked.status_source = "local_duplicate_ip_guard"
+        locked.loi_seconds = locked.calculate_loi_seconds(now)
+        locked.upstream_transaction_data = {
+            **(locked.upstream_transaction_data or {}),
+            "local_ip_guard": {
+                "status": "Security terminated",
+                "reason": "Duplicate IP address",
+                "first_attempt_rid": getattr(prior_attempt, "rid", ""),
+            },
+        }
+        locked.save(update_fields=[
+            "submitted_at", "callback_at", "last_callback_at", "callback_ip",
+            "exit_user_agent", "exit_browser", "exit_device", "exit_os", "exit_client_data",
+            "status", "status_source", "loi_seconds", "upstream_transaction_data", "updated_at",
+        ])
+        finalize_attempt_capacity(locked)
+    return locked
+
+
 @require_http_methods(["GET", "POST"])
 def survey_start(request):
     if request.method == "GET" and not request.GET.get("rid"):
@@ -1517,6 +1557,7 @@ def survey_start(request):
                 "The provider entry link is temporarily unavailable. Please try again shortly.",
                 status_code=503,
             )
+        entry_ip = get_request_ip(request)
         entry_location = resolve_entry_geolocation(request)
         entry_client_data = {
             **get_request_client_data(request),
@@ -1530,10 +1571,11 @@ def survey_start(request):
                     require_capacity=True,
                     for_update=True,
                 )
+                ip_claim, prior_ip_attempt, duplicate_ip = claim_global_entry_ip(entry_ip)
                 attempt = create_attempt(
                     survey,
                     platform_user,
-                    get_request_ip(request),
+                    entry_ip,
                     client_data=entry_client_data,
                 )
                 if allocation_context:
@@ -1542,6 +1584,8 @@ def survey_start(request):
                         allocation_context.survey_allocation,
                         client_allocation=allocation_context.client_allocation,
                     )
+                if not duplicate_ip:
+                    attach_global_entry_ip_claim(ip_claim, attempt)
                 if delivery_api_key:
                     delivery_config = {
                         "survey_id_mode": delivery_api_key.survey_id_mode,
@@ -1557,6 +1601,11 @@ def survey_start(request):
                     attempt.supplier_delivery_config = delivery_config
         except AllocationUnavailable as exc:
             return _invalid_survey_link(request, str(exc), status_code=409)
+        if duplicate_ip:
+            attempt = _finish_duplicate_ip_attempt(attempt, request, prior_ip_attempt)
+            return HttpResponseRedirect(
+                f"{reverse('survey-status')}?{urlencode({'status': '4', 'rid': attempt.rid})}"
+            )
         if targeting_warning:
             request.session[f"attempt_warning_{attempt.rid}"] = targeting_warning
         return HttpResponseRedirect(f"{reverse('survey-start')}?rid={quote(attempt.rid)}")

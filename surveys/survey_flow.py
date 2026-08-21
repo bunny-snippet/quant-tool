@@ -7,7 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from django.conf import settings
 from django.db import IntegrityError, transaction
 
-from .models import Survey, SurveyAttempt
+from .models import Survey, SurveyAttempt, SurveyEntryIPClaim
 
 
 RID_ALPHABET = string.ascii_letters + string.digits
@@ -210,6 +210,43 @@ def create_attempt(survey: Survey, platform_user, ip_address: str | None, client
         except IntegrityError:
             continue
     raise RuntimeError("Could not allocate a unique RID")
+
+
+def claim_global_entry_ip(ip_address: str | None):
+    """Claim one IP across all clients inside the attempt transaction.
+
+    Existing historical attempts are discovered lazily, avoiding a blocking
+    production backfill. The unique claim row prevents simultaneous requests
+    from both passing the guard.
+    """
+
+    if not settings.ENFORCE_GLOBAL_UNIQUE_ENTRY_IP or not ip_address:
+        return None, None, False
+    claim, created = SurveyEntryIPClaim.objects.get_or_create(ip_address=ip_address)
+    claim = SurveyEntryIPClaim.objects.select_for_update().select_related(
+        "first_attempt"
+    ).get(pk=claim.pk)
+    prior_attempt = claim.first_attempt
+    if created and prior_attempt is None:
+        prior_attempt = (
+            SurveyAttempt.objects.filter(initiation_ip=ip_address)
+            .only("id", "rid", "initiated_at")
+            .order_by("initiated_at", "id")
+            .first()
+        )
+        if prior_attempt is not None:
+            claim.first_attempt = prior_attempt
+            claim.save(update_fields=["first_attempt", "updated_at"])
+    return claim, prior_attempt, bool(prior_attempt is not None or not created)
+
+
+def attach_global_entry_ip_claim(claim, attempt: SurveyAttempt) -> None:
+    """Bind a newly claimed IP to its first accepted attempt."""
+
+    if claim is None:
+        return
+    claim.first_attempt = attempt
+    claim.save(update_fields=["first_attempt", "updated_at"])
 
 
 def build_outbound_url(entry_link: str, rid: str, answers: dict) -> str:

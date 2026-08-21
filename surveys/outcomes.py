@@ -84,7 +84,7 @@ def provider_outcome(attempt):
     }
     candidates = [data]
     candidates.extend(
-        value for key in ("transaction", "outcome", "result", "local_country_guard")
+        value for key in ("transaction", "outcome", "result", "local_country_guard", "local_ip_guard")
         if isinstance((value := data.get(key)), dict)
     )
 
