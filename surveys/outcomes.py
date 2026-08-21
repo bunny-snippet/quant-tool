@@ -99,7 +99,7 @@ def provider_outcome(attempt):
                     return value
         return ""
 
-    return {
+    outcome = {
         "status": mapped_or_common("status", ("status", "Status", "resultStatus", "outcome")),
         "reason": mapped_or_common(
             "reason", ("termReason", "term_reason", "reason", "ruledOutBy", "message", "description")
@@ -108,3 +108,14 @@ def provider_outcome(attempt):
             "category", ("termReasonCategory", "termReasonCategoryCode", "termCategory", "reasonCategory")
         ),
     }
+    # The signed InnovateMR redirect gives the fastest, attempt-specific reason.
+    # Keep the transaction API payload above as the detailed history/status
+    # source, but prefer the authenticated redirect reason when it is present.
+    if provider_code == "innovatemr" and attempt.is_verified:
+        exit_data = attempt.exit_client_data or {}
+        callback = exit_data.get("innovatemr_callback")
+        if isinstance(callback, dict):
+            callback_reason = _text(callback.get("termReason"))
+            if callback_reason:
+                outcome["reason"] = callback_reason
+    return outcome

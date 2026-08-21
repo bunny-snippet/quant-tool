@@ -32,9 +32,9 @@ Answers are persisted but are not used as an authoritative local rejection. Inno
 
 The public copied link always uses the platform-facing supplier code, so an upstream/vendor supplier code is not exposed there. The exact stored `entryLink` is parsed only after validation. Its PID is replaced with RID, `trackId=RID` is added, and captured `QuestionKey=OptionId` pairs are appended. `survNum` and the real upstream `supCode` are preserved from the allocated link; they are never reconstructed from client parameters. This keeps InnovateMR routing intact while allowing the same public code to be used for future providers.
 
-InnovateMR owns the browser redirect after the respondent leaves this application. Configure the account-level or survey-level return URLs in InnovateMR to point to the public deployment, using `%%trackId%%` as the RID, for example:
+InnovateMR owns the browser redirect after the respondent leaves this application. Configure the account-level or survey-level return URLs in InnovateMR to point to the public deployment. Each URL must carry `%%trackId%%` as the RID, `%%termReason%%` for the immediate provider reason, and `%%hashdata%%` as the final HMAC value. For example:
 
-`https://survey.example.com/survey?status=1&rid=%%trackId%%`
+`https://survey.example.com/survey?status=1&rid=%%trackId%%&termReason=%%termReason%%&hash=%%hashdata%%`
 
 Use status 1, 2, 3 and 4 for complete, terminate, over-quota and quality-terminate destinations respectively. A redirect to another domain such as `api.quantichamps.com` and a `code=null` value are produced by that upstream redirect configuration, not by the local Django callback route.
 
@@ -61,6 +61,6 @@ The landing page accepts RID aliases `PID`, `pid`, `QSID`, `qsid`, and `trackId`
 
 ## Trust and verification
 
-Browser redirects can be forged. Every callback starts as `is_verified=false`. Add InnovateMR server-to-server notification or redirect-hash validation before using a completion for rewards, invoices or financial reporting. The staff-only `/studies/` page, `/api/v1/survey-attempts/` endpoint and Django Admin expose the audit trail.
+Browser redirects can be forged. Once `INNOVATEMR_CALLBACK_HASH_KEY` is configured, InnovateMR callbacks are rejected before any status, complete credit, callback timestamp, or capacity counter is changed unless their HMAC matches. Verification uses the raw, fully hydrated public URL with the hash value emptied, preserving query order and encoding, and defaults to InnovateMR's HMAC-SHA256 mechanism. The received hash is never persisted or shown. A verified redirect reason is retained separately from the Survey Transactions response and takes display priority in Traffic/Term Reports; scheduled transaction reconciliation continues to preserve the provider's detailed history. The staff-only `/studies/` page, `/api/v1/survey-attempts/` endpoint and Django Admin expose the audit trail.
 
 The Studies page applies user, status, text and entry/exit date-time filters server-side. `/api/v1/survey-attempts/export/` applies the identical filter contract but exports the complete related audit dataset rather than only the compact UI columns. Viewing requires `attempts.view`; downloading requires the independently assignable `attempts.export` function permission.

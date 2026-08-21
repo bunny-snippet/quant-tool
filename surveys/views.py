@@ -60,6 +60,7 @@ from .dashboard import (
 )
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
+from .innovatemr_callbacks import verify_callback_request
 from .models import Survey, SurveyAttempt, SyncRun, TolunaNotification
 from .outcomes import provider_outcome
 from .report_pricing import (
@@ -2092,15 +2093,19 @@ def survey_status(request):
     canonical_rid = attempt.rid if attempt else rid
     ip_address = get_request_ip(request)
     if attempt:
-        callback_verified = False
-        provider_code = ""
-        if attempt.survey.integration_id:
-            provider_code = attempt.survey.integration.provider_code
+        provider_code = (
+            attempt.survey.integration.provider_code
+            if attempt.survey.integration_id
+            else "innovatemr"
+        )
         if status_code not in STATUS_PAGES and provider_code != "toluna":
             return render(request, "surveys/flow_error.html", {
                 "title": "Invalid survey status",
                 "message": "This extended result status is only configured for Toluna attempts.",
             }, status=400)
+
+        callback_verified = False
+        innovate_callback_verified = False
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES[status_code]
             try:
@@ -2110,12 +2115,42 @@ def survey_status(request):
                     "title": "Invalid Toluna callback",
                     "message": str(exc),
                 }, status=403)
+        elif (
+            provider_code == "innovatemr"
+            and settings.INNOVATEMR_CALLBACK_HASH_REQUIRED
+        ):
+            verification = verify_callback_request(request)
+            if not verification.valid:
+                logger.warning(
+                    "Rejected InnovateMR callback rid=%s reason=%s ip=%s",
+                    attempt.rid,
+                    verification.error,
+                    ip_address or "unknown",
+                )
+                return render(request, "surveys/flow_error.html", {
+                    "title": "Invalid survey callback",
+                    "message": "This survey result could not be verified and was not recorded.",
+                }, status=403)
+            innovate_callback_verified = True
         with transaction.atomic():
             attempt = SurveyAttempt.objects.select_for_update().select_related(
                 "survey__integration"
             ).get(pk=attempt.pk)
             now = timezone.now()
             exit_client_data = get_request_client_data(request)
+            if innovate_callback_verified:
+                exit_client_data["innovatemr_callback"] = {
+                    "status": status_code,
+                    "termReason": str(
+                        request.GET.get("termReason")
+                        or request.GET.get("term_reason")
+                        or request.GET.get("reason")
+                        or ""
+                    ).strip()[:1000],
+                    "closeQuotaId": str(request.GET.get("closeQuotaId") or "").strip()[:160],
+                    "surveyId": str(request.GET.get("surveyId") or "").strip()[:160],
+                    "verifiedAt": now.isoformat(),
+                }
             if attempt.callback_at is None:
                 attempt.callback_at = now
                 attempt.callback_ip = ip_address
@@ -2126,7 +2161,13 @@ def survey_status(request):
                 attempt.exit_device = exit_client_data.get("device", "")
                 attempt.exit_os = exit_client_data.get("os", "")
                 attempt.exit_client_data = exit_client_data
-                attempt.status_source = "toluna_callback" if provider_code == "toluna" else "browser_callback"
+                attempt.status_source = (
+                    "toluna_callback"
+                    if provider_code == "toluna"
+                    else "innovatemr_signed_redirect"
+                    if innovate_callback_verified
+                    else "browser_callback"
+                )
                 if provider_code == "toluna":
                     attempt.is_verified = callback_verified
                     attempt.upstream_transaction_data = {
@@ -2138,6 +2179,17 @@ def survey_status(request):
                             "title": page["title"],
                         },
                     }
+            if innovate_callback_verified:
+                callback_data = dict(request.GET.items())
+                for callback_key in list(callback_data):
+                    if callback_key.casefold() in {"hash", "hashdata"}:
+                        callback_data[callback_key] = "[redacted]"
+                attempt.upstream_transaction_data = {
+                    **(attempt.upstream_transaction_data or {}),
+                    "innovatemr_browser_return": callback_data,
+                }
+                attempt.exit_client_data = exit_client_data
+                attempt.is_verified = True
             attempt.last_callback_at = now
             attempt.callback_count += 1
             attempt.save(update_fields=[
