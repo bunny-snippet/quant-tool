@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import requests
 from django.conf import settings
@@ -63,6 +63,8 @@ class InnovateMRClient:
         self.page_size = settings.INNOVATEMR_PAGE_SIZE
         self.max_pages = settings.INNOVATEMR_MAX_PAGES
         self.session = session or requests.Session()
+        self._biobrain_language_cache: dict[str, dict[str, Any]] | None = None
+        self._biobrain_qualification_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _config(self, name: str, default=""):
         return getattr(self.integration, name, default) if self.integration is not None else default
@@ -84,6 +86,76 @@ class InnovateMRClient:
         if urlparse(endpoint).scheme in {"http", "https"}:
             return endpoint
         return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+
+    def _biobrain_url(self, endpoint: str) -> str:
+        """Resolve BioBrain collection URLs beside the configured `/surveys` URL."""
+        endpoint = str(endpoint or "").strip()
+        if urlparse(endpoint).scheme in {"http", "https"}:
+            return endpoint
+        parsed = urlsplit(self.base_url)
+        path = parsed.path.rstrip("/")
+        if path.lower().endswith("/surveys"):
+            path = path[:-len("/surveys")]
+        return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/{endpoint.lstrip('/')}", "", ""))
+
+    def _biobrain_languages(self) -> dict[str, dict[str, Any]]:
+        if self._biobrain_language_cache is None:
+            payload = self._get(self._biobrain_url("collection/languages"))
+            rows = self._result_list(payload, "Languages")
+            self._biobrain_language_cache = {
+                str(row.get("Id")): row for row in rows if row.get("Id") is not None
+            }
+        return self._biobrain_language_cache
+
+    def _biobrain_qualification(self, language_id, qualification_id) -> dict[str, Any]:
+        cache_key = (str(language_id or ""), str(qualification_id or ""))
+        if not all(cache_key):
+            return {}
+        if cache_key not in self._biobrain_qualification_cache:
+            payload = self._get(self._biobrain_url(
+                f"collection/languages/{cache_key[0]}/qualifications/{cache_key[1]}"
+            ))
+            detail = payload.get("Qualification") if isinstance(payload, dict) else {}
+            self._biobrain_qualification_cache[cache_key] = detail if isinstance(detail, dict) else {}
+        return self._biobrain_qualification_cache[cache_key]
+
+    @staticmethod
+    def _biobrain_options(item: dict[str, Any], detail: dict[str, Any]) -> list[dict[str, Any]]:
+        option_ids = item.get("OptionIds") if isinstance(item.get("OptionIds"), list) else []
+        option_codes = item.get("OptionCodes") if isinstance(item.get("OptionCodes"), list) else []
+        labels = {
+            str(option.get("OptionCode")): str(option.get("OptionText") or option.get("OptionCode"))
+            for option in detail.get("Options", [])
+            if isinstance(option, dict) and option.get("OptionCode") is not None
+        }
+        options = []
+        for index, option_id in enumerate(option_ids):
+            option_code = option_codes[index] if index < len(option_codes) else option_id
+            options.append({
+                "OptionId": option_id,
+                "OptionCode": option_code,
+                "OptionText": labels.get(str(option_code), str(option_code)),
+                "Qualifies": True,
+            })
+        return options
+
+    def _normalize_biobrain_qualification(self, item, language_id) -> dict[str, Any]:
+        qualification_id = item.get("QualificationId")
+        detail = self._biobrain_qualification(language_id, qualification_id)
+        question_text = str(detail.get("QuestionText") or detail.get("Code") or f"Qualification {qualification_id}")
+        question_type = str(detail.get("TypeName") or item.get("QualificationTypeId") or "")
+        options = self._biobrain_options(item, detail)
+        return {
+            **item,
+            "QuestionId": qualification_id,
+            "QuestionKey": f"Q{qualification_id}",
+            "QuestionText": question_text,
+            "QuestionType": question_type,
+            "QuestionCategory": "BioBrain targeting",
+            "Options": options,
+            "targeting_choices": [str(option["OptionId"]) for option in options],
+            "qualification_code": str(detail.get("Code") or ""),
+        }
 
     def _headers(self) -> dict[str, str]:
         if not self.token:
@@ -208,6 +280,16 @@ class InnovateMRClient:
                 normalized[canonical] = value
         if self.is_biobrain:
             normalized.setdefault("CPI", item.get("Cpi")); normalized.setdefault("IR", item.get("Ir")); normalized.setdefault("LOI", item.get("Loi"))
+            normalized["N"] = max(0, int(item.get("Completes") or 0))
+            normalized["supCmps"] = max(0, int(item.get("SupplierCompletes") or item.get("Completed") or 0))
+            normalized["remainingN"] = max(0, normalized["N"] - normalized["supCmps"])
+            language_id = item.get("LanguageId")
+            language = self._biobrain_languages().get(str(language_id), {}) if language_id is not None else {}
+            country_code = str(language.get("CountryCode") or "").upper()
+            normalized["Country"] = country_code
+            normalized["CountryCode"] = country_code
+            normalized["Language"] = str(language.get("Name") or "")
+            normalized["LanguageCode"] = str(language.get("Name") or "").upper()[:8]
             normalized["deviceType"] = ", ".join(name for name, field in (("desktop", "DesktopAllowed"), ("mobile", "MobileAllowed"), ("tablet", "TabletAllowed")) if item.get(field))
         normalized["_provider_name"] = getattr(getattr(self.integration, "client", None), "name", self.provider_code)
         return normalized
@@ -235,17 +317,37 @@ class InnovateMRClient:
             seen_cursors.add(candidate); next_cursor=candidate
         raise InnovateMRAPIError(f"Pagination exceeded max pages ({self.max_pages})")
 
-    def get_quota_for_survey(self, survey_id: int) -> list[dict[str, Any]]:
+    def get_quota_for_survey(self, survey_id: int, *, language_id=None) -> list[dict[str, Any]]:
         endpoint=self._endpoint("quota_endpoint_template", "/supply/getQuotaForSurvey/{survey_id}", "")
         if not endpoint: return []
         key=str(self._config("quota_result_key", "") or ("Quotas" if self.is_biobrain else "result")); items=self._result_list(self._get(endpoint.format(survey_id=survey_id)), key)
-        return [{**item, "id": item.get("QuotaId"), "targeting": {"Conditions": item.get("Conditions", [])}} for item in items] if self.is_biobrain else items
+        if not self.is_biobrain:
+            return items
+        normalized = []
+        for item in items:
+            targeting_details = []
+            for condition in item.get("Conditions", []) if isinstance(item.get("Conditions"), list) else []:
+                if not isinstance(condition, dict):
+                    continue
+                question = self._normalize_biobrain_qualification(condition, language_id)
+                targeting_details.append({
+                    "name": question["QuestionText"],
+                    "values": [option["OptionText"] for option in question["Options"]] or ["Provider-defined segment"],
+                })
+            normalized.append({
+                **item,
+                "id": item.get("QuotaId"),
+                "title": "Targeted respondent quota" if targeting_details else "Overall survey quota",
+                "targeting": {"Conditions": item.get("Conditions", [])},
+                "targeting_details": targeting_details,
+            })
+        return normalized
 
-    def get_survey_targeting(self, survey_id: int) -> list[dict[str, Any]]:
+    def get_survey_targeting(self, survey_id: int, *, language_id=None) -> list[dict[str, Any]]:
         endpoint=self._endpoint("targeting_endpoint_template", "/supply/getSurveyTargeting/{survey_id}", "")
         if not endpoint: return []
         key=str(self._config("targeting_result_key", "") or ("Qualifications" if self.is_biobrain else "result")); items=self._result_list(self._get(endpoint.format(survey_id=survey_id)), key)
-        return [{**item, "QuestionId": item.get("QualificationId"), "QuestionKey": str(item.get("QualificationId") or ""), "QuestionType": str(item.get("QualificationTypeId") or ""), "Options": item.get("OptionIds", [])} for item in items] if self.is_biobrain else items
+        return [self._normalize_biobrain_qualification(item, language_id) for item in items] if self.is_biobrain else items
 
     def get_survey_transactions_by_pid(self, survey_id: int, pid: str) -> list[dict[str, Any]]:
         endpoint=self._endpoint("transaction_endpoint_template", "/supply/getSurveyTransactionsByCond/{survey_id}/{pid}", "")

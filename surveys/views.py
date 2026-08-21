@@ -105,9 +105,11 @@ from .services import reconcile_attempt_status, replace_survey_quotas, replace_s
 from .survey_flow import (
     attach_global_entry_ip_claim,
     backfill_attempt_entry_audit,
+    build_biobrain_outbound_url,
     build_outbound_url,
     claim_global_entry_ip,
     create_attempt,
+    ensure_attempt_prescreener_uid,
     get_request_client_data,
     get_request_ip,
     status_rid_from_request,
@@ -1145,6 +1147,8 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         age_ranges = []
         allowed_values = _rfg_qualifying_option_values(question) if is_rfg else None
         for option in question.options:
+            if not isinstance(option, dict):
+                option = {"OptionId": option, "OptionText": str(option)}
             option_id = option.get("OptionId")
             if option.get("ageStart") is not None:
                 label = f"{option.get('ageStart')}–{option.get('ageEnd')}"
@@ -1530,6 +1534,13 @@ def survey_start(request):
                 stale = stale or not survey.targeting_questions.filter(
                     raw_data__adapter_version=2
                 ).exists()
+        if survey.integration_id and survey.integration.provider_code == "biobrain":
+            stale = stale or any(
+                not question.text
+                or str(question.text).startswith("Qualification ")
+                or any(not isinstance(option, dict) for option in (question.options or []))
+                for question in survey.targeting_questions.all()
+            )
         targeting_warning = ""
         if stale:
             try:
@@ -1662,6 +1673,8 @@ def survey_start(request):
         answers, errors = _collect_prescreener_answers(request, attempt.survey)
         if not errors:
             try:
+                if provider_code == "biobrain":
+                    ensure_attempt_prescreener_uid(attempt)
                 provider = None
                 if provider_code in {"rfg", "toluna"}:
                     provider = get_provider(attempt.survey.integration)
@@ -1722,11 +1735,21 @@ def survey_start(request):
                             # request waited for the row lock. Reuse that
                             # prepared invite instead of creating a second one.
                             return HttpResponseRedirect(_toluna_member_ready_url(locked.rid))
-                        outbound_url = (
-                            provider.build_outbound_url(locked.survey, locked, answers)
-                            if provider
-                            else build_outbound_url(locked.survey.entry_link, locked.rid, answers)
-                        )
+                        if provider:
+                            outbound_url = provider.build_outbound_url(
+                                locked.survey, locked, answers
+                            )
+                        elif provider_code == "biobrain":
+                            outbound_url = build_biobrain_outbound_url(
+                                locked.survey.entry_link,
+                                locked.rid,
+                                locked.provider_profile_uid or locked.prescreener_uid,
+                                answers,
+                            )
+                        else:
+                            outbound_url = build_outbound_url(
+                                locked.survey.entry_link, locked.rid, answers
+                            )
                         now = timezone.now()
                         locked.answers = operational_answer_value(answers)
                         locked.submitted_at = now
@@ -2270,6 +2293,19 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         stale = synced_at is None or (
             survey.source_modified_at is not None and synced_at < survey.source_modified_at
         )
+        if survey.integration_id and survey.integration.provider_code == "biobrain":
+            if detail_type == "targeting":
+                stale = stale or any(
+                    not question.text
+                    or str(question.text).startswith("Qualification ")
+                    or any(not isinstance(option, dict) for option in (question.options or []))
+                    for question in survey.targeting_questions.all()
+                )
+            else:
+                stale = stale or any(
+                    not isinstance((quota.raw_data or {}).get("targeting_details"), list)
+                    for quota in survey.quotas.all()
+                )
         if stale:
             if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:
                 get_provider(survey.integration).refresh_details(survey)

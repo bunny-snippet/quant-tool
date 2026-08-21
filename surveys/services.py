@@ -139,7 +139,10 @@ def _detail_changed(existing: Survey, incoming: dict[str, Any]) -> bool:
 
 def replace_survey_quotas(client: InnovateMRClient, survey: Survey) -> None:
     try:
-        quotas = client.get_quota_for_survey(survey.source_id)
+        quotas = client.get_quota_for_survey(
+            survey.source_id,
+            language_id=(survey.raw_data or {}).get("LanguageId") if client.is_biobrain else None,
+        )
     except InnovateMRNotFound:
         quotas = []
     with transaction.atomic():
@@ -167,7 +170,10 @@ def replace_survey_quotas(client: InnovateMRClient, survey: Survey) -> None:
 
 def replace_survey_targeting(client: InnovateMRClient, survey: Survey) -> None:
     try:
-        targeting = client.get_survey_targeting(survey.source_id)
+        targeting = client.get_survey_targeting(
+            survey.source_id,
+            language_id=(survey.raw_data or {}).get("LanguageId") if client.is_biobrain else None,
+        )
     except InnovateMRNotFound:
         targeting = []
     with transaction.atomic():
