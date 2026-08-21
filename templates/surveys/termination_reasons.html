@@ -36,13 +36,13 @@
 
 {% if lookup_error and not detail_attempt %}<div class="reason-alert"><strong>Outcome not found</strong><span>{{ lookup_error }}</span></div>{% endif %}
 
-{% if show_toluna_notifications %}<section class="toluna-notification-panel" aria-label="Toluna notification audit">
+{% if show_toluna_notifications %}<section class="toluna-notification-panel" data-toluna-async-panel aria-label="Toluna notification audit" aria-busy="false">
   <header class="toluna-notification-head">
     <div><span>Toluna notification centre</span><h2>Provider status feed</h2><p>Verified completion, termination and operational events received directly from Toluna.</p></div>
     <strong>POST · JSON</strong>
   </header>
   <nav class="toluna-event-tabs" aria-label="Toluna notification types">
-    {% for tab in toluna_tabs %}<a class="{% if tab.active %}active{% endif %}" href="?{{ tab.query }}"><span>{{ tab.label }}</span><strong>{{ tab.count }}</strong><small>{{ tab.description }}</small></a>{% endfor %}
+    {% for tab in toluna_tabs %}<a class="{% if tab.active %}active{% endif %}" data-toluna-tab-link href="?{{ tab.query }}"><span>{{ tab.label }}</span><strong>{{ tab.count }}</strong><small>{{ tab.description }}</small></a>{% endfor %}
   </nav>
   <div class="table-wrap toluna-notification-table-wrap">
     <table class="survey-table toluna-notification-table">
@@ -148,4 +148,4 @@
   </section>
 </div>{% endif %}
 {% endblock %}
-{% block scripts %}<script src="/static/surveys/term_reports.js?v=1"></script>{% endblock %}
+{% block scripts %}<script src="/static/surveys/term_reports.js?v=2"></script>{% endblock %}

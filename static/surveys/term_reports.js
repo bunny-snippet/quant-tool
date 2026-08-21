@@ -115,3 +115,60 @@
     if (event.key === 'Escape') closeMenus();
   });
 })();
+
+/* Switch Toluna notification cards without reloading the complete report page. */
+(() => {
+  let activeRequest = null;
+
+  async function replaceTolunaPanel(url, { pushHistory = true } = {}) {
+    const currentPanel = document.querySelector('[data-toluna-async-panel]');
+    if (!currentPanel) {
+      window.location.assign(url);
+      return;
+    }
+
+    activeRequest?.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
+    currentPanel.classList.add('is-loading');
+    currentPanel.setAttribute('aria-busy', 'true');
+
+    try {
+      const response = await fetch(url, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const nextPanel = page.querySelector('[data-toluna-async-panel]');
+      if (!nextPanel) throw new Error('Toluna panel missing from response');
+
+      currentPanel.replaceWith(nextPanel);
+      if (pushHistory) window.history.pushState({ tolunaTab: true }, '', response.url || url);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      window.location.assign(url);
+    } finally {
+      if (activeRequest !== controller) return;
+      activeRequest = null;
+      const panel = document.querySelector('[data-toluna-async-panel]');
+      panel?.classList.remove('is-loading');
+      panel?.setAttribute('aria-busy', 'false');
+    }
+  }
+
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('[data-toluna-tab-link]');
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    replaceTolunaPanel(link.href);
+  });
+
+  window.addEventListener('popstate', () => {
+    if (document.querySelector('[data-toluna-async-panel]') && new URL(window.location.href).searchParams.getAll('provider').includes('toluna')) {
+      replaceTolunaPanel(window.location.href, { pushHistory: false });
+    }
+  });
+})();

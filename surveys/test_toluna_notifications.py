@@ -170,6 +170,8 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["show_toluna_notifications"])
         self.assertContains(response, '?provider=toluna')
+        self.assertContains(response, 'data-toluna-async-panel')
+        self.assertContains(response, 'data-toluna-tab-link', count=6)
         self.assertContains(response, "Toluna notification centre")
         self.assertContains(response, "Enhanced termination")
         self.assertContains(response, "NonQuotaDemographicRejection")
