@@ -523,6 +523,37 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .reason-mobile-card>.reason-platform-status{margin-top:7px}
 @media(max-width:720px){.reason-list-filters .search-field{grid-column:1/-1}.reason-list-filters .datetime-field{grid-column:auto}}
 
+/* Toluna's authenticated operational feed inside Term Reports. */
+.toluna-notification-panel{margin:0 0 18px;overflow:hidden;border:1px solid var(--line);border-radius:19px;background:#fff;box-shadow:0 8px 28px rgba(38,55,88,.05)}
+.toluna-notification-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;background:linear-gradient(135deg,#132344,#1d365f);color:#fff}
+.toluna-notification-head>div>span{color:#67d9ec;font-size:9px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase}
+.toluna-notification-head h2{margin:4px 0 3px;color:#fff;font:800 21px "Manrope"}
+.toluna-notification-head p{margin:0;color:#c3cee0;font-size:11px}
+.toluna-notification-head>strong{flex:0 0 auto;padding:8px 11px;border:1px solid rgba(255,255,255,.17);border-radius:9px;background:rgba(255,255,255,.08);font-size:9px;letter-spacing:.5px}
+.toluna-event-tabs{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:8px;padding:12px;border-bottom:1px solid var(--line);overflow-x:auto}
+.toluna-event-tabs a{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;min-height:66px;padding:11px 12px;border:1px solid #e1e7ef;border-radius:12px;background:#f8fafc;color:#53627a;text-decoration:none;transition:.18s ease}
+.toluna-event-tabs a:hover{border-color:#9bdbea;transform:translateY(-1px)}
+.toluna-event-tabs a.active{border-color:#1cb7d4;background:#eafaff;color:#087b92;box-shadow:0 5px 16px rgba(28,183,212,.13)}
+.toluna-event-tabs span{overflow:hidden;font-size:10px;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
+.toluna-event-tabs strong{display:grid;place-items:center;min-width:23px;height:23px;padding:0 6px;border-radius:8px;background:#e7edf5;color:#4f6079;font:800 10px "Manrope"}
+.toluna-event-tabs a.active strong{background:#1cb7d4;color:#fff}
+.toluna-event-tabs small{grid-column:1/-1;overflow:hidden;color:#8a97aa;font-size:8px;text-overflow:ellipsis;white-space:nowrap}
+.toluna-notification-table{min-width:980px}
+.toluna-notification-table td{height:74px}
+.toluna-event-badge{display:inline-flex;padding:6px 8px;border-radius:8px;background:#eaf7fb;color:#14839a;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.3px}
+.toluna-event-badge.event-member_terminate,.toluna-event-badge.event-enhanced_termination{background:#fff0f2;color:#af4654}
+.toluna-event-badge.event-quota_status{background:#fff7df;color:#956812}
+.toluna-event-badge.event-reconciliation{background:#f2edff;color:#7652b4}
+.toluna-outcome{display:flex;max-width:280px;flex-direction:column;align-items:flex-start;gap:4px}
+.toluna-outcome strong{color:var(--navy);font-size:11px}
+.toluna-outcome span,.toluna-outcome small{display:-webkit-box;overflow:hidden;color:#77849a;font-size:9px;line-height:1.35;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.toluna-notification-panel .panel-foot{border-top:1px solid var(--line)}
+.toluna-result-head{background:linear-gradient(135deg,#eefbfe,#fff);border-color:#d7f0f5}
+.toluna-result-head .reason-status-icon{background:#14afcb}
+.toluna-highlight{background:#eefbfe;border-color:#ccecf3}
+@media(max-width:900px){.toluna-event-tabs{grid-template-columns:repeat(6,155px)}.toluna-notification-head{align-items:flex-start}.toluna-notification-head>strong{display:none}}
+@media(max-width:620px){.toluna-notification-head{padding:17px}.toluna-notification-head h2{font-size:18px}.toluna-notification-head p{line-height:1.5}.toluna-event-tabs{padding:9px}.toluna-notification-table-wrap{overflow-x:auto}.toluna-notification-table{min-width:860px}}
+
 @media(max-width:1550px) and (min-width:901px){
   .page-studies .study-overview-compact{gap:7px}
   .page-studies .study-overview-compact>.revenue,.page-studies .study-overview-compact>.study-summary-card{padding-inline:9px}

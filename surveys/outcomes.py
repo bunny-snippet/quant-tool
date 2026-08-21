@@ -66,6 +66,15 @@ def provider_outcome(attempt):
             "category": _text(parameters.get("ruledOutBy")),
         }
 
+    if provider_code == "toluna":
+        notification = data.get("toluna_notification") or {}
+        if isinstance(notification, dict) and notification:
+            return {
+                "status": _text(notification.get("status") or attempt.get_status_display()),
+                "reason": _text(notification.get("reason")),
+                "category": _text(notification.get("category") or notification.get("event_type")),
+            }
+
     config_mapping = ((integration.config or {}).get("outcome_mapping") or {}) if integration else {}
     field_mapping = (integration.field_mapping or {}) if integration else {}
     mapping = {

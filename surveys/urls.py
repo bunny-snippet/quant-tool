@@ -1,6 +1,15 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .webhook_views import (
+    TolunaEnhancedTerminationNotificationAPIView,
+    TolunaMemberCompleteNotificationAPIView,
+    TolunaMemberTerminateNotificationAPIView,
+    TolunaQuotaStatusNotificationAPIView,
+    TolunaReconciliationNotificationAPIView,
+    TolunaSurveyClosedNotificationAPIView,
+)
+
 from .views import (
     DashboardAPIView,
     SurveyAttemptViewSet,
@@ -30,6 +39,36 @@ router.register("sync-runs", SyncRunViewSet, basename="sync-run")
 router.register("survey-attempts", SurveyAttemptViewSet, basename="survey-attempt")
 
 urlpatterns = [
+    path(
+        "api/toluna/notifications/member-complete",
+        TolunaMemberCompleteNotificationAPIView.as_view(),
+        name="toluna-notification-member-complete",
+    ),
+    path(
+        "api/toluna/notifications/member-terminate",
+        TolunaMemberTerminateNotificationAPIView.as_view(),
+        name="toluna-notification-member-terminate",
+    ),
+    path(
+        "api/toluna/notifications/survey-closed",
+        TolunaSurveyClosedNotificationAPIView.as_view(),
+        name="toluna-notification-survey-closed",
+    ),
+    path(
+        "api/toluna/notifications/quota-status",
+        TolunaQuotaStatusNotificationAPIView.as_view(),
+        name="toluna-notification-quota-status",
+    ),
+    path(
+        "api/toluna/notifications/enhanced-termination",
+        TolunaEnhancedTerminationNotificationAPIView.as_view(),
+        name="toluna-notification-enhanced-termination",
+    ),
+    path(
+        "api/toluna/notifications/reconciliation",
+        TolunaReconciliationNotificationAPIView.as_view(),
+        name="toluna-notification-reconciliation",
+    ),
     path("survey/start", survey_start, name="survey-start"),
     path("survey/toluna/member-ready", toluna_member_ready, name="toluna-member-ready"),
     path("survey/rfg/callback", RFGCallbackAPIView.as_view(), name="rfg-callback"),

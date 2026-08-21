@@ -9,8 +9,23 @@ from .models import (
     SyncRun,
     TargetingQuestion,
     TolunaMember,
+    TolunaNotification,
     TolunaReferenceQuestion,
 )
+
+
+@admin.register(TolunaNotification)
+class TolunaNotificationAdmin(admin.ModelAdmin):
+    list_display = [
+        "id", "event_type", "provider_status", "reason", "survey", "attempt",
+        "applied", "duplicate_count", "occurred_at", "received_at",
+    ]
+    list_filter = ["event_type", "provider_status", "reason", "applied", "received_at"]
+    search_fields = [
+        "unique_code", "provider_survey_id", "survey_ref", "attempt__rid",
+        "reason", "rejection_name", "processing_message",
+    ]
+    readonly_fields = [field.name for field in TolunaNotification._meta.fields]
 
 
 class SurveyQuotaInline(admin.TabularInline):

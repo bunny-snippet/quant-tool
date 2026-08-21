@@ -47,7 +47,7 @@ from vendors.services import (
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 from vendors.credentials import decrypt_secret
-from vendors.models import VendorAPIKey
+from vendors.models import ClientIntegration, VendorAPIKey
 from vendors.security import decode_delivery_token, sign_supplier_callback
 
 from .filters import SurveyAttemptFilter, SurveyFilter
@@ -59,7 +59,7 @@ from .dashboard import (
 )
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
-from .models import Survey, SurveyAttempt, SyncRun
+from .models import Survey, SurveyAttempt, SyncRun, TolunaNotification
 from .outcomes import provider_outcome
 from .report_pricing import (
     apply_percentage,
@@ -238,10 +238,20 @@ TERM_REASON_FILTER_PERMISSIONS = {
     "status": "termination_reasons.filter.status",
     "country": "termination_reasons.filter.country",
     "client": "termination_reasons.filter.client",
+    "provider": "termination_reasons.filter.provider",
     "buyer": "termination_reasons.filter.buyer",
     "date": "termination_reasons.filter.date",
     "clear": "termination_reasons.filters.clear",
 }
+
+TOLUNA_NOTIFICATION_TABS = (
+    (TolunaNotification.EventType.MEMBER_COMPLETE, "Member completion", "Completed respondents"),
+    (TolunaNotification.EventType.MEMBER_TERMINATE, "Member termination", "Standard termination reasons"),
+    (TolunaNotification.EventType.ENHANCED_TERMINATION, "Enhanced termination", "Quality and rejection details"),
+    (TolunaNotification.EventType.QUOTA_STATUS, "Quota status", "Open and full quota changes"),
+    (TolunaNotification.EventType.SURVEY_CLOSED, "Survey closed", "Closed survey notifications"),
+    (TolunaNotification.EventType.RECONCILIATION, "Reconciliation", "Post-fieldwork adjustments"),
+)
 
 TERM_REASON_CARD_PERMISSIONS = {
     "total": "termination_reasons.card.total",
@@ -650,6 +660,7 @@ def _term_report_filter_state(request, filters_access):
         "status": _term_report_values(request, "status"),
         "country": _term_report_values(request, "country"),
         "client": _term_report_values(request, "client"),
+        "provider": _term_report_values(request, "provider"),
         "buyer_id": _term_report_values(request, "buyer_id"),
         "date_field": request.GET.get("date_field", "callback").strip() or "callback",
         "date_from": request.GET.get("date_from", "").strip(),
@@ -660,6 +671,7 @@ def _term_report_filter_state(request, filters_access):
         "sub_branch": selected["sub_branch"], "shift": selected["shift"],
         "user": selected["user"], "status": selected["status"],
         "country": selected["country"], "client": selected["client"],
+        "provider": selected["provider"],
         "buyer": selected["buyer_id"], "date": selected["date_from"] or selected["date_to"],
     }
     for filter_name, value in supplied_by_permission.items():
@@ -708,6 +720,8 @@ def _filtered_term_report_queryset(request, filters_access):
         if selected[name]
     }
     queryset = SurveyAttemptFilter(filter_data, queryset=queryset).qs
+    if selected["provider"]:
+        queryset = queryset.filter(survey__integration__provider_code__in=selected["provider"])
     lower = _term_report_datetime(selected["date_from"], "From date and time")
     upper = _term_report_datetime(selected["date_to"], "To date and time")
     if lower and upper and lower > upper:
@@ -722,8 +736,25 @@ def _filtered_term_report_queryset(request, filters_access):
 
 def _term_report_options(base_queryset, user):
     hierarchy = user_hit_filter_options(user)
+    provider_labels = {
+        "innovatemr": "InnovateMR",
+        "rfg": "Research For Good",
+        "cint": "Cint Exchange",
+        "toluna": "Toluna",
+        "biobrain": "BioBrain / Voqall",
+        "custom": "Custom REST API",
+    }
+    provider_codes = list(
+        ClientIntegration.objects.filter(is_active=True).exclude(provider_code="")
+        .values_list("provider_code", flat=True)
+        .distinct().order_by("provider_code")
+    )
     return {
         **hierarchy,
+        "providers": [
+            {"value": code, "name": provider_labels.get(code, code.replace("-", " ").title())}
+            for code in provider_codes
+        ],
         "countries": list(base_queryset.exclude(survey__country_code="").values(
             "survey__country_code", "survey__country"
         ).distinct().order_by("survey__country_code")),
@@ -736,6 +767,57 @@ def _term_report_options(base_queryset, user):
     }
 
 
+def _filtered_toluna_notifications(request, selected):
+    """Apply the Term Reports filters to Toluna's operational notification audit."""
+
+    queryset = TolunaNotification.objects.select_related(
+        "integration__client", "survey__client", "attempt__platform_user",
+    ).defer("raw_payload")
+    search = selected["search"]
+    if search:
+        queryset = queryset.filter(
+            Q(attempt__rid__icontains=search)
+            | Q(unique_code__icontains=search)
+            | Q(survey__local_id__icontains=search)
+            | Q(survey__source_key__icontains=search)
+            | Q(provider_survey_id__icontains=search)
+            | Q(survey_ref__icontains=search)
+            | Q(reason__icontains=search)
+            | Q(rejection_name__icontains=search)
+            | Q(attempt__platform_user__username__icontains=search)
+            | Q(attempt__platform_user__email__icontains=search)
+        )
+    if selected["country"]:
+        queryset = queryset.filter(survey__country_code__in=selected["country"])
+    if selected["client"]:
+        queryset = queryset.filter(survey__client_id__in=selected["client"])
+    if selected["buyer_id"]:
+        queryset = queryset.filter(survey__buyer_id__in=selected["buyer_id"])
+
+    attempt_filters = {
+        name: ",".join(selected[name])
+        for name in ("branch", "sub_branch", "shift", "user", "status")
+        if selected[name]
+    }
+    if attempt_filters:
+        attempts = SurveyAttemptFilter(
+            attempt_filters,
+            queryset=SurveyAttempt.objects.filter(survey__integration__provider_code="toluna"),
+        ).qs
+        queryset = queryset.filter(attempt_id__in=attempts.values("id"))
+
+    lower = _term_report_datetime(selected["date_from"], "From date and time")
+    upper = _term_report_datetime(selected["date_to"], "To date and time")
+    if lower and upper and lower > upper:
+        raise PermissionDenied("From date and time cannot be after To date and time.")
+    queryset = queryset.annotate(report_time=Coalesce("occurred_at", "received_at"))
+    if lower:
+        queryset = queryset.filter(report_time__gte=lower)
+    if upper:
+        queryset = queryset.filter(report_time__lte=upper)
+    return queryset
+
+
 @function_permission_required("termination_reasons.view")
 def termination_reasons_page(request):
     codes = effective_permission_codes(request.user)
@@ -746,12 +828,53 @@ def termination_reasons_page(request):
     detail_attempt = None
     detail_outcome = None
     lookup_error = ""
+    show_toluna_notifications = "toluna" in selected["provider"]
+    toluna_event = (request.GET.get("toluna_event") or TolunaNotification.EventType.MEMBER_TERMINATE).strip()
+    valid_toluna_events = {value for value, _label, _description in TOLUNA_NOTIFICATION_TABS}
+    if toluna_event not in valid_toluna_events:
+        toluna_event = TolunaNotification.EventType.MEMBER_TERMINATE
+    toluna_page_obj = None
+    toluna_tabs = []
+    toluna_detail = None
 
     if detail_rid and "termination_reasons.action.details" not in codes:
         raise PermissionDenied("Your account cannot open outcome details.")
 
     base_queryset = _term_report_base_queryset()
     filter_options = _term_report_options(base_queryset, request.user)
+
+    if show_toluna_notifications:
+        toluna_queryset = _filtered_toluna_notifications(request, selected)
+        toluna_counts = {
+            row["event_type"]: row["total"]
+            for row in toluna_queryset.values("event_type").annotate(total=Count("id"))
+        }
+        tab_params = request.GET.copy()
+        for parameter in ("toluna_event", "toluna_page", "toluna_detail", "detail", "rid", "page"):
+            tab_params.pop(parameter, None)
+        for value, label, description in TOLUNA_NOTIFICATION_TABS:
+            query = tab_params.copy()
+            query["toluna_event"] = value
+            toluna_tabs.append({
+                "value": value,
+                "label": label,
+                "description": description,
+                "count": toluna_counts.get(value, 0),
+                "active": value == toluna_event,
+                "query": query.urlencode(),
+            })
+        selected_notifications = toluna_queryset.filter(event_type=toluna_event).order_by(
+            "-report_time", "-received_at"
+        )
+        toluna_page_obj = Paginator(selected_notifications, 20).get_page(
+            request.GET.get("toluna_page", 1)
+        )
+        toluna_detail_id = (request.GET.get("toluna_detail") or "").strip()
+        if toluna_detail_id:
+            if "termination_reasons.action.details" not in codes:
+                raise PermissionDenied("Your account cannot open notification details.")
+            if toluna_detail_id.isdigit():
+                toluna_detail = toluna_queryset.filter(pk=toluna_detail_id).first()
 
     summary = queryset.aggregate(
         total=Count("id"),
@@ -814,6 +937,13 @@ def termination_reasons_page(request):
     page_params = link_params.copy()
     page_params.pop("page", None)
     page_query = page_params.urlencode()
+    toluna_link_params = request.GET.copy()
+    for parameter in ("toluna_detail", "detail", "rid"):
+        toluna_link_params.pop(parameter, None)
+    toluna_detail_query = toluna_link_params.urlencode()
+    toluna_page_params = toluna_link_params.copy()
+    toluna_page_params.pop("toluna_page", None)
+    toluna_page_query = toluna_page_params.urlencode()
 
     return render(request, "surveys/termination_reasons.html", {
         "active_page": "termination-reasons",
@@ -827,6 +957,7 @@ def termination_reasons_page(request):
         "term_users": filter_options["users"],
         "term_countries": filter_options["countries"],
         "term_buyers": filter_options["buyers"],
+        "term_providers": filter_options["providers"],
         "attempt_statuses": list(UNSUCCESSFUL_STATUS_LABELS.items()),
         "summary": summary,
         "page_obj": page_obj,
@@ -844,6 +975,13 @@ def termination_reasons_page(request):
         "can_refresh_reasons": "termination_reasons.action.refresh" in codes,
         "can_export_reasons": "termination_reasons.export" in codes,
         "reason_fields": _component_access(codes, TERM_REASON_FIELD_PERMISSIONS),
+        "show_toluna_notifications": show_toluna_notifications,
+        "toluna_tabs": toluna_tabs,
+        "toluna_event": toluna_event,
+        "toluna_page_obj": toluna_page_obj,
+        "toluna_detail": toluna_detail,
+        "toluna_detail_query": toluna_detail_query,
+        "toluna_page_query": toluna_page_query,
     })
 
 
@@ -852,7 +990,7 @@ def termination_reasons_export(request):
     """Export the exact filtered Term Reports result set with both status layers."""
     codes = effective_permission_codes(request.user)
     filters_access = _component_access(codes, TERM_REASON_FILTER_PERMISSIONS)
-    queryset, _selected = _filtered_term_report_queryset(request, filters_access)
+    queryset, selected = _filtered_term_report_queryset(request, filters_access)
     queryset = queryset.order_by("-callback_at", "-initiated_at")
     headers = [
         "RID", "PID", "UID", "Project ID", "Client survey ID", "Client", "Provider",
@@ -887,9 +1025,53 @@ def termination_reasons_export(request):
                 round(attempt.loi_seconds / 60, 2) if attempt.loi_seconds is not None else "",
             ]
     local_now = timezone.localtime()
+    sheets = [ExcelSheet("Term Reports", headers, rows(), widths)]
+    if "toluna" in selected["provider"]:
+        event_type = (request.GET.get("toluna_event") or TolunaNotification.EventType.MEMBER_TERMINATE).strip()
+        valid_events = {value for value, _label, _description in TOLUNA_NOTIFICATION_TABS}
+        if event_type not in valid_events:
+            event_type = TolunaNotification.EventType.MEMBER_TERMINATE
+        notifications = _filtered_toluna_notifications(request, selected).filter(
+            event_type=event_type
+        ).order_by("-report_time", "-received_at")
+        notification_headers = [
+            "Notification", "RID", "Unique code", "Project ID", "Survey ID", "Survey reference",
+            "Wave ID", "Quota ID", "Provider status", "Reason", "Rejection ID", "Rejection",
+            "Reconciliation ID", "Revenue", "Applied", "Processing result", "Occurred at",
+            "Received at", "Duplicate deliveries",
+        ]
+        notification_widths = [
+            24, 15, 22, 19, 18, 28, 12, 12, 22, 28, 14, 30, 18, 13, 11, 38, 24, 24, 18,
+        ]
+
+        def notification_rows():
+            for notification in notifications.iterator(chunk_size=500):
+                yield [
+                    notification.get_event_type_display(),
+                    notification.attempt.rid if notification.attempt_id else "",
+                    notification.unique_code,
+                    notification.survey.local_id if notification.survey_id else "",
+                    notification.provider_survey_id or "",
+                    notification.survey_ref,
+                    notification.wave_id or "",
+                    notification.quota_id or "",
+                    notification.provider_status,
+                    notification.reason,
+                    notification.rejection_id or "",
+                    notification.rejection_name,
+                    notification.reconciliation_id or "",
+                    round(notification.revenue_cents / 100, 2) if notification.revenue_cents is not None else "",
+                    "Yes" if notification.applied else "No",
+                    notification.processing_message,
+                    _excel_datetime(notification.occurred_at),
+                    _excel_datetime(notification.received_at),
+                    notification.duplicate_count,
+                ]
+
+        sheets.append(ExcelSheet("Toluna Notifications", notification_headers, notification_rows(), notification_widths))
     return build_excel_response(
         f"term-reports-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
-        [ExcelSheet("Term Reports", headers, rows(), widths)],
+        sheets,
     )
 
 

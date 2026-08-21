@@ -127,6 +127,7 @@ FUNCTION_CATALOG = (
     ("termination_reasons.filter.status", "Filter by status", "Term Reports - Filters", "Filter outcomes by terminated, quota or quality/security status.", ADMIN_ROLES),
     ("termination_reasons.filter.country", "Filter by country", "Term Reports - Filters", "Filter unsuccessful outcomes by one or more survey countries.", ADMIN_ROLES),
     ("termination_reasons.filter.client", "Filter by client", "Term Reports - Filters", "Filter provider outcomes by client integration.", ADMIN_ROLES),
+    ("termination_reasons.filter.provider", "Filter by provider", "Term Reports - Filters", "Filter provider outcomes and notification reports by provider.", ADMIN_ROLES),
     ("termination_reasons.filter.buyer", "Filter by buyer ID", "Term Reports - Filters", "Filter provider outcomes by one or more buyer or sub-client IDs.", ADMIN_ROLES),
     ("termination_reasons.filter.date", "Filter by date and time", "Term Reports - Filters", "Filter by an IST start or end date-time range.", ADMIN_ROLES),
     ("termination_reasons.filters.clear", "Clear outcome filters", "Term Reports - Filters", "Clear all Term Reports list filters.", ADMIN_ROLES),

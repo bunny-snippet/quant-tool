@@ -8,7 +8,7 @@
   const fallbackLabels = {
     branch: 'All branches', sub_branch: 'All sub-branches', shift: 'All shifts',
     user: 'All users', status: 'All unsuccessful', country: 'All countries',
-    client: 'All clients', buyer_id: 'All buyer IDs',
+    client: 'All clients', provider: 'Select provider', buyer_id: 'All buyer IDs',
   };
 
   const selectedValues = (container) => new Set(

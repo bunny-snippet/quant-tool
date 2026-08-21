@@ -258,6 +258,81 @@ class TolunaMember(models.Model):
         ordering = ["-updated_at"]
 
 
+class TolunaNotification(models.Model):
+    """Immutable, idempotent audit of one Toluna server notification.
+
+    Toluna can resend member-completion notifications when a respondent
+    refreshes its end page.  ``payload_hash`` therefore identifies an exact
+    provider event while ``duplicate_count`` records repeated deliveries
+    without applying the same status transition twice.
+    """
+
+    class EventType(models.TextChoices):
+        MEMBER_COMPLETE = "member_complete", "Member completion"
+        MEMBER_TERMINATE = "member_terminate", "Member termination"
+        ENHANCED_TERMINATION = "enhanced_termination", "Enhanced termination"
+        QUOTA_STATUS = "quota_status", "Quota status"
+        SURVEY_CLOSED = "survey_closed", "Survey closed"
+        RECONCILIATION = "reconciliation", "Reconciliation"
+
+    event_type = models.CharField(max_length=32, choices=EventType.choices, db_index=True)
+    payload_hash = models.CharField(max_length=64)
+    integration = models.ForeignKey(
+        "vendors.ClientIntegration",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="toluna_notifications",
+    )
+    survey = models.ForeignKey(
+        Survey,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="toluna_notifications",
+    )
+    attempt = models.ForeignKey(
+        "SurveyAttempt",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="toluna_notifications",
+    )
+    unique_code = models.CharField(max_length=160, blank=True, db_index=True)
+    provider_survey_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    survey_ref = models.CharField(max_length=300, blank=True)
+    wave_id = models.BigIntegerField(null=True, blank=True)
+    quota_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    provider_status = models.CharField(max_length=80, blank=True, db_index=True)
+    reason = models.CharField(max_length=160, blank=True, db_index=True)
+    rejection_id = models.BigIntegerField(null=True, blank=True)
+    rejection_name = models.CharField(max_length=200, blank=True, db_index=True)
+    reconciliation_id = models.BigIntegerField(null=True, blank=True)
+    revenue_cents = models.IntegerField(null=True, blank=True)
+    is_live = models.BooleanField(null=True, blank=True)
+    occurred_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    raw_payload = models.JSONField(default=dict, blank=True, editable=False)
+    applied = models.BooleanField(default=False, db_index=True)
+    processing_message = models.CharField(max_length=300, blank=True)
+    duplicate_count = models.PositiveIntegerField(default=0)
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    last_received_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event_type", "payload_hash"],
+                name="unique_toluna_notification_payload",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["event_type", "-received_at"]),
+            models.Index(fields=["integration", "event_type", "-received_at"]),
+            models.Index(fields=["attempt", "-received_at"]),
+        ]
+        ordering = ["-received_at"]
+
+
 class SyncRun(models.Model):
     class Status(models.TextChoices):
         RUNNING = "running", "Running"
