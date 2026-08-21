@@ -142,19 +142,20 @@ class InnovateMRClient:
     def _normalize_biobrain_qualification(self, item, language_id) -> dict[str, Any]:
         qualification_id = item.get("QualificationId")
         detail = self._biobrain_qualification(language_id, qualification_id)
-        question_text = str(detail.get("QuestionText") or detail.get("Code") or f"Qualification {qualification_id}")
+        qualification_code = str(detail.get("Code") or "").strip()
+        question_text = str(detail.get("QuestionText") or qualification_code or f"Qualification {qualification_id}")
         question_type = str(detail.get("TypeName") or item.get("QualificationTypeId") or "")
         options = self._biobrain_options(item, detail)
         return {
             **item,
             "QuestionId": qualification_id,
-            "QuestionKey": f"Q{qualification_id}",
+            "QuestionKey": qualification_code or f"BIOBRAIN_Q_{qualification_id}",
             "QuestionText": question_text,
             "QuestionType": question_type,
             "QuestionCategory": "BioBrain targeting",
             "Options": options,
             "targeting_choices": [str(option["OptionId"]) for option in options],
-            "qualification_code": str(detail.get("Code") or ""),
+            "qualification_code": qualification_code,
         }
 
     def _headers(self) -> dict[str, str]:

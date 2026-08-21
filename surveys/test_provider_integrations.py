@@ -65,7 +65,7 @@ class ConfigurableProviderClientTests(SimpleTestCase):
         )
         question = InnovateMRClient(token="secret", session=session, integration=integration()).get_survey_targeting(44, language_id=9)[0]
         self.assertEqual(question["QuestionText"], "What is your gender?")
-        self.assertEqual(question["QuestionKey"], "Q59")
+        self.assertEqual(question["QuestionKey"], "Gender")
         self.assertEqual(question["Options"], [
             {"OptionId": 100, "OptionCode": 1, "OptionText": "Male", "Qualifies": True},
             {"OptionId": 200, "OptionCode": 2, "OptionText": "Female", "Qualifies": True},
