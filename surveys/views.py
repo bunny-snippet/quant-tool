@@ -105,11 +105,10 @@ from .rfg_outcomes import RFG_STATUS_MAP, describe_rfg_outcome
 from .rfg_text import clean_rfg_display_text
 from .services import reconcile_attempt_status, replace_survey_quotas, replace_survey_targeting, sync_surveys
 from .survey_flow import (
-    attach_global_entry_ip_claim,
     backfill_attempt_entry_audit,
     build_biobrain_outbound_url,
     build_outbound_url,
-    claim_global_entry_ip,
+    claim_project_entry_ip,
     create_attempt,
     ensure_attempt_prescreener_uid,
     get_request_client_data,
@@ -1585,7 +1584,7 @@ def survey_start(request):
                     require_capacity=True,
                     for_update=True,
                 )
-                ip_claim, prior_ip_attempt, duplicate_ip = claim_global_entry_ip(entry_ip)
+                prior_ip_attempt, duplicate_ip = claim_project_entry_ip(survey, entry_ip)
                 attempt = create_attempt(
                     survey,
                     platform_user,
@@ -1598,8 +1597,6 @@ def survey_start(request):
                         allocation_context.survey_allocation,
                         client_allocation=allocation_context.client_allocation,
                     )
-                if not duplicate_ip:
-                    attach_global_entry_ip_claim(ip_claim, attempt)
                 if delivery_api_key:
                     delivery_config = {
                         "survey_id_mode": delivery_api_key.survey_id_mode,

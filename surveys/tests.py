@@ -585,8 +585,8 @@ class SurveyFlowTests(TestCase):
         self.assertEqual(attempt.exit_os, "Android 14")
         self.assertIsNotNone(attempt.loi_seconds)
 
-    @override_settings(ENFORCE_GLOBAL_UNIQUE_ENTRY_IP=True)
-    def test_duplicate_entry_ip_is_blocked_globally_before_prescreener(self):
+    @override_settings(ENFORCE_PROJECT_UNIQUE_ENTRY_IP=True)
+    def test_duplicate_entry_ip_is_blocked_only_inside_the_same_project(self):
         first = self.client.get(reverse("survey-start"), {
             "surveyId": self.survey.source_id,
             "supplierCode": "1000",
@@ -616,8 +616,22 @@ class SurveyFlowTests(TestCase):
 
         self.assertEqual(second.status_code, 302)
         second_query = parse_qs(urlsplit(second["Location"]).query)
-        self.assertEqual(second_query["status"], ["4"])
-        duplicate = SurveyAttempt.objects.get(rid=second_query["rid"][0])
+        self.assertIn("rid", second_query)
+        self.assertNotIn("status", second_query)
+        allowed = SurveyAttempt.objects.get(rid=second_query["rid"][0])
+        self.assertEqual(allowed.survey, other)
+        self.assertEqual(allowed.status, SurveyAttempt.Status.INITIATED)
+
+        duplicate_response = self.client.get(reverse("survey-start"), {
+            "surveyId": self.survey.source_id,
+            "supplierCode": "1000",
+            "userId": str(self.platform_user.pk),
+            "code": self.survey.local_id,
+        }, REMOTE_ADDR="31.13.71.44")
+        self.assertEqual(duplicate_response.status_code, 302)
+        duplicate_query = parse_qs(urlsplit(duplicate_response["Location"]).query)
+        self.assertEqual(duplicate_query["status"], ["4"])
+        duplicate = SurveyAttempt.objects.get(rid=duplicate_query["rid"][0])
         self.assertNotEqual(duplicate.rid, first_rid)
         self.assertEqual(duplicate.status, SurveyAttempt.Status.QUALITY_TERMINATED)
         self.assertEqual(duplicate.status_source, "local_duplicate_ip_guard")
