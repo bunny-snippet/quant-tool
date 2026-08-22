@@ -639,6 +639,46 @@ class SurveyFlowTests(TestCase):
             duplicate.upstream_transaction_data["local_ip_guard"]["reason"],
             "Duplicate IP address",
         )
+        result = self.client.get(duplicate_response["Location"])
+        self.assertEqual(result.status_code, 200)
+        self.assertContains(result, "Duplicate entry blocked")
+        self.assertContains(result, "Duplicate IP blocked")
+        self.assertNotContains(result, "Invalid survey callback")
+
+    @override_settings(ENFORCE_SURVEY_TARGET_COUNTRY=True)
+    def test_wrong_target_country_shows_recorded_reason_instead_of_invalid_callback(self):
+        location = {
+            "ip": "49.37.10.20",
+            "country_code": "IN",
+            "country": "India",
+            "postal_code": "110001",
+            "source": "test",
+        }
+        with patch("surveys.views.resolve_entry_geolocation", return_value=location):
+            start = self.client.get(reverse("survey-start"), {
+                "surveyId": self.survey.source_id,
+                "supplierCode": "1000",
+                "userId": str(self.platform_user.pk),
+                "code": self.survey.local_id,
+            }, REMOTE_ADDR=location["ip"])
+            self.assertEqual(start.status_code, 302)
+            rid = parse_qs(urlsplit(start["Location"]).query)["rid"][0]
+            blocked = self.client.get(reverse("survey-start"), {"rid": rid})
+
+        self.assertEqual(blocked.status_code, 302)
+        blocked_query = parse_qs(urlsplit(blocked["Location"]).query)
+        self.assertEqual(blocked_query["status"], ["4"])
+        attempt = SurveyAttempt.objects.get(rid=rid)
+        self.assertEqual(blocked_query["rid"], [attempt.rid])
+        self.assertEqual(attempt.status_source, "local_country_guard")
+
+        result = self.client.get(blocked["Location"])
+        self.assertEqual(result.status_code, 200)
+        self.assertContains(result, "Location not eligible")
+        self.assertContains(result, "Wrong target country")
+        self.assertContains(result, "detected country (IN)")
+        self.assertContains(result, "target country (US)")
+        self.assertNotContains(result, "Invalid survey callback")
 
     def test_innovate_profile_mapping_replaces_stale_values_and_protects_routing_keys(self):
         outbound = build_outbound_url(

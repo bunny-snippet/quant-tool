@@ -1403,7 +1403,7 @@ def _finish_wrong_target_country_attempt(attempt, request, location):
 
 
 def _finish_duplicate_ip_attempt(attempt, request, prior_attempt=None):
-    """Record an all-client duplicate entry IP as an immediate local S4."""
+    """Record a same-project duplicate entry IP as an immediate local S4."""
 
     now = timezone.now()
     with transaction.atomic():
@@ -1438,6 +1438,12 @@ def _finish_duplicate_ip_attempt(attempt, request, prior_attempt=None):
         ])
         finalize_attempt_capacity(locked)
     return locked
+
+
+def _recorded_status_url(attempt, status_code):
+    """Build a trusted local result URL without invoking provider callback checks."""
+
+    return f"{reverse('survey-status')}?{urlencode({'status': str(status_code), 'rid': attempt.rid})}"
 
 
 @require_http_methods(["GET", "POST"])
@@ -1614,9 +1620,7 @@ def survey_start(request):
             return _invalid_survey_link(request, str(exc), status_code=409)
         if duplicate_ip:
             attempt = _finish_duplicate_ip_attempt(attempt, request, prior_ip_attempt)
-            return HttpResponseRedirect(
-                f"{reverse('survey-status')}?{urlencode({'status': '4', 'rid': attempt.rid})}"
-            )
+            return HttpResponseRedirect(_recorded_status_url(attempt, "4"))
         if targeting_warning:
             request.session[f"attempt_warning_{attempt.rid}"] = targeting_warning
         return HttpResponseRedirect(f"{reverse('survey-start')}?rid={quote(attempt.rid)}")
@@ -1650,9 +1654,7 @@ def survey_start(request):
             attempt.entry_client_data = merged_client_data
     if attempt.status == SurveyAttempt.Status.INITIATED and is_wrong_target_country(attempt.survey, entry_location):
         attempt = _finish_wrong_target_country_attempt(attempt, request, entry_location)
-        return HttpResponseRedirect(
-            f"{reverse('survey-status')}?{urlencode({'status': '4', 'rid': attempt.rid})}"
-        )
+        return HttpResponseRedirect(_recorded_status_url(attempt, "4"))
 
     provider_code = (
         attempt.survey.integration.provider_code
@@ -1893,6 +1895,33 @@ TOLUNA_STATUS_PAGES = {
 }
 
 
+def _status_presentation_for_attempt(attempt, page, status_label):
+    """Explain locally enforced outcomes instead of showing a generic S4."""
+
+    if not attempt:
+        return page, status_label
+    audit = attempt.upstream_transaction_data or {}
+    if attempt.status_source == "local_country_guard":
+        guard = audit.get("local_country_guard") or {}
+        expected = str(guard.get("expected_country") or "").upper()
+        actual = str(guard.get("detected_country") or "").upper()
+        message = "Your location does not match this survey's target country."
+        if expected and actual:
+            message = f"Your detected country ({actual}) does not match this survey's target country ({expected})."
+        return {
+            "title": "Location not eligible",
+            "message": message,
+            "tone": "danger",
+        }, "Wrong target country"
+    if attempt.status_source == "local_duplicate_ip_guard":
+        return {
+            "title": "Duplicate entry blocked",
+            "message": "This IP address has already entered this project, so another entry from the same IP is not allowed.",
+            "tone": "danger",
+        }, "Duplicate IP blocked"
+    return page, status_label
+
+
 RFG_CALLBACK_IPS = {
     "15.222.163.99", "3.97.223.177", "3.97.28.227", "3.230.105.121",
     "52.21.20.32", "52.45.41.61",
@@ -2095,6 +2124,12 @@ def survey_status(request):
             if attempt.survey.integration_id
             else "innovatemr"
         )
+        canonical_query = (
+            set(request.GET.keys()) == {"status", "rid"}
+            and request.GET.get("rid", "").strip() == attempt.rid
+            and attempt.status_source in {"local_country_guard", "local_duplicate_ip_guard"}
+            and str(attempt.status) == status_code
+        )
         if status_code not in STATUS_PAGES and provider_code != "toluna":
             return render(request, "surveys/flow_error.html", {
                 "title": "Invalid survey status",
@@ -2105,15 +2140,17 @@ def survey_status(request):
         innovate_callback_verified = False
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES[status_code]
-            try:
-                callback_verified = get_provider(attempt.survey.integration).verify_callback(request)
-            except ProviderError as exc:
-                return render(request, "surveys/flow_error.html", {
-                    "title": "Invalid Toluna callback",
-                    "message": str(exc),
-                }, status=403)
+            if not canonical_query:
+                try:
+                    callback_verified = get_provider(attempt.survey.integration).verify_callback(request)
+                except ProviderError as exc:
+                    return render(request, "surveys/flow_error.html", {
+                        "title": "Invalid Toluna callback",
+                        "message": str(exc),
+                    }, status=403)
         elif (
             provider_code == "innovatemr"
+            and not canonical_query
             and settings.INNOVATEMR_CALLBACK_HASH_REQUIRED
         ):
             verification = verify_callback_request(request)
@@ -2195,9 +2232,10 @@ def survey_status(request):
                 "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
             ])
             finalize_attempt_capacity(attempt)
-        supplier_callback_url = _external_supplier_result_url(attempt, status_code)
-        if supplier_callback_url:
-            return HttpResponseRedirect(supplier_callback_url)
+        if not canonical_query:
+            supplier_callback_url = _external_supplier_result_url(attempt, status_code)
+            if supplier_callback_url:
+                return HttpResponseRedirect(supplier_callback_url)
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES.get(attempt.status, page)
         else:
@@ -2205,6 +2243,8 @@ def survey_status(request):
         status_label = page.get("status_label") or attempt.get_status_display()
     else:
         status_label = "Unknown attempt"
+
+    page, status_label = _status_presentation_for_attempt(attempt, page, status_label)
 
     return render(request, "surveys/status.html", {
         **page,
