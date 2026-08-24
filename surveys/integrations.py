@@ -30,6 +30,8 @@ BIOBRAIN_FIELD_MAP = {
     "modifiedDate": "LastUpdatedOnUTC", "Language": "LanguageId",
 }
 
+BIOBRAIN_DETAIL_ADAPTER_VERSION = 2
+
 
 def _path_value(payload: Any, path: str, default=None):
     value = payload
@@ -65,6 +67,8 @@ class InnovateMRClient:
         self.session = session or requests.Session()
         self._biobrain_language_cache: dict[str, dict[str, Any]] | None = None
         self._biobrain_qualification_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        self._biobrain_qualification_catalog_cache: dict[str, dict[str, Any]] | None = None
+        self._biobrain_survey_language_cache: dict[str, Any] = {}
 
     def _config(self, name: str, default=""):
         return getattr(self.integration, name, default) if self.integration is not None else default
@@ -107,27 +111,128 @@ class InnovateMRClient:
             }
         return self._biobrain_language_cache
 
+    @staticmethod
+    def _biobrain_value(payload: Any, *names: str, default=None):
+        if not isinstance(payload, dict):
+            return default
+        lowered = {str(key).lower(): value for key, value in payload.items()}
+        for name in names:
+            if name in payload:
+                return payload[name]
+            value = lowered.get(str(name).lower())
+            if value is not None:
+                return value
+        return default
+
+    @classmethod
+    def _biobrain_qualification_payload(cls, payload: Any, qualification_id) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        candidates: list[Any] = []
+        direct = cls._biobrain_value(payload, "Qualification")
+        if direct is not None:
+            candidates.append(direct)
+        data = cls._biobrain_value(payload, "data", "result")
+        if isinstance(data, dict):
+            candidates.append(cls._biobrain_value(data, "Qualification", default=data))
+        rows = cls._biobrain_value(payload, "Qualifications")
+        if isinstance(rows, list):
+            candidates.extend(rows)
+        if cls._biobrain_value(payload, "Id", "QualificationId") is not None:
+            candidates.append(payload)
+        expected_id = str(qualification_id or "")
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_id = cls._biobrain_value(candidate, "Id", "QualificationId")
+            if expected_id and candidate_id not in (None, "") and str(candidate_id) != expected_id:
+                continue
+            return candidate
+        return {}
+
+    def _biobrain_qualification_catalog(self) -> dict[str, dict[str, Any]]:
+        if self._biobrain_qualification_catalog_cache is None:
+            try:
+                payload = self._get(self._biobrain_url("collection/qualifications"))
+                rows = self._result_list(payload, "Qualifications")
+            except InnovateMRAPIError:
+                logger.warning("BioBrain qualification catalog could not be loaded", exc_info=True)
+                rows = []
+            self._biobrain_qualification_catalog_cache = {
+                str(self._biobrain_value(row, "Id", "QualificationId")): row
+                for row in rows
+                if self._biobrain_value(row, "Id", "QualificationId") is not None
+            }
+        return self._biobrain_qualification_catalog_cache
+
+    def _biobrain_language_id(self, survey_id, language_id=None, response_payload=None):
+        candidate = language_id or self._biobrain_value(
+            response_payload, "LanguageId", "LanguageID", "language_id"
+        )
+        if candidate not in (None, ""):
+            self._biobrain_survey_language_cache[str(survey_id)] = candidate
+            return candidate
+        cached = self._biobrain_survey_language_cache.get(str(survey_id))
+        if cached not in (None, ""):
+            return cached
+        try:
+            endpoint = self._endpoint("inventory_endpoint", "", "")
+            key = str(self._config("inventory_result_key", "") or "Surveys")
+            rows = self._result_list(self._get(endpoint), key)
+        except InnovateMRAPIError:
+            logger.warning("BioBrain survey language lookup failed survey=%s", survey_id, exc_info=True)
+            return None
+        for row in rows:
+            row_id = self._biobrain_value(row, "SurveyId", "surveyId", "Id")
+            row_language = self._biobrain_value(row, "LanguageId", "LanguageID", "language_id")
+            if row_id is not None and row_language not in (None, ""):
+                self._biobrain_survey_language_cache[str(row_id)] = row_language
+        return self._biobrain_survey_language_cache.get(str(survey_id))
+
     def _biobrain_qualification(self, language_id, qualification_id) -> dict[str, Any]:
         cache_key = (str(language_id or ""), str(qualification_id or ""))
-        if not all(cache_key):
+        if not cache_key[1]:
             return {}
         if cache_key not in self._biobrain_qualification_cache:
-            payload = self._get(self._biobrain_url(
-                f"collection/languages/{cache_key[0]}/qualifications/{cache_key[1]}"
-            ))
-            detail = payload.get("Qualification") if isinstance(payload, dict) else {}
-            self._biobrain_qualification_cache[cache_key] = detail if isinstance(detail, dict) else {}
+            detail: dict[str, Any] = {}
+            if cache_key[0]:
+                try:
+                    payload = self._get(self._biobrain_url(
+                        f"collection/languages/{cache_key[0]}/qualifications/{cache_key[1]}"
+                    ))
+                    detail = self._biobrain_qualification_payload(payload, qualification_id)
+                except InnovateMRAPIError:
+                    logger.warning(
+                        "BioBrain localized qualification lookup failed language=%s qualification=%s",
+                        cache_key[0], cache_key[1], exc_info=True,
+                    )
+            needs_generic = not self._biobrain_value(detail, "Code", "TypeName")
+            generic = self._biobrain_qualification_catalog().get(cache_key[1], {}) if needs_generic else {}
+            self._biobrain_qualification_cache[cache_key] = {**generic, **detail}
         return self._biobrain_qualification_cache[cache_key]
 
     @staticmethod
     def _biobrain_options(item: dict[str, Any], detail: dict[str, Any]) -> list[dict[str, Any]]:
-        option_ids = item.get("OptionIds") if isinstance(item.get("OptionIds"), list) else []
-        option_codes = item.get("OptionCodes") if isinstance(item.get("OptionCodes"), list) else []
-        labels = {
-            str(option.get("OptionCode")): str(option.get("OptionText") or option.get("OptionCode"))
-            for option in detail.get("Options", [])
-            if isinstance(option, dict) and option.get("OptionCode") is not None
-        }
+        option_ids = InnovateMRClient._biobrain_value(item, "OptionIds", default=[])
+        option_codes = InnovateMRClient._biobrain_value(item, "OptionCodes", default=[])
+        option_ids = option_ids if isinstance(option_ids, list) else []
+        option_codes = option_codes if isinstance(option_codes, list) else []
+        detail_options = InnovateMRClient._biobrain_value(
+            detail, "Options", "Answers", "QualificationOptions", default=[]
+        )
+        labels: dict[str, str] = {}
+        if isinstance(detail_options, list):
+            for option in detail_options:
+                if not isinstance(option, dict):
+                    continue
+                option_code = InnovateMRClient._biobrain_value(option, "OptionCode", "Code", "Value")
+                option_id = InnovateMRClient._biobrain_value(option, "OptionId", "Id")
+                option_text = InnovateMRClient._biobrain_value(
+                    option, "OptionText", "Text", "Label", "Name", default=option_code or option_id
+                )
+                for lookup in (option_code, option_id):
+                    if lookup not in (None, ""):
+                        labels[str(lookup)] = str(option_text)
         options = []
         for index, option_id in enumerate(option_ids):
             option_code = option_codes[index] if index < len(option_codes) else option_id
@@ -140,12 +245,26 @@ class InnovateMRClient:
         return options
 
     def _normalize_biobrain_qualification(self, item, language_id) -> dict[str, Any]:
-        qualification_id = item.get("QualificationId")
+        qualification_id = self._biobrain_value(item, "QualificationId", "Id")
         detail = self._biobrain_qualification(language_id, qualification_id)
-        qualification_code = str(detail.get("Code") or "").strip()
-        question_text = str(detail.get("QuestionText") or qualification_code or f"Qualification {qualification_id}")
-        question_type = str(detail.get("TypeName") or item.get("QualificationTypeId") or "")
+        qualification_code = str(self._biobrain_value(detail, "Code", "Key", default="") or "").strip()
+        question_text = str(
+            self._biobrain_value(
+                detail, "QuestionText", "Question", "Text", "Label", "Name", default=""
+            )
+            or qualification_code
+            or f"Qualification {qualification_id}"
+        )
+        question_type = str(
+            self._biobrain_value(detail, "TypeName", "QuestionType", default="")
+            or self._biobrain_value(item, "QualificationTypeId", default="")
+        )
         options = self._biobrain_options(item, detail)
+        metadata_hydrated = bool(
+            self._biobrain_value(
+                detail, "QuestionText", "Question", "Text", "Label", "Name", default=""
+            )
+        )
         return {
             **item,
             "QuestionId": qualification_id,
@@ -156,6 +275,8 @@ class InnovateMRClient:
             "Options": options,
             "targeting_choices": [str(option["OptionId"]) for option in options],
             "qualification_code": qualification_code,
+            "adapter_version": BIOBRAIN_DETAIL_ADAPTER_VERSION,
+            "metadata_hydrated": metadata_hydrated,
         }
 
     def _headers(self) -> dict[str, str]:
@@ -285,6 +406,8 @@ class InnovateMRClient:
             normalized["supCmps"] = max(0, int(item.get("SupplierCompletes") or item.get("Completed") or 0))
             normalized["remainingN"] = max(0, normalized["N"] - normalized["supCmps"])
             language_id = item.get("LanguageId")
+            if language_id not in (None, "") and item.get("SurveyId") is not None:
+                self._biobrain_survey_language_cache[str(item.get("SurveyId"))] = language_id
             language = self._biobrain_languages().get(str(language_id), {}) if language_id is not None else {}
             country_code = str(language.get("CountryCode") or "").upper()
             normalized["Country"] = country_code
@@ -292,6 +415,7 @@ class InnovateMRClient:
             normalized["Language"] = str(language.get("Name") or "")
             normalized["LanguageCode"] = str(language.get("Name") or "").upper()[:8]
             normalized["deviceType"] = ", ".join(name for name, field in (("desktop", "DesktopAllowed"), ("mobile", "MobileAllowed"), ("tablet", "TabletAllowed")) if item.get(field))
+            normalized["_biobrain_detail_adapter_version"] = BIOBRAIN_DETAIL_ADAPTER_VERSION
         normalized["_provider_name"] = getattr(getattr(self.integration, "client", None), "name", self.provider_code)
         return normalized
 
@@ -321,16 +445,20 @@ class InnovateMRClient:
     def get_quota_for_survey(self, survey_id: int, *, language_id=None) -> list[dict[str, Any]]:
         endpoint=self._endpoint("quota_endpoint_template", "/supply/getQuotaForSurvey/{survey_id}", "")
         if not endpoint: return []
-        key=str(self._config("quota_result_key", "") or ("Quotas" if self.is_biobrain else "result")); items=self._result_list(self._get(endpoint.format(survey_id=survey_id)), key)
+        key=str(self._config("quota_result_key", "") or ("Quotas" if self.is_biobrain else "result")); payload=self._get(endpoint.format(survey_id=survey_id)); items=self._result_list(payload, key)
         if not self.is_biobrain:
             return items
+        if any(isinstance(item.get("Conditions"), list) and item.get("Conditions") for item in items):
+            language_id = self._biobrain_language_id(survey_id, language_id, payload)
         normalized = []
         for item in items:
             targeting_details = []
+            metadata_hydrated = True
             for condition in item.get("Conditions", []) if isinstance(item.get("Conditions"), list) else []:
                 if not isinstance(condition, dict):
                     continue
                 question = self._normalize_biobrain_qualification(condition, language_id)
+                metadata_hydrated = metadata_hydrated and question["metadata_hydrated"]
                 targeting_details.append({
                     "name": question["QuestionText"],
                     "values": [option["OptionText"] for option in question["Options"]] or ["Provider-defined segment"],
@@ -341,13 +469,16 @@ class InnovateMRClient:
                 "title": "Targeted respondent quota" if targeting_details else "Overall survey quota",
                 "targeting": {"Conditions": item.get("Conditions", [])},
                 "targeting_details": targeting_details,
+                "metadata_hydrated": metadata_hydrated,
             })
         return normalized
 
     def get_survey_targeting(self, survey_id: int, *, language_id=None) -> list[dict[str, Any]]:
         endpoint=self._endpoint("targeting_endpoint_template", "/supply/getSurveyTargeting/{survey_id}", "")
         if not endpoint: return []
-        key=str(self._config("targeting_result_key", "") or ("Qualifications" if self.is_biobrain else "result")); items=self._result_list(self._get(endpoint.format(survey_id=survey_id)), key)
+        key=str(self._config("targeting_result_key", "") or ("Qualifications" if self.is_biobrain else "result")); payload=self._get(endpoint.format(survey_id=survey_id)); items=self._result_list(payload, key)
+        if self.is_biobrain:
+            language_id = self._biobrain_language_id(survey_id, language_id, payload)
         return [self._normalize_biobrain_qualification(item, language_id) for item in items] if self.is_biobrain else items
 
     def get_survey_transactions_by_pid(self, survey_id: int, pid: str) -> list[dict[str, Any]]:

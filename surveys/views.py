@@ -1585,6 +1585,7 @@ def survey_start(request):
                 not question.text
                 or str(question.text).startswith("Qualification ")
                 or bool(re.fullmatch(r"Q\d+", str(question.key or ""), re.IGNORECASE))
+                or (question.raw_data or {}).get("metadata_hydrated") is not True
                 or any(not isinstance(option, dict) for option in (question.options or []))
                 for question in survey.targeting_questions.all()
             )
@@ -2432,12 +2433,14 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
                     not question.text
                     or str(question.text).startswith("Qualification ")
                     or bool(re.fullmatch(r"Q\d+", str(question.key or ""), re.IGNORECASE))
+                    or (question.raw_data or {}).get("metadata_hydrated") is not True
                     or any(not isinstance(option, dict) for option in (question.options or []))
                     for question in survey.targeting_questions.all()
                 )
             else:
                 stale = stale or any(
                     not isinstance((quota.raw_data or {}).get("targeting_details"), list)
+                    or (quota.raw_data or {}).get("metadata_hydrated") is not True
                     for quota in survey.quotas.all()
                 )
         if stale:

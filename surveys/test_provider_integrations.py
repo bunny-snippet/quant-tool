@@ -53,9 +53,13 @@ class ConfigurableProviderClientTests(SimpleTestCase):
         self.assertTrue(session.calls[1][0].endswith("/api/v1/collection/languages"))
 
     def test_biobrain_detail_endpoints_are_configurable(self):
-        session = CapturingSession({"hasError": False, "Quotas": [{"QuotaId": 7, "Conditions": []}]}, {"hasError": False, "Qualifications": [{"QualificationId": 9, "OptionIds": [1, 2]}]})
+        session = CapturingSession(
+            {"hasError": False, "Quotas": [{"QuotaId": 7, "Conditions": []}]},
+            {"hasError": False, "Qualifications": [{"QualificationId": 9, "OptionIds": [1, 2]}]},
+            {"hasError": False, "Qualification": {"Id": 9, "Code": "Gender", "QuestionText": "What is your gender?", "TypeName": "Single", "Options": []}},
+        )
         client = InnovateMRClient(token="secret", session=session, integration=integration())
-        self.assertEqual(client.get_quota_for_survey(44)[0]["id"], 7); self.assertEqual(client.get_survey_targeting(44)[0]["QuestionId"], 9)
+        self.assertEqual(client.get_quota_for_survey(44)[0]["id"], 7); self.assertEqual(client.get_survey_targeting(44, language_id=9)[0]["QuestionId"], 9)
         self.assertTrue(session.calls[0][0].endswith("/survey-quotas/44")); self.assertTrue(session.calls[1][0].endswith("/survey-qualifications/44"))
 
     def test_biobrain_targeting_uses_localized_question_and_option_labels(self):
@@ -70,6 +74,31 @@ class ConfigurableProviderClientTests(SimpleTestCase):
             {"OptionId": 100, "OptionCode": 1, "OptionText": "Male", "Qualifies": True},
             {"OptionId": 200, "OptionCode": 2, "OptionText": "Female", "Qualifies": True},
         ])
+
+    def test_biobrain_recovers_missing_language_and_varied_metadata_casing(self):
+        session = CapturingSession(
+            {"hasError": False, "Qualifications": [{"QualificationId": 60, "QualificationTypeId": 1, "OptionIds": [901, 902], "OptionCodes": [1, 2]}]},
+            {"hasError": False, "Surveys": [{"SurveyId": 44, "LanguageID": 9}]},
+            {"hasError": False, "data": {"qualification": {"id": 60, "code": "Gender", "questionText": "What is your gender?", "typeName": "Single", "options": [{"id": 901, "code": 1, "label": "Male"}, {"id": 902, "code": 2, "label": "Female"}]}}},
+        )
+        question = InnovateMRClient(
+            token="secret", session=session, integration=integration()
+        ).get_survey_targeting(44)[0]
+        self.assertEqual(question["QuestionText"], "What is your gender?")
+        self.assertEqual(question["QuestionKey"], "Gender")
+        self.assertEqual([option["OptionText"] for option in question["Options"]], ["Male", "Female"])
+        self.assertTrue(session.calls[1][0].endswith("/api/v1/surveys"))
+        self.assertTrue(session.calls[2][0].endswith("/collection/languages/9/qualifications/60"))
+
+    def test_biobrain_quota_conditions_use_readable_question_and_answers(self):
+        session = CapturingSession(
+            {"hasError": False, "Quotas": [{"QuotaId": 7, "Conditions": [{"QualificationId": 60, "QualificationTypeId": 1, "OptionIds": [901], "OptionCodes": [1]}]}]},
+            {"hasError": False, "Qualification": {"Id": 60, "Code": "Gender", "QuestionText": "What is your gender?", "TypeName": "Single", "Options": [{"OptionCode": 1, "OptionText": "Male"}]}},
+        )
+        quota = InnovateMRClient(
+            token="secret", session=session, integration=integration()
+        ).get_quota_for_survey(44, language_id=9)[0]
+        self.assertEqual(quota["targeting_details"], [{"name": "What is your gender?", "values": ["Male"]}])
 
     def test_biobrain_outbound_url_uses_canonical_rid_and_profile_uid(self):
         outbound = build_biobrain_outbound_url(
