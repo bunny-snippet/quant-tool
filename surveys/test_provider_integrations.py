@@ -57,6 +57,7 @@ class ConfigurableProviderClientTests(SimpleTestCase):
             {"hasError": False, "Quotas": [{"QuotaId": 7, "Conditions": []}]},
             {"hasError": False, "Qualifications": [{"QualificationId": 9, "OptionIds": [1, 2]}]},
             {"hasError": False, "Qualification": {"Id": 9, "Code": "Gender", "QuestionText": "What is your gender?", "TypeName": "Single", "Options": []}},
+            {"hasError": False, "Qualification": {"Id": 9, "Code": "Gender", "QuestionText": "What is your gender?", "TypeName": "Single", "Options": [{"OptionCode": 1, "OptionText": "Male"}, {"OptionCode": 2, "OptionText": "Female"}]}},
         )
         client = InnovateMRClient(token="secret", session=session, integration=integration())
         self.assertEqual(client.get_quota_for_survey(44)[0]["id"], 7); self.assertEqual(client.get_survey_targeting(44, language_id=9)[0]["QuestionId"], 9)
@@ -74,6 +75,28 @@ class ConfigurableProviderClientTests(SimpleTestCase):
             {"OptionId": 100, "OptionCode": 1, "OptionText": "Male", "Qualifies": True},
             {"OptionId": 200, "OptionCode": 2, "OptionText": "Female", "Qualifies": True},
         ])
+
+    def test_biobrain_uses_api2_when_legacy_host_returns_incomplete_metadata(self):
+        session = CapturingSession(
+            {"hasError": False, "Qualifications": [{"QualificationId": 60, "QualificationTypeId": 1, "OptionIds": [901, 902, 903], "OptionCodes": [1, 2, 3]}]},
+            {"hasError": False, "Qualification": {"Id": 60, "Code": "GENDER", "TypeName": "SINGLE SELECT"}},
+            {"hasError": False, "Qualification": {"Id": 60, "Code": "GENDER", "QuestionText": "What is your gender?", "TypeName": "SINGLE SELECT", "Options": [{"OptionCode": 1, "OptionText": "Male"}, {"OptionCode": 2, "OptionText": "Female"}, {"OptionCode": 3, "OptionText": "Other"}]}},
+        )
+        question = InnovateMRClient(token="secret", session=session, integration=integration()).get_survey_targeting(44, language_id=9)[0]
+        self.assertEqual([option["OptionText"] for option in question["Options"]], ["Male", "Female", "Other"])
+        self.assertTrue(question["metadata_hydrated"])
+        self.assertIn("partner-api2.voqall.com", session.calls[2][0])
+
+    def test_biobrain_gender_has_readable_fallback_when_provider_omits_labels(self):
+        session = CapturingSession(
+            {"hasError": False, "Qualifications": [{"QualificationId": 60, "QualificationTypeId": 1, "OptionIds": [901, 902, 903], "OptionCodes": [1, 2, 3]}]},
+            {"hasError": False, "Qualification": {"Id": 60, "Code": "GENDER", "TypeName": "SINGLE SELECT"}},
+            {"hasError": False, "Qualification": {"Id": 60, "Code": "GENDER", "TypeName": "SINGLE SELECT"}},
+        )
+        question = InnovateMRClient(token="secret", session=session, integration=integration()).get_survey_targeting(44, language_id=9)[0]
+        self.assertEqual(question["QuestionText"], "What is your gender?")
+        self.assertEqual([option["OptionText"] for option in question["Options"]], ["Male", "Female", "Other"])
+        self.assertTrue(question["metadata_hydrated"])
 
     def test_biobrain_recovers_missing_language_and_varied_metadata_casing(self):
         session = CapturingSession(

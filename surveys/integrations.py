@@ -30,7 +30,15 @@ BIOBRAIN_FIELD_MAP = {
     "modifiedDate": "LastUpdatedOnUTC", "Language": "LanguageId",
 }
 
-BIOBRAIN_DETAIL_ADAPTER_VERSION = 2
+BIOBRAIN_DETAIL_ADAPTER_VERSION = 3
+
+BIOBRAIN_STANDARD_QUALIFICATIONS = {
+    "GENDER": {
+        "question": "What is your gender?",
+        "options": {"1": "Male", "2": "Female", "3": "Other"},
+    },
+    "AGE": {"question": "What is your age?", "options": {}},
+}
 
 
 def _path_value(payload: Any, path: str, default=None):
@@ -101,6 +109,18 @@ class InnovateMRClient:
         if path.lower().endswith("/surveys"):
             path = path[:-len("/surveys")]
         return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/{endpoint.lstrip('/')}", "", ""))
+
+    def _biobrain_collection_urls(self, endpoint: str) -> list[str]:
+        """Return current and API-v2 collection URLs without changing inventory."""
+        primary = self._biobrain_url(endpoint)
+        parsed = urlsplit(primary)
+        hosts = [parsed.netloc]
+        if "partner-api2." not in parsed.netloc and "partner-api." in parsed.netloc:
+            hosts.append(parsed.netloc.replace("partner-api.", "partner-api2.", 1))
+        return [
+            urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+            for host in dict.fromkeys(hosts)
+        ]
 
     def _biobrain_languages(self) -> dict[str, dict[str, Any]]:
         if self._biobrain_language_cache is None:
@@ -196,16 +216,22 @@ class InnovateMRClient:
         if cache_key not in self._biobrain_qualification_cache:
             detail: dict[str, Any] = {}
             if cache_key[0]:
-                try:
-                    payload = self._get(self._biobrain_url(
-                        f"collection/languages/{cache_key[0]}/qualifications/{cache_key[1]}"
-                    ))
-                    detail = self._biobrain_qualification_payload(payload, qualification_id)
-                except InnovateMRAPIError:
-                    logger.warning(
-                        "BioBrain localized qualification lookup failed language=%s qualification=%s",
-                        cache_key[0], cache_key[1], exc_info=True,
-                    )
+                endpoint = f"collection/languages/{cache_key[0]}/qualifications/{cache_key[1]}"
+                for detail_url in self._biobrain_collection_urls(endpoint):
+                    try:
+                        payload = self._get(detail_url)
+                        candidate = self._biobrain_qualification_payload(payload, qualification_id)
+                        if candidate:
+                            detail = candidate
+                        if self._biobrain_value(detail, "QuestionText", "Question", "Text") and self._biobrain_value(
+                            detail, "Options", "Answers", "QualificationOptions"
+                        ):
+                            break
+                    except InnovateMRAPIError:
+                        logger.warning(
+                            "BioBrain localized qualification lookup failed url=%s language=%s qualification=%s",
+                            detail_url, cache_key[0], cache_key[1], exc_info=True,
+                        )
             needs_generic = not self._biobrain_value(detail, "Code", "TypeName")
             generic = self._biobrain_qualification_catalog().get(cache_key[1], {}) if needs_generic else {}
             self._biobrain_qualification_cache[cache_key] = {**generic, **detail}
@@ -233,13 +259,20 @@ class InnovateMRClient:
                 for lookup in (option_code, option_id):
                     if lookup not in (None, ""):
                         labels[str(lookup)] = str(option_text)
+        qualification_code = str(
+            InnovateMRClient._biobrain_value(detail, "Code", "Key", default="") or ""
+        ).strip().upper()
+        standard_labels = BIOBRAIN_STANDARD_QUALIFICATIONS.get(qualification_code, {}).get("options", {})
         options = []
         for index, option_id in enumerate(option_ids):
             option_code = option_codes[index] if index < len(option_codes) else option_id
+            option_text = labels.get(str(option_code)) or labels.get(str(option_id))
+            if not option_text or option_text.strip() in {str(option_code), str(option_id)}:
+                option_text = standard_labels.get(str(option_code), str(option_code))
             options.append({
                 "OptionId": option_id,
                 "OptionCode": option_code,
-                "OptionText": labels.get(str(option_code), str(option_code)),
+                "OptionText": option_text,
                 "Qualifies": True,
             })
         return options
@@ -248,22 +281,29 @@ class InnovateMRClient:
         qualification_id = self._biobrain_value(item, "QualificationId", "Id")
         detail = self._biobrain_qualification(language_id, qualification_id)
         qualification_code = str(self._biobrain_value(detail, "Code", "Key", default="") or "").strip()
-        question_text = str(
+        standard = BIOBRAIN_STANDARD_QUALIFICATIONS.get(qualification_code.upper(), {})
+        localized_question = str(
             self._biobrain_value(
                 detail, "QuestionText", "Question", "Text", "Label", "Name", default=""
             )
-            or qualification_code
-            or f"Qualification {qualification_id}"
+            or ""
         )
+        question_text = localized_question or standard.get("question") or qualification_code or f"Qualification {qualification_id}"
         question_type = str(
             self._biobrain_value(detail, "TypeName", "QuestionType", default="")
             or self._biobrain_value(item, "QualificationTypeId", default="")
         )
         options = self._biobrain_options(item, detail)
+        readable_options = all(
+            str(option.get("OptionText") or "").strip()
+            and str(option.get("OptionText")).strip() not in {
+                str(option.get("OptionCode")), str(option.get("OptionId"))
+            }
+            for option in options
+        )
         metadata_hydrated = bool(
-            self._biobrain_value(
-                detail, "QuestionText", "Question", "Text", "Label", "Name", default=""
-            )
+            (localized_question or standard.get("question"))
+            and (not options or readable_options)
         )
         return {
             **item,
