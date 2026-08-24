@@ -148,24 +148,6 @@ class Survey(models.Model):
 
     @property
     def source_identifier(self):
-        # Toluna identifies one inventory row by SurveyID + WaveID, so the
-        # composite source_key must remain intact for synchronization
-        # uniqueness. Respondent-facing screens and links, however, expose
-        # SurveyID only; WaveID already has its own buyer_id field.
-        raw_data = self.raw_data if isinstance(self.raw_data, dict) else {}
-        integration = self._state.fields_cache.get("integration")
-        is_toluna = bool(
-            isinstance(raw_data.get("_toluna"), dict)
-            or (integration and integration.provider_code == "toluna")
-        )
-        if is_toluna:
-            toluna_survey_id = (
-                raw_data.get("SurveyID")
-                or raw_data.get("SurveyId")
-                or str(self.source_key or "").partition(":")[0]
-            )
-            if str(toluna_survey_id or "").strip():
-                return toluna_survey_id
         if self.source_id is not None and self.source_key in {"", str(self.source_id)}:
             return self.source_id
         return self.source_key or self.source_id
