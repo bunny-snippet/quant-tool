@@ -102,6 +102,56 @@ def _datetime(value):
     return parsed.replace(tzinfo=dt_timezone.utc) if parsed.tzinfo is None else parsed.astimezone(dt_timezone.utc)
 
 
+class TolunaAPIError(ProviderError):
+    """A structured Toluna HTTP error with its documented ResultCode."""
+
+    def __init__(self, message, *, http_status=None, result_code=None, result=""):
+        super().__init__(message)
+        self.http_status = http_status
+        self.result_code = result_code
+        self.result = str(result or "")
+
+
+class TolunaInviteRejected(ProviderError):
+    """A terminal invite outcome that should be recorded instead of retried."""
+
+    def __init__(self, message, *, status_code, result_code=None, result=""):
+        super().__init__(message)
+        self.status_code = str(status_code)
+        self.result_code = result_code
+        self.result = str(result or "")
+
+
+# Toluna External Sample returns these documented business ResultCodes while
+# generating an invite. They are terminal respondent/survey outcomes, not
+# malformed prescreener answers and not application failures.
+TOLUNA_INVITE_RESULT_STATUS = {
+    # Survey/quota is unavailable for this partner or route.
+    5: "7", 6: "7", 8: "7", 9: "7", 10: "7", 15: "7", 17: "7",
+    23: "7", 24: "7", 25: "7", 27: "7", 32: "7", 33: "7", 37: "7",
+    42: "7", 43: "7", 45: "7",
+    # Capacity outcomes.
+    28: "3", 29: "3", 41: "3", 46: "3", 47: "3",
+    # Profile/device qualification outcomes.
+    13: "11", 16: "11", 21: "11", 31: "11", 35: "11",
+    # Security/quality outcomes.
+    14: "4", 22: "4", 34: "4",
+    # Repeat participation outcomes.
+    26: "12", 30: "12", 38: "12",
+    # Frequency caps.
+    39: "10", 40: "10",
+}
+
+TOLUNA_INVITE_STATUS_MESSAGES = {
+    "3": "The selected Toluna quota is full.",
+    "4": "Toluna rejected this attempt for a security or quality rule.",
+    "7": "This Toluna survey is not currently available for this respondent route.",
+    "10": "This respondent has reached Toluna's survey frequency limit.",
+    "11": "The respondent profile does not match an available Toluna route.",
+    "12": "This respondent has already taken or been excluded from this Toluna survey.",
+}
+
+
 class TolunaProvider(SurveyProvider):
     """Toluna External Sample adapter for inventory, members and invites."""
 
@@ -147,7 +197,7 @@ class TolunaProvider(SurveyProvider):
             "PARTNER_AUTH_KEY": self.partner_auth_key,
         }
 
-    def _request(self, method, url, *, expected=(200,), **kwargs):
+    def _request(self, method, url, *, expected=(200,), allow_empty=False, **kwargs):
         try:
             response = self.session.request(method, url, timeout=self.timeout, **kwargs)
         except requests.RequestException as exc:
@@ -159,8 +209,24 @@ class TolunaProvider(SurveyProvider):
             # profile data.
             detail = self._safe_error_detail(response)
             suffix = f": {detail}" if detail else "."
-            raise ProviderError(f"Toluna request failed (HTTP {response.status_code}){suffix}")
+            try:
+                error_payload = response.json()
+            except (TypeError, ValueError):
+                error_payload = {}
+            result = _pick(error_payload, "Result", default="")
+            result_code = _integer(_pick(error_payload, "ResultCode"), None)
+            raise TolunaAPIError(
+                f"Toluna request failed (HTTP {response.status_code}){suffix}",
+                http_status=response.status_code,
+                result_code=result_code,
+                result=result,
+            )
         if response.status_code in {201, 204}:
+            return None, response.status_code
+        # Toluna's member PUT endpoint documents a successful 200 response but
+        # returns no JSON body. Only callers that explicitly opt in may accept
+        # an empty response; inventory and invite endpoints still require JSON.
+        if allow_empty and not bytes(getattr(response, "content", b"") or b""):
             return None, response.status_code
         try:
             return response.json(), response.status_code
@@ -864,6 +930,7 @@ class TolunaProvider(SurveyProvider):
                     method,
                     url,
                     expected=(200, 201, 409),
+                    allow_empty=(method == "PUT"),
                     headers={"Accept": "application/json;version=2.0", "Content-Type": "application/json"},
                     json=payload,
                 )
@@ -875,6 +942,7 @@ class TolunaProvider(SurveyProvider):
                         "PUT",
                         url,
                         expected=(200,),
+                        allow_empty=True,
                         headers={"Accept": "application/json;version=2.0", "Content-Type": "application/json"},
                         json=payload,
                     )
@@ -909,11 +977,25 @@ class TolunaProvider(SurveyProvider):
             (self.integration.credential_env_keys or {}).get(f"panel_{culture}"),
             f"Toluna {culture.replace('_', '-')} PanelGUID",
         )
-        invite, _ = self._request(
-            "GET",
-            f"{self.es_base_url}/IPExternalSamplingService/ExternalSample/{panel_guid}/{member_code}/Invite/{quota.quota_id}",
-            headers=self.api_headers,
-        )
+        try:
+            invite, _ = self._request(
+                "GET",
+                f"{self.es_base_url}/IPExternalSamplingService/ExternalSample/{panel_guid}/{member_code}/Invite/{quota.quota_id}",
+                headers=self.api_headers,
+            )
+        except TolunaAPIError as exc:
+            local_status = TOLUNA_INVITE_RESULT_STATUS.get(exc.result_code)
+            if not local_status:
+                # Configuration errors and Toluna technical failures remain
+                # retryable operational errors instead of being miscredited as
+                # respondent outcomes.
+                raise
+            raise TolunaInviteRejected(
+                TOLUNA_INVITE_STATUS_MESSAGES[local_status],
+                status_code=local_status,
+                result_code=exc.result_code,
+                result=exc.result,
+            ) from exc
         if not isinstance(invite, dict) or not _pick(invite, "URL"):
             raise ProviderError("Toluna did not return a survey invite URL.")
         expected_survey = _integer(_pick(survey.raw_data, "SurveyID"), -1)

@@ -187,6 +187,30 @@ class SurveySyncTests(TestCase):
             {innovate.pk, rfg.pk},
         )
 
+    @override_settings(CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS=60)
+    @patch("surveys.tasks.sync_client_integration_task.delay")
+    def test_dispatcher_does_not_duplicate_a_recent_running_toluna_sync(self, delay):
+        from .tasks import dispatch_due_integrations_task
+
+        ClientIntegration.objects.all().delete()
+        client = Client.objects.create(
+            code="toluna-running", name="Toluna", provider_code="toluna"
+        )
+        ClientIntegration.objects.create(
+            client=client,
+            name="Toluna running",
+            provider_code="toluna",
+            base_url="https://tws.toluna.com",
+            last_test_status="success",
+            last_sync_status="running",
+            last_sync_started_at=timezone.now() - timedelta(seconds=61),
+        )
+
+        result = dispatch_due_integrations_task()
+
+        self.assertEqual(result, {"queued": [], "count": 0})
+        delay.assert_not_called()
+
 
     @patch("surveys.tasks.sync_client_integration_task.delay")
     def test_hidden_biobrain_is_queued_only_after_its_api_key_exists(self, delay):

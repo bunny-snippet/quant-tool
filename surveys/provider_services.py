@@ -160,6 +160,8 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
             last_sync_error=run.error,
             last_sync_summary={
                 "run_id": run.pk,
+                "fetched_full": run.fetched_full,
+                "unique_surveys": run.unique_surveys,
                 "created": run.created,
                 "updated": run.updated,
                 "unchanged": run.unchanged,

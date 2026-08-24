@@ -19,7 +19,7 @@ from prescreener_vault.models import PrescreenerSubmission
 from .models import Survey, SurveyAttempt, TargetingQuestion, TolunaMember, TolunaReferenceQuestion
 from .provider_services import sync_client_integration
 from .providers import ProviderError
-from .providers.toluna import TolunaProvider
+from .providers.toluna import TolunaInviteRejected, TolunaProvider
 from .serializers import SurveyListSerializer, SurveyQuotaSerializer
 from .views import _prescreener_questions
 
@@ -545,6 +545,67 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
         self.assertIsNotNone(attempt.redirected_at)
 
+    @override_settings(PRESCREENER_VAULT_ENABLED=False)
+    @patch("surveys.views.get_provider")
+    def test_prescreener_records_invite_business_rejection_as_status_page(self, get_provider_mock):
+        bootstrap = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)
+            ),
+        )
+        normalized = bootstrap.normalize_inventory_item(bootstrap.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        bootstrap.refresh_details(survey)
+        user = get_user_model().objects.create_user(
+            username="toluna-rejection",
+            email="toluna-rejection@example.test",
+            password="test-password",
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Rej123AbC9",
+            prescreener_uid="Qr1s-Tu2v-Wx3y-Za4b",
+            survey=survey,
+            platform_user=user,
+            user_id=str(user.pk),
+        )
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(None, 201),
+                FakeResponse({
+                    "Result": "SURVEY_NOT_ENABLED_FOR_IP_ES",
+                    "ResultCode": 15,
+                }, status_code=400),
+            ),
+        )
+        get_provider_mock.return_value = provider
+
+        response = self.client.post(reverse("survey-start"), {
+            "rid": attempt.rid,
+            f"question_{questions[1001538].pk}": "27",
+            f"question_{questions[1001007].pk}": "2000247",
+        })
+
+        self.assertRedirects(
+            response,
+            f"{reverse('survey-status')}?status=7&rid={attempt.rid}",
+            fetch_redirect_response=False,
+        )
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.SURVEY_NOT_AVAILABLE)
+        self.assertEqual(attempt.status_source, "toluna_invite_rejection")
+        self.assertEqual(
+            attempt.upstream_transaction_data["toluna_invite_rejection"]["result_code"],
+            15,
+        )
+
     def test_toluna_validation_error_exposes_only_safe_diagnostic_fields(self):
         provider = TolunaProvider(
             self.integration,
@@ -561,6 +622,58 @@ class TolunaProviderTests(TestCase):
             provider._request("POST", "https://toluna.test/member")
 
         self.assertNotIn("must-not-be-echoed", str(raised.exception))
+
+    def test_member_update_accepts_documented_empty_http_200(self):
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(None, status_code=200)),
+        )
+
+        payload, status_code = provider._request(
+            "PUT",
+            "https://toluna.test/member",
+            expected=(200,),
+            allow_empty=True,
+        )
+
+        self.assertIsNone(payload)
+        self.assertEqual(status_code, 200)
+
+    def test_invite_result_code_15_is_a_terminal_survey_unavailable_outcome(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="71:72",
+            company_name="Toluna",
+            name="Toluna unavailable survey",
+            status=Survey.Status.LIVE,
+            raw_data={"SurveyID": 71, "WaveID": 72, "_toluna": {"culture_code": "en-us"}},
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Unv123AbC9",
+            prescreener_uid="Wx1y-Za2b-Cd3e-Fg4h",
+            survey=survey,
+            user_id="1",
+        )
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse({
+                "Result": "SURVEY_NOT_ENABLED_FOR_IP_ES",
+                "ResultCode": 15,
+            }, status_code=400)),
+        )
+        provider._matching_quota = lambda _survey, _answers: type("Quota", (), {"quota_id": 900})()
+        provider._register_member = lambda _survey, _attempt, _answers: {
+            "member_id": attempt.prescreener_uid,
+            "birth_date": "01/01/2000",
+        }
+
+        with self.assertRaises(TolunaInviteRejected) as raised:
+            provider.build_outbound_url(survey, attempt, {})
+
+        self.assertEqual(raised.exception.status_code, "7")
+        self.assertEqual(raised.exception.result_code, 15)
+        self.assertNotIn("HTTP 400", str(raised.exception))
 
     def test_member_validation_error_never_echoes_profile_payload(self):
         provider = TolunaProvider(

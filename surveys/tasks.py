@@ -35,7 +35,7 @@ def dispatch_due_integrations_task():
         | Q(provider_code="rfg", last_test_status="success")
         | Q(provider_code="toluna", last_test_status="success")
     ).only(
-        "id", "provider_code", "sync_interval_seconds", "last_sync_started_at",
+        "id", "provider_code", "sync_interval_seconds", "last_sync_started_at", "last_sync_status",
         "credential_env_key", "encrypted_api_token",
     )
     for integration in integrations:
@@ -47,6 +47,18 @@ def dispatch_due_integrations_task():
             "toluna": settings.CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS,
         }.get(integration.provider_code, integration.sync_interval_seconds)
         interval_seconds = max(60, interval_seconds)
+        # Do not keep adding duplicate jobs while a previous sync is queued or
+        # running. A genuinely stale marker is allowed through after the lease
+        # window so a worker restart can recover automatically.
+        active_sync_cutoff = now - timedelta(
+            seconds=max(300, interval_seconds * 3)
+        )
+        if (
+            integration.last_sync_status in {"queued", "running"}
+            and integration.last_sync_started_at
+            and integration.last_sync_started_at > active_sync_cutoff
+        ):
+            continue
         due_at = (integration.last_sync_started_at or (now - timedelta(days=1))) + timedelta(
             seconds=interval_seconds
         )
@@ -76,6 +88,8 @@ def sync_client_integration_task(integration_id):
             summary = {
                 "run_id": run.pk,
                 "status": run.status,
+                "fetched_full": run.fetched_full,
+                "unique_surveys": run.unique_surveys,
                 "created": run.created,
                 "updated": run.updated,
                 "unchanged": run.unchanged,

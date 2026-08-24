@@ -94,7 +94,7 @@ from prescreener_vault.services import (
 )
 from prescreener_vault.models import PrescreenerSubmission
 from prescreener_vault.reuse import effective_profile_uid, maybe_assign_reusable_profile
-from .providers import ProviderError, get_provider
+from .providers import ProviderError, TolunaInviteRejected, get_provider
 from .geolocation import (
     geolocation_client_data,
     is_wrong_target_country,
@@ -1356,6 +1356,45 @@ def _finish_local_rfg_attempt(attempt, answers, request, *, result, reason):
     return locked
 
 
+def _finish_toluna_invite_rejection(attempt, answers, request, rejection):
+    """Persist a documented Toluna invite ResultCode as a final local status."""
+
+    now = timezone.now()
+    with transaction.atomic():
+        locked = SurveyAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if locked.status != SurveyAttempt.Status.INITIATED:
+            return locked
+        client_data = get_request_client_data(request)
+        locked.answers = operational_answer_value(answers)
+        locked.submitted_at = now
+        locked.callback_at = now
+        locked.last_callback_at = now
+        locked.callback_ip = get_request_ip(request) or locked.initiation_ip
+        locked.exit_user_agent = client_data.get("user_agent", "")
+        locked.exit_browser = client_data.get("browser", "")
+        locked.exit_device = client_data.get("device", "")
+        locked.exit_os = client_data.get("os", "")
+        locked.exit_client_data = client_data
+        locked.status = rejection.status_code
+        locked.status_source = "toluna_invite_rejection"
+        locked.loi_seconds = locked.calculate_loi_seconds(now)
+        locked.upstream_transaction_data = {
+            **(locked.upstream_transaction_data or {}),
+            "toluna_invite_rejection": {
+                "result": rejection.result,
+                "result_code": rejection.result_code,
+                "reason": str(rejection),
+            },
+        }
+        locked.save(update_fields=[
+            "answers", "submitted_at", "callback_at", "last_callback_at", "callback_ip",
+            "exit_user_agent", "exit_browser", "exit_device", "exit_os", "exit_client_data",
+            "status", "status_source", "loi_seconds", "upstream_transaction_data", "updated_at",
+        ])
+        finalize_attempt_capacity(locked)
+    return locked
+
+
 def _finish_wrong_target_country_attempt(attempt, request, location):
     """Record a local S4 before any prescreener question or provider redirect."""
     now = timezone.now()
@@ -1775,6 +1814,9 @@ def survey_start(request):
                         )
                         return HttpResponseRedirect(_toluna_member_ready_url(locked.rid))
                     return HttpResponseRedirect(outbound_url)
+            except TolunaInviteRejected as exc:
+                _finish_toluna_invite_rejection(attempt, answers, request, exc)
+                return HttpResponseRedirect(_recorded_status_url(attempt, exc.status_code))
             except Exception as exc:
                 if isinstance(exc, PrescreenerVaultError):
                     logger.exception("Prescreener vault capture failed for rid=%s", attempt.rid)
