@@ -80,6 +80,44 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(notification.reason, "QuotaFull")
         self.assertNotIn("notification-test-token", str(notification.raw_payload))
 
+    def test_unsigned_browser_return_renders_already_verified_completion(self):
+        notification = self._post("toluna-notification-member-complete", {
+            "UniqueCode": self.attempt.prescreener_uid,
+            "SurveyId": 123,
+            "SurveyRef": "123560-US",
+            "Revenue": 100,
+            "DateTime": "2026-08-21 10:20:00",
+            "WaveId": 100,
+            "QuotaID": 900,
+            "AdditionalData": f"rid={self.attempt.rid}",
+        })
+        self.assertEqual(notification.status_code, 200)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, SurveyAttempt.Status.COMPLETED)
+        self.assertTrue(self.attempt.is_verified)
+
+        response = self.client.get(
+            reverse("survey-status"),
+            {"status": "1", "rid": self.attempt.rid},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Qualified")
+        self.assertContains(response, self.attempt.rid)
+        self.assertNotContains(response, "Invalid survey callback")
+
+    def test_unsigned_browser_return_cannot_create_a_completion(self):
+        response = self.client.get(
+            reverse("survey-status"),
+            {"status": "1", "rid": self.attempt.rid},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "Invalid Toluna callback", status_code=403)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertFalse(self.attempt.is_verified)
+
     def test_exact_duplicate_is_acknowledged_without_second_status_mutation(self):
         payload = {
             "UniqueCode": self.attempt.prescreener_uid,

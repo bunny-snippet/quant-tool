@@ -2166,10 +2166,18 @@ def survey_status(request):
             if attempt.survey.integration_id
             else "innovatemr"
         )
+        trusted_recorded_source = (
+            attempt.status_source in {"local_country_guard", "local_duplicate_ip_guard"}
+            or (
+                provider_code == "toluna"
+                and attempt.is_verified
+                and attempt.status_source.startswith("toluna_notification_")
+            )
+        )
         canonical_query = (
             set(request.GET.keys()) == {"status", "rid"}
             and request.GET.get("rid", "").strip() == attempt.rid
-            and attempt.status_source in {"local_country_guard", "local_duplicate_ip_guard"}
+            and trusted_recorded_source
             and str(attempt.status) == status_code
         )
         if status_code not in STATUS_PAGES and provider_code != "toluna":

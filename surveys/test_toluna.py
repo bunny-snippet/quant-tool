@@ -192,14 +192,19 @@ class TolunaProviderTests(TestCase):
             name="Toluna test survey",
             status=Survey.Status.LIVE,
             entry_link="",
+            buyer_id="72",
+            raw_data={"SurveyID": 71, "WaveID": 72, "_toluna": {"culture_code": "en-us"}},
         )
         request = RequestFactory().get("/api/surveys/")
         request.user = user
 
         data = SurveyListSerializer(survey, context={"request": request}).data
 
+        self.assertEqual(data["source_id"], 71)
+        self.assertEqual(data["buyer_id"], "72")
         self.assertIn("/survey/start?", data["start_link"])
-        self.assertIn("surveyId=71%3A72", data["start_link"])
+        self.assertIn("surveyId=71", data["start_link"])
+        self.assertNotIn("surveyId=71%3A72", data["start_link"])
 
     def test_member_registration_quota_match_and_invite_build(self):
         bootstrap = TolunaProvider(
