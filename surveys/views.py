@@ -1578,7 +1578,7 @@ def survey_start(request):
                 stale = stale or not survey.entry_link
             elif survey.integration.provider_code == "toluna":
                 stale = stale or not survey.targeting_questions.filter(
-                    raw_data__adapter_version=2
+                    raw_data__adapter_version=3
                 ).exists()
         if survey.integration_id and survey.integration.provider_code == "biobrain":
             stale = stale or any(

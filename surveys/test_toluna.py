@@ -357,7 +357,7 @@ class TolunaProviderTests(TestCase):
 
         self.assertFalse(survey.targeting_questions.filter(question_id=2910077).exists())
         self.assertTrue(
-            survey.targeting_questions.filter(raw_data__adapter_version=2).exists()
+            survey.targeting_questions.filter(raw_data__adapter_version=3).exists()
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
@@ -425,6 +425,74 @@ class TolunaProviderTests(TestCase):
         matched = provider._matching_quota(survey, answers)
 
         self.assertEqual(matched.quota_id, 900)
+
+    def test_text_and_answer_id_age_ranges_are_merged_for_prescreener(self):
+        quotas = copy.deepcopy(QUOTAS)
+        age_rows = [
+            {
+                "QuestionID": 1001538,
+                "AnswerIDs": [],
+                "AnswerValues": [value],
+                "IsRoutable": False,
+            }
+            for value in ["21-29", "30-45", "46-64"]
+        ]
+        age_rows.append({
+            "QuestionID": 1001538,
+            "AnswerIDs": [2006361],
+            "AnswerValues": [],
+            "IsRoutable": False,
+        })
+        quotas["Surveys"][0]["Quotas"][0]["Layers"][0]["SubQuotas"][0][
+            "QuestionsAndAnswers"
+        ] = age_rows
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(quotas)),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+
+        provider.refresh_details(survey)
+
+        age_question = survey.targeting_questions.get(question_id=1001538)
+        self.assertEqual(age_question.options, [])
+        self.assertEqual(age_question.raw_data["adapter_version"], 3)
+        self.assertEqual(age_question.raw_data["targeting_age_ranges"], [
+            {"min": 21, "max": 29},
+            {"min": 30, "max": 45},
+            {"min": 46, "max": 64},
+            {"min": 65, "max": 120},
+        ])
+        prepared = _prescreener_questions(survey)
+        age_field = next(item for item in prepared if item["model"].question_id == 1001538)
+        self.assertEqual(age_field["input_kind"], "number")
+        self.assertEqual(age_field["min_value"], 21)
+        self.assertEqual(age_field["max_value"], 120)
+        self.assertEqual(
+            age_field["targeting_note"],
+            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65\u2013120",
+        )
+
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        answers = {
+            str(questions[1001538].pk): {
+                "question_id": 1001538,
+                "values": ["70"],
+                "upstream_values": ["70"],
+            },
+            str(questions[1001007].pk): {
+                "question_id": 1001007,
+                "values": ["2000247"],
+                "upstream_values": ["2000247"],
+            },
+        }
+        self.assertEqual(provider._matching_quota(survey, answers).quota_id, 900)
 
     def test_member_ready_page_shows_identity_then_redirects_once(self):
         survey = Survey.objects.create(

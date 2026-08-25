@@ -63,6 +63,7 @@ COMMON_GENDER_OPTIONS = (
     (2000246, "Female"),
     (2000247, "Male"),
 )
+TOLUNA_ADAPTER_VERSION = 3
 
 
 def _pick(payload, *names, default=None):
@@ -540,7 +541,10 @@ class TolunaProvider(SurveyProvider):
                         values = _pick(item, "AnswerValues", default=[])
                         if isinstance(values, str):
                             values = [part.strip() for part in values.split(",") if part.strip()]
-                        current["answer_values"].extend(str(value) for value in (values or []))
+                        for value in values or []:
+                            normalized = str(value).strip()
+                            if normalized and normalized not in current["answer_values"]:
+                                current["answer_values"].append(normalized)
                         current["raw"].append(item)
                         current["all_routable"] = current["all_routable"] and bool(
                             _pick(item, "IsRoutable", default=False)
@@ -557,6 +561,47 @@ class TolunaProvider(SurveyProvider):
         if re.search(r"\bage\b|birth", text):
             return "birth_date"
         return "profile"
+
+    @staticmethod
+    def _age_range(value):
+        raw = str(value or "").strip()
+        match = re.fullmatch(r"(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})", raw, re.I)
+        if match:
+            minimum, maximum = int(match.group(1)), int(match.group(2))
+            return (minimum, maximum) if minimum <= maximum <= 120 else None
+        match = re.fullmatch(r"(\d{1,3})\s*(?:\+|and\s+older|or\s+older)", raw, re.I)
+        if match:
+            minimum = int(match.group(1))
+            return (minimum, 120) if minimum <= 120 else None
+        return None
+
+    @classmethod
+    def _age_option_range(cls, option):
+        try:
+            minimum = int(option["ageStart"])
+            maximum = int(option["ageEnd"])
+        except (KeyError, TypeError, ValueError):
+            return cls._age_range(option.get("OptionText") if isinstance(option, dict) else "")
+        return (minimum, maximum) if 0 <= minimum <= maximum <= 120 else None
+
+    @classmethod
+    def _targeting_age_ranges(cls, requirement, reference):
+        ranges = {
+            parsed
+            for value in requirement.get("answer_values") or []
+            if (parsed := cls._age_range(value)) is not None
+        }
+        allowed_ids = {str(value) for value in requirement.get("answer_ids") or []}
+        for option in reference.options or []:
+            if str(option.get("OptionId")) not in allowed_ids:
+                continue
+            parsed = cls._age_option_range(option)
+            if parsed is not None:
+                ranges.add(parsed)
+        return [
+            {"min": minimum, "max": maximum}
+            for minimum, maximum in sorted(ranges)
+        ]
 
     def refresh_details(self, survey):
         raw = survey.raw_data or {}
@@ -591,10 +636,20 @@ class TolunaProvider(SurveyProvider):
             kind = self._question_kind(reference)
             requirement = requirements.get(question_id, {})
             allowed_ids = sorted(requirement.get("answer_ids") or [])
-            options = [
-                option for option in reference.options
+            reference_options = list(reference.options or [])
+            # Age is collected as the respondent's exact numeric value. Keep
+            # Toluna's answer-ID mapping in raw data for quota evaluation, while
+            # exposing the exact union of textual and ID-backed quota ranges to
+            # the pre-screener. Choice options would incorrectly widen partial
+            # ranges such as 21-29 to Toluna's common 18-24 bucket.
+            options = [] if kind == "birth_date" else [
+                option for option in reference_options
                 if not allowed_ids or _integer(option.get("OptionId"), -1) in allowed_ids
             ]
+            targeting_age_ranges = (
+                self._targeting_age_ranges(requirement, reference)
+                if kind == "birth_date" else []
+            )
             answer_type = reference.answer_type.lower()
             question_type = (
                 "numeric" if kind == "birth_date"
@@ -614,7 +669,7 @@ class TolunaProvider(SurveyProvider):
                 category="Required profile" if kind in {"birth_date", "gender"} else "Toluna targeting",
                 options=options,
                 raw_data={
-                    "adapter_version": 2,
+                    "adapter_version": TOLUNA_ADAPTER_VERSION,
                     "toluna_kind": kind,
                     "toluna_is_routable": bool(
                         requirement.get("all_routable") or reference.is_routable
@@ -623,6 +678,10 @@ class TolunaProvider(SurveyProvider):
                     "allowed_answer_values": requirement.get("answer_values") or [],
                     "required_for_member": kind in {"birth_date", "gender"},
                     "reference_answer_type": reference.answer_type,
+                    **({
+                        "targeting_age_ranges": targeting_age_ranges,
+                        "toluna_age_options": reference_options,
+                    } if kind == "birth_date" else {}),
                 },
             ))
         quota_rows = []
@@ -717,14 +776,22 @@ class TolunaProvider(SurveyProvider):
                 return False
             if allowed_values:
                 for item in allowed_values:
-                    match = re.fullmatch(r"\s*(\d{1,3})\s*(?:-|to)\s*(\d{1,3})\s*", item, re.I)
-                    if match and int(match.group(1)) <= age <= int(match.group(2)):
+                    parsed = cls._age_range(item)
+                    if parsed and parsed[0] <= age <= parsed[1]:
                         return True
             if allowed_ids:
-                for option in question.options:
-                    label = str(option.get("OptionText") or "")
-                    match = re.search(r"(\d{1,3})\D+(\d{1,3})", label)
-                    if str(option.get("OptionId")) in allowed_ids and match and int(match.group(1)) <= age <= int(match.group(2)):
+                age_options = (
+                    (question.raw_data or {}).get("toluna_age_options")
+                    or question.options
+                    or []
+                )
+                for option in age_options:
+                    parsed = cls._age_option_range(option)
+                    if (
+                        str(option.get("OptionId")) in allowed_ids
+                        and parsed
+                        and parsed[0] <= age <= parsed[1]
+                    ):
                         return True
                 return False
         if allowed_ids and values.intersection(allowed_ids):
