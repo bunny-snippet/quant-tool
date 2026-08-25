@@ -2443,6 +2443,14 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
                     or (quota.raw_data or {}).get("metadata_hydrated") is not True
                     for quota in survey.quotas.all()
                 )
+        if (
+            detail_type == "targeting"
+            and survey.integration_id
+            and survey.integration.provider_code == "toluna"
+        ):
+            stale = stale or not survey.targeting_questions.filter(
+                raw_data__adapter_version=3
+            ).exists()
         if stale:
             if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:
                 get_provider(survey.integration).refresh_details(survey)

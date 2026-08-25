@@ -21,7 +21,7 @@ from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaInviteRejected, TolunaProvider
 from .serializers import SurveyListSerializer, SurveyQuotaSerializer
-from .views import _prescreener_questions
+from .views import SurveyViewSet, _prescreener_questions
 
 
 class FakeResponse:
@@ -493,6 +493,28 @@ class TolunaProviderTests(TestCase):
             },
         }
         self.assertEqual(provider._matching_quota(survey, answers).quota_id, 900)
+
+    @patch("surveys.views.get_provider")
+    def test_targeting_details_refresh_fresh_adapter_v2_rows(self, get_provider_mock):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-adapter-v2",
+            targeting_synced_at=timezone.now(),
+        )
+        TargetingQuestion.objects.create(
+            survey=survey,
+            question_id=1001538,
+            key="TOLUNA_1001538",
+            text="What is your age?",
+            question_type="numeric",
+            raw_data={"adapter_version": 2, "toluna_kind": "birth_date"},
+        )
+
+        SurveyViewSet._refresh_if_stale(survey, "targeting")
+
+        get_provider_mock.assert_called_once_with(self.integration)
+        get_provider_mock.return_value.refresh_details.assert_called_once_with(survey)
 
     def test_member_ready_page_shows_identity_then_redirects_once(self):
         survey = Survey.objects.create(
