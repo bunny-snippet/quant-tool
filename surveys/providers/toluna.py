@@ -58,12 +58,13 @@ COMMON_AGE_OPTIONS = (
     (2006360, "60-64", 60, 64),
     (2006361, "65 and older", 65, 120),
 )
+TOLUNA_MAX_RESPONDENT_AGE = 120
 COMMON_GENDER_QUESTION_ID = 1001007
 COMMON_GENDER_OPTIONS = (
     (2000246, "Female"),
     (2000247, "Male"),
 )
-TOLUNA_ADAPTER_VERSION = 3
+TOLUNA_ADAPTER_VERSION = 4
 
 
 def _pick(payload, *names, default=None):
@@ -568,21 +569,35 @@ class TolunaProvider(SurveyProvider):
         match = re.fullmatch(r"(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})", raw, re.I)
         if match:
             minimum, maximum = int(match.group(1)), int(match.group(2))
-            return (minimum, maximum) if minimum <= maximum <= 120 else None
+            if not 1 <= minimum <= maximum:
+                return None
+            if minimum > TOLUNA_MAX_RESPONDENT_AGE:
+                return None
+            return minimum, min(maximum, TOLUNA_MAX_RESPONDENT_AGE)
         match = re.fullmatch(r"(\d{1,3})\s*(?:\+|and\s+older|or\s+older)", raw, re.I)
         if match:
             minimum = int(match.group(1))
-            return (minimum, 120) if minimum <= 120 else None
+            return (
+                (minimum, None)
+                if 1 <= minimum <= TOLUNA_MAX_RESPONDENT_AGE
+                else None
+            )
         return None
 
     @classmethod
     def _age_option_range(cls, option):
+        label = option.get("OptionText") if isinstance(option, dict) else ""
+        open_ended = cls._age_range(label)
+        if open_ended is not None and open_ended[1] is None:
+            return open_ended
         try:
             minimum = int(option["ageStart"])
             maximum = int(option["ageEnd"])
         except (KeyError, TypeError, ValueError):
-            return cls._age_range(option.get("OptionText") if isinstance(option, dict) else "")
-        return (minimum, maximum) if 0 <= minimum <= maximum <= 120 else None
+            return cls._age_range(label)
+        if not 1 <= minimum <= maximum or minimum > TOLUNA_MAX_RESPONDENT_AGE:
+            return None
+        return minimum, min(maximum, TOLUNA_MAX_RESPONDENT_AGE)
 
     @classmethod
     def _targeting_age_ranges(cls, requirement, reference):
@@ -600,7 +615,13 @@ class TolunaProvider(SurveyProvider):
                 ranges.add(parsed)
         return [
             {"min": minimum, "max": maximum}
-            for minimum, maximum in sorted(ranges)
+            for minimum, maximum in sorted(
+                ranges,
+                key=lambda item: (
+                    item[0],
+                    TOLUNA_MAX_RESPONDENT_AGE + 1 if item[1] is None else item[1],
+                ),
+            )
         ]
 
     def refresh_details(self, survey):
@@ -741,7 +762,7 @@ class TolunaProvider(SurveyProvider):
         raw = str(value).strip()
         if raw.isdigit():
             age = int(raw)
-            if not 1 <= age <= 120:
+            if not 1 <= age <= TOLUNA_MAX_RESPONDENT_AGE:
                 raise ProviderError("Enter a valid age before Toluna member registration.")
             today = date.today()
             # Month/day are spread across the calendar but remain stable for
@@ -774,10 +795,14 @@ class TolunaProvider(SurveyProvider):
                 age = cls._age(next(iter(answer.get("values") or [])))
             except (StopIteration, TypeError, ValueError):
                 return False
+            if not 1 <= age <= TOLUNA_MAX_RESPONDENT_AGE:
+                return False
             if allowed_values:
                 for item in allowed_values:
                     parsed = cls._age_range(item)
-                    if parsed and parsed[0] <= age <= parsed[1]:
+                    if parsed and parsed[0] <= age and (
+                        parsed[1] is None or age <= parsed[1]
+                    ):
                         return True
             if allowed_ids:
                 age_options = (
@@ -790,7 +815,8 @@ class TolunaProvider(SurveyProvider):
                     if (
                         str(option.get("OptionId")) in allowed_ids
                         and parsed
-                        and parsed[0] <= age <= parsed[1]
+                        and parsed[0] <= age
+                        and (parsed[1] is None or age <= parsed[1])
                     ):
                         return True
                 return False
@@ -816,6 +842,13 @@ class TolunaProvider(SurveyProvider):
             for layer in layers:
                 matched_subquota = False
                 for subquota in _pick(layer, "SubQuotas", default=[]) or []:
+                    current_raw = _pick(subquota, "CurrentCompletes", default=None)
+                    maximum_raw = _pick(subquota, "MaxTargetCompletes", default=None)
+                    if current_raw is not None and maximum_raw is not None:
+                        current = _integer(current_raw, -1)
+                        maximum = _integer(maximum_raw, -1)
+                        if maximum >= 0 and current >= maximum:
+                            continue
                     conditions = _pick(subquota, "QuestionsAndAnswers", default=[]) or []
 
                     def condition_matches(condition):

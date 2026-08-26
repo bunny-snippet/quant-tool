@@ -308,7 +308,7 @@
     const cells = [];
     const clientName = survey.client_name || survey.display_company_name || survey.company_name || 'Survey client';
     if (projectColumns.has('project_id')) cells.push(`<td><div class="project-id-stack">${projectIdControl(survey)}${canViewProjectClientName ? `<small>${escapeHtml(clientName)}</small>` : ''}</div></td>`);
-    if (projectColumns.has('survey')) cells.push(`<td><div class="survey-name"><strong>${escapeHtml(survey.source_id ?? '—')}</strong><span>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</span></div></td>`);
+    if (projectColumns.has('survey')) cells.push(`<td><div class="survey-name"><strong>${escapeHtml(survey.display_source_id ?? survey.source_id ?? '—')}</strong><span>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</span></div></td>`);
     if (projectColumns.has('market')) cells.push(`<td><span class="market-pill">${escapeHtml(survey.country_code || '—')} <i>${escapeHtml(survey.language_code || '')}</i></span><small class="country-name">${escapeHtml(survey.country || '')}</small></td>`);
     if (projectColumns.has('completes')) cells.push(`<td><div class="complete-value"><strong>${survey.completes.toLocaleString()} / ${survey.sample_size.toLocaleString()}</strong><span><i style="width:${percent}%"></i></span></div></td>`);
     if (projectColumns.has('cpi')) cells.push(`<td><strong class="cpi">${money(survey.cpi)}</strong></td>`);
@@ -329,7 +329,7 @@
     if (projectColumns.has('cpi')) metrics.push(`<span><small>CPI</small><b>${money(survey.cpi)}</b></span>`);
     if (projectColumns.has('loi_ir')) metrics.push(`<span><small>LOI / IR · Type</small><b>${survey.loi ?? '—'}m · ${survey.incidence_rate ?? '—'}% · ${escapeHtml(survey.survey_type || survey.group_type || '—')}</b></span>`);
     const bottom = `${projectColumns.has('modified') ? `<div class="source-timestamp"><small>Updated</small>${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}</div>` : ''}${projectColumns.has('entry_link') ? `<button class="copy-link" data-copy-link="${escapeHtml(survey.start_link)}">Copy link</button>` : ''}`;
-    return `<article class="survey-card"><div class="card-top"><div>${top}</div>${projectColumns.has('actions') ? `<button class="eye-button" data-action="${escapeHtml(survey.local_id)}" aria-label="View survey details">◉</button>` : ''}</div>${projectColumns.has('survey') ? `<h3>${escapeHtml(survey.source_id ?? '—')}</h3><p>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</p>` : ''}${metrics.length ? `<div class="card-grid">${metrics.join('')}</div>` : ''}${bottom ? `<div class="card-bottom">${bottom}</div>` : ''}</article>`;
+    return `<article class="survey-card"><div class="card-top"><div>${top}</div>${projectColumns.has('actions') ? `<button class="eye-button" data-action="${escapeHtml(survey.local_id)}" aria-label="View survey details">◉</button>` : ''}</div>${projectColumns.has('survey') ? `<h3>${escapeHtml(survey.display_source_id ?? survey.source_id ?? '—')}</h3><p>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</p>` : ''}${metrics.length ? `<div class="card-grid">${metrics.join('')}</div>` : ''}${bottom ? `<div class="card-bottom">${bottom}</div>` : ''}</article>`;
   }
 
   function scheduleLoad() {
@@ -461,12 +461,46 @@
 
   function renderQuotas(items) {
     if (!items.length) return '<div class="detail-empty"><div class="detail-empty-visual" aria-hidden="true"><span></span><span></span><span></span><i>✓</i></div><strong>No quota data</strong><p>This survey currently has no quota definitions.</p></div>';
-    return `<div class="quota-help"><strong>How to read this</strong><span>Remaining capacity is shown from the provider response. Target and completed totals appear only when the provider supplies them.</span></div><div class="detail-list">${items.map((quota, index) => `<article class="quota-item"><div class="detail-index">${String(index + 1).padStart(2, '0')}</div><div class="detail-main"><div class="detail-title"><div><strong>${escapeHtml(quota.display_name || quota.name || quota.title || 'Survey quota')}</strong><small class="quota-scope">${escapeHtml(quota.scope_label || 'Quota scope')} · limited by ${escapeHtml(quota.limit_type || 'Completes')}</small></div><span class="quota-status quota-status-${escapeHtml(String(quota.status || 'unknown').toLowerCase())}">${escapeHtml(quota.status || 'Unknown')}</span></div><div class="quota-stats"><span><small>Target</small><b>${quota.target_known ? escapeHtml(quota.sample_size) : '<em>Not provided</em>'}</b></span><span><small>Completed</small><b>${quota.completed_known ? escapeHtml(quota.completes) : '<em>Not provided</em>'}</b></span><span><small>Remaining</small><b>${escapeHtml(quota.remaining)}</b></span></div>${quotaTargeting(quota.targeting_details)}</div></article>`).join('')}</div>`;
+    return `<div class="quota-help"><strong>How to read this</strong><span>Overall quota capacity is shown at the top of each card. Provider subquota capacity stays inside its own segment and is never added across layers.</span></div><div class="detail-list">${items.map((quota, index) => {
+      const targeting = quota.toluna_layers?.length
+        ? tolunaQuotaBreakdown(quota.toluna_layers)
+        : quotaTargeting(quota.targeting_details);
+      return `<article class="quota-item"><div class="detail-index">${String(index + 1).padStart(2, '0')}</div><div class="detail-main"><div class="detail-title"><div><strong>${escapeHtml(quota.display_name || quota.name || quota.title || 'Survey quota')}</strong><small class="quota-scope">${escapeHtml(quota.scope_label || 'Quota scope')} · limited by ${escapeHtml(quota.limit_type || 'Completes')}</small></div><span class="quota-status quota-status-${escapeHtml(String(quota.status || 'unknown').toLowerCase())}">${escapeHtml(quota.status || 'Unknown')}</span></div><div class="quota-stats"><span><small>Target</small><b>${quota.target_known ? escapeHtml(quota.sample_size) : '<em>Not provided</em>'}</b></span><span><small>Completed</small><b>${quota.completed_known ? escapeHtml(quota.completes) : '<em>Not provided</em>'}</b></span><span><small>Remaining</small><b>${escapeHtml(quota.remaining)}</b></span></div>${targeting}</div></article>`;
+    }).join('')}</div>`;
   }
 
   function quotaTargeting(details) {
     if (!details?.length) return '<div class="quota-targeting quota-targeting-overall"><strong>Overall quota</strong><span>Applies to every respondent entering this survey.</span></div>';
     return `<div class="quota-targeting"><strong>Who this quota applies to</strong>${details.map(detail => `<div><label>${escapeHtml(detail.name)}</label><span>${(detail.values || []).map(escapeHtml).join(', ')}</span></div>`).join('')}</div>`;
+  }
+
+  function tolunaSegmentTitle(details, position) {
+    const labels = (details || []).flatMap((detail) => detail.values || []).filter(Boolean);
+    if (labels.length) return labels.slice(0, 4).join(', ') + (labels.length > 4 ? ` +${labels.length - 4} more` : '');
+    return `Segment ${position}`;
+  }
+
+  function tolunaSegmentStats(segment) {
+    if (!segment.target_known && !segment.completed_known && !segment.remaining_known) {
+      return '<p class="toluna-capacity-missing">Subquota capacity was not supplied by Toluna.</p>';
+    }
+    const metric = (label, known, value) => `<span><small>${label}</small><b>${known ? escapeHtml(value) : '<em>Not provided</em>'}</b></span>`;
+    const progress = segment.target_known && segment.completed_known && Number(segment.target) > 0
+      ? Math.max(0, Math.min(100, (Number(segment.completed) / Number(segment.target)) * 100))
+      : null;
+    return `<div class="toluna-segment-stats">${metric('Target', segment.target_known, segment.target)}${metric('Completed', segment.completed_known, segment.completed)}${metric('Remaining', segment.remaining_known, segment.remaining)}</div>${progress === null ? '' : `<div class="toluna-capacity-bar" aria-label="${progress.toFixed(0)} percent complete"><i style="width:${progress.toFixed(2)}%"></i></div>`}`;
+  }
+
+  function tolunaQuotaBreakdown(layers) {
+    return `<section class="toluna-quota-breakdown"><header class="toluna-logic"><div><strong>Quota composition</strong><span>Every condition inside the selected segment applies together.</span></div><div><b>ALL layers</b><i>+</i><b>ANY one segment per layer</b><i>+</i><b>ALL segment conditions</b></div></header>${layers.map((layer, layerIndex) => {
+      const segments = layer.subquotas || [];
+      const layerName = layer.name || `Layer ${layer.position || layerIndex + 1}`;
+      return `<details class="toluna-layer" ${layerIndex === 0 ? 'open' : ''}><summary><span><small>Layer ${escapeHtml(layer.position || layerIndex + 1)}</small><strong>${escapeHtml(layerName)}</strong></span><b>${segments.length} ${segments.length === 1 ? 'segment' : 'segments'}</b></summary><div class="toluna-layer-body">${segments.map((segment, segmentIndex) => {
+        const details = segment.targeting_details || [];
+        const statusClass = String(segment.status || 'unknown').toLowerCase();
+        return `<article class="toluna-segment"><header><div><small>Eligible segment ${escapeHtml(segment.position || segmentIndex + 1)}</small><strong>${escapeHtml(tolunaSegmentTitle(details, segment.position || segmentIndex + 1))}</strong></div><span class="quota-status quota-status-${escapeHtml(statusClass)}">${escapeHtml(segment.status || 'Unknown')}</span></header>${tolunaSegmentStats(segment)}<div class="toluna-segment-criteria">${details.map((detail) => `<div><label>${escapeHtml(detail.name)}${detail.is_routable ? '<em>Asked by Toluna</em>' : ''}</label><span>${(detail.values || []).map(escapeHtml).join(', ') || 'Provider-defined segment'}</span></div>`).join('') || '<p>Applies to all respondents in this segment.</p>'}</div></article>`;
+      }).join('') || '<p class="toluna-capacity-missing">No subquota segments were supplied for this layer.</p>'}</div></details>`;
+    }).join('')}</section>`;
   }
 
   function renderQuestions(items) {

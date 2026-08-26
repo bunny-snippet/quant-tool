@@ -95,6 +95,7 @@ from prescreener_vault.services import (
 from prescreener_vault.models import PrescreenerSubmission
 from prescreener_vault.reuse import effective_profile_uid, maybe_assign_reusable_profile
 from .providers import ProviderError, TolunaInviteRejected, get_provider
+from .providers.toluna import TOLUNA_ADAPTER_VERSION, TOLUNA_MAX_RESPONDENT_AGE
 from .geolocation import (
     geolocation_client_data,
     is_wrong_target_country,
@@ -1152,7 +1153,11 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                 option = {"OptionId": option, "OptionText": str(option)}
             option_id = option.get("OptionId")
             if option.get("ageStart") is not None:
-                label = f"{option.get('ageStart')}–{option.get('ageEnd')}"
+                label = (
+                    f"{option.get('ageStart')}+"
+                    if option.get("ageEnd") is None
+                    else f"{option.get('ageStart')}–{option.get('ageEnd')}"
+                )
                 age_ranges.append(option)
             else:
                 label = clean_rfg_display_text(
@@ -1167,9 +1172,10 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                 if not isinstance(item, dict):
                     continue
                 try:
+                    maximum = item.get("max")
                     age_ranges.append({
                         "ageStart": int(item["min"]),
-                        "ageEnd": int(item["max"]),
+                        "ageEnd": None if maximum is None else int(maximum),
                     })
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -1207,9 +1213,17 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         for option in options:
             option["selected"] = option["value"] in selected_values
         min_value = min((int(item["ageStart"]) for item in age_ranges), default=None)
-        max_value = max((int(item["ageEnd"]) for item in age_ranges), default=None)
+        max_value = (
+            TOLUNA_MAX_RESPONDENT_AGE
+            if any(item.get("ageEnd") is None for item in age_ranges)
+            else max((int(item["ageEnd"]) for item in age_ranges), default=None)
+        )
         age_range_labels = [
-            f"{int(item['ageStart'])}\u2013{int(item['ageEnd'])}"
+            (
+                f"{int(item['ageStart'])}+"
+                if item.get("ageEnd") is None
+                else f"{int(item['ageStart'])}\u2013{int(item['ageEnd'])}"
+            )
             for item in age_ranges
         ]
         prepared.append({
@@ -1572,13 +1586,13 @@ def survey_start(request):
         )
         if is_dynamic_provider:
             stale = stale or not survey.targeting_questions.filter(
-                raw_data__adapter_version__in=[1, 2, 3]
+                raw_data__adapter_version__in=[1, 2, 3, TOLUNA_ADAPTER_VERSION]
             ).exists()
             if is_rfg:
                 stale = stale or not survey.entry_link
             elif survey.integration.provider_code == "toluna":
                 stale = stale or not survey.targeting_questions.filter(
-                    raw_data__adapter_version=3
+                    raw_data__adapter_version=TOLUNA_ADAPTER_VERSION
                 ).exists()
         if survey.integration_id and survey.integration.provider_code == "biobrain":
             stale = stale or any(
@@ -2449,7 +2463,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
             and survey.integration.provider_code == "toluna"
         ):
             stale = stale or not survey.targeting_questions.filter(
-                raw_data__adapter_version=3
+                raw_data__adapter_version=TOLUNA_ADAPTER_VERSION
             ).exists()
         if stale:
             if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:
@@ -2457,6 +2471,13 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
             else:
                 refresh = replace_survey_quotas if detail_type == "quotas" else replace_survey_targeting
                 refresh(InnovateMRClient(integration=survey.integration), survey)
+            # get_object() prefetched both related collections before the
+            # provider atomically replaced them. Drop those snapshots so this
+            # same response serializes the newly-created quota/question rows.
+            prefetched = getattr(survey, "_prefetched_objects_cache", {})
+            prefetched.pop("quotas", None)
+            prefetched.pop("targeting_questions", None)
+        return stale
 
     @extend_schema(
         tags=["Survey details"],

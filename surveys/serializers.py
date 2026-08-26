@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlencode
 from django.conf import settings
 from django.urls import reverse
@@ -10,8 +11,16 @@ from vendors.models import VendorAPIKey
 from vendors.security import generate_delivery_token
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
-from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
+from .models import (
+    Survey,
+    SurveyAttempt,
+    SurveyQuota,
+    SyncRun,
+    TargetingQuestion,
+    TolunaReferenceQuestion,
+)
 from .outcomes import provider_outcome
+from .providers.toluna import TOLUNA_MAX_RESPONDENT_AGE
 from .report_pricing import viewer_attempt_cpi
 from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
@@ -24,13 +33,19 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
     limit_type = serializers.SerializerMethodField(help_text="Provider quota unit, such as Completes or Starts.")
     scope_label = serializers.SerializerMethodField(help_text="Human-readable overall or targeted quota scope.")
     targeting_details = serializers.SerializerMethodField(help_text="Quota targeting decoded into readable datapoint names and answer labels.")
+    toluna_layers = serializers.SerializerMethodField(
+        help_text=(
+            "Toluna-only quota composition preserving every AND layer, OR subquota, "
+            "provider-supplied subquota capacity and culture-specific answer label."
+        )
+    )
 
     class Meta:
         model = SurveyQuota
         fields = [
             "id", "quota_id", "title", "name", "display_name", "sample_size", "remaining", "completes",
             "clicks", "status", "targeting", "target_known", "completed_known", "limit_type",
-            "scope_label", "targeting_details", "updated_at",
+            "scope_label", "targeting_details", "toluna_layers", "updated_at",
         ]
 
     @staticmethod
@@ -59,6 +74,202 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
                     if isinstance(item, dict)
                 )
         return rows
+
+    @staticmethod
+    def _toluna_layers_from(obj) -> list:
+        raw = obj.raw_data or {}
+        layers = raw.get("Layers")
+        if not isinstance(layers, list):
+            layers = (obj.targeting or {}).get("layers")
+        return layers if isinstance(layers, list) else []
+
+    @staticmethod
+    def _toluna_display_value(question_id: str, value) -> str:
+        label = str(value or "").strip()
+        if question_id == "1001538":
+            if label.lower() in {"65 and older", "65 or older", "65+"}:
+                return "65+"
+            match = re.fullmatch(
+                r"(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})",
+                label,
+                re.I,
+            )
+            if match:
+                minimum, maximum = int(match.group(1)), int(match.group(2))
+                if minimum <= maximum:
+                    return f"{minimum}\u2013{min(maximum, TOLUNA_MAX_RESPONDENT_AGE)}"
+        return label
+
+    def _toluna_reference_map(self, obj) -> dict:
+        survey = obj.survey
+        culture = str(
+            ((survey.raw_data or {}).get("_toluna") or {}).get("culture_code") or ""
+        ).strip().lower().replace("_", "-")
+        if not survey.integration_id or not culture:
+            return {}
+        cache_key = (survey.integration_id, culture)
+        cache = getattr(self, "_toluna_reference_maps", None)
+        if cache is None:
+            cache = self._toluna_reference_maps = {}
+        entry = cache.setdefault(cache_key, {"rows": {}, "loaded_ids": set()})
+
+        quota_rows = [obj]
+        prefetched = getattr(survey, "_prefetched_objects_cache", {}).get("quotas")
+        if prefetched is not None:
+            quota_rows = prefetched
+        else:
+            parent_instance = getattr(getattr(self, "parent", None), "instance", None)
+            if parent_instance is not None:
+                quota_rows = [
+                    quota for quota in parent_instance
+                    if getattr(quota, "survey_id", None) == survey.pk
+                ] or quota_rows
+        question_ids = {
+            int(question_id)
+            for quota in quota_rows
+            for row in self._toluna_question_rows(quota)
+            if (question_id := str(row.get("QuestionID") or "").strip()).isdigit()
+        }
+        missing_ids = question_ids - entry["loaded_ids"]
+        if missing_ids:
+            entry["rows"].update({
+                str(row.question_id): row
+                for row in TolunaReferenceQuestion.objects.filter(
+                    integration_id=survey.integration_id,
+                    culture_code=culture,
+                    question_id__in=missing_ids,
+                )
+            })
+            entry["loaded_ids"].update(missing_ids)
+        return entry["rows"]
+
+    def _toluna_targeting_question_map(self, obj) -> dict:
+        survey = obj.survey
+        cache = getattr(self, "_toluna_targeting_question_maps", None)
+        if cache is None:
+            cache = self._toluna_targeting_question_maps = {}
+        if survey.pk not in cache:
+            cache[survey.pk] = {
+                str(row.question_id): row
+                for row in survey.targeting_questions.all()
+            }
+        return cache[survey.pk]
+
+    def _toluna_targeting_details(self, obj, rows) -> list:
+        question_map = self._toluna_targeting_question_map(obj)
+        reference_map = self._toluna_reference_map(obj)
+        grouped = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            question_id = str(row.get("QuestionID") or "").strip()
+            if not question_id:
+                continue
+            question = question_map.get(question_id)
+            reference = reference_map.get(question_id)
+            readable_name = (
+                (reference.display_name or reference.internal_name) if reference else ""
+            ) or (question.text if question else "") or "Toluna qualification"
+            detail = grouped.setdefault(question_id, {
+                "question_id": question_id,
+                "name": str(readable_name),
+                "values": [],
+                "is_routable": False,
+            })
+            detail["is_routable"] = detail["is_routable"] or bool(row.get("IsRoutable"))
+
+            option_labels = {}
+            for option_source in (
+                question.options if question else [],
+                reference.options if reference else [],
+            ):
+                for option in option_source or []:
+                    if not isinstance(option, dict) or option.get("OptionId") is None:
+                        continue
+                    option_id = str(option.get("OptionId"))
+                    option_labels[option_id] = self._toluna_display_value(
+                        question_id,
+                        option.get("OptionText") or option.get("Translation") or option_id,
+                    )
+
+            values = row.get("AnswerValues") or []
+            if isinstance(values, str):
+                values = [part.strip() for part in values.split(",") if part.strip()]
+            readable = [self._toluna_display_value(question_id, value) for value in values]
+            readable.extend(
+                option_labels.get(str(value), "Provider-defined answer")
+                for value in (row.get("AnswerIDs") or [])
+            )
+            for value in readable:
+                if value and value not in detail["values"]:
+                    detail["values"].append(value)
+        return list(grouped.values())
+
+    @staticmethod
+    def _optional_integer(value):
+        if value in (None, "") or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def get_toluna_layers(self, obj) -> list:
+        if not self._is_toluna(obj):
+            return []
+        result = []
+        for layer_index, layer in enumerate(self._toluna_layers_from(obj), start=1):
+            if not isinstance(layer, dict):
+                continue
+            subquota_rows = []
+            layer_names = []
+            for subquota_index, subquota in enumerate(layer.get("SubQuotas") or [], start=1):
+                if not isinstance(subquota, dict):
+                    continue
+                details = self._toluna_targeting_details(
+                    obj, subquota.get("QuestionsAndAnswers") or []
+                )
+                for detail in details:
+                    if detail["name"] not in layer_names:
+                        layer_names.append(detail["name"])
+
+                target_known = (
+                    "MaxTargetCompletes" in subquota
+                    and subquota.get("MaxTargetCompletes") is not None
+                )
+                completed_known = (
+                    "CurrentCompletes" in subquota
+                    and subquota.get("CurrentCompletes") is not None
+                )
+                target = self._optional_integer(subquota.get("MaxTargetCompletes"))
+                completed = self._optional_integer(subquota.get("CurrentCompletes"))
+                remaining = (
+                    max(target - completed, 0)
+                    if target_known and completed_known and target is not None and completed is not None
+                    else None
+                )
+                subquota_rows.append({
+                    "position": subquota_index,
+                    "subquota_id": subquota.get("SubQuotaID"),
+                    "target_known": bool(target_known and target is not None),
+                    "completed_known": bool(completed_known and completed is not None),
+                    "remaining_known": remaining is not None,
+                    "target": target,
+                    "completed": completed,
+                    "remaining": remaining,
+                    "status": (
+                        "Full" if remaining == 0 else "Open" if remaining is not None else "Unknown"
+                    ),
+                    "targeting_details": details,
+                })
+            result.append({
+                "position": layer_index,
+                "layer_id": layer.get("LayerID"),
+                "name": " + ".join(layer_names) if layer_names else f"Layer {layer_index}",
+                "match_rule": "any_subquota",
+                "subquotas": subquota_rows,
+            })
+        return result
 
     def get_display_name(self, obj) -> str:
         if self._is_toluna(obj):
@@ -121,36 +332,9 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         normalized = (obj.raw_data or {}).get("targeting_details")
         if isinstance(normalized, list):
             return normalized
-        questions = list(obj.survey.targeting_questions.all())
         if self._is_toluna(obj):
-            question_map = {str(item.question_id): item for item in questions}
-            grouped = {}
-            for row in self._toluna_question_rows(obj):
-                question_id = str(row.get("QuestionID") or "").strip()
-                if not question_id:
-                    continue
-                question = question_map.get(question_id)
-                detail = grouped.setdefault(question_id, {
-                    "name": question.text if question else f"Qualification {question_id}",
-                    "values": [],
-                })
-                option_labels = {
-                    str(option.get("OptionId")): str(option.get("OptionText") or option.get("Translation") or option.get("OptionId"))
-                    for option in (question.options if question else [])
-                    if isinstance(option, dict)
-                }
-                values = row.get("AnswerValues") or []
-                if isinstance(values, str):
-                    values = [part.strip() for part in values.split(",") if part.strip()]
-                readable = [str(value) for value in values]
-                readable.extend(
-                    option_labels.get(str(value), str(value))
-                    for value in (row.get("AnswerIDs") or [])
-                )
-                for value in readable:
-                    if value and value not in detail["values"]:
-                        detail["values"].append(value)
-            return list(grouped.values())
+            return self._toluna_targeting_details(obj, self._toluna_question_rows(obj))
+        questions = list(obj.survey.targeting_questions.all())
         details = []
         for datapoint in self._quota_datapoints(obj):
             if not isinstance(datapoint, dict):
@@ -237,6 +421,9 @@ class TargetingQuestionSerializer(serializers.ModelSerializer):
 
 class SurveyListSerializer(serializers.ModelSerializer):
     source_id = serializers.SerializerMethodField()
+    display_source_id = serializers.SerializerMethodField(
+        help_text="Project-page survey identifier with provider-only routing suffixes hidden."
+    )
     survey_id = serializers.SerializerMethodField(help_text="External delivery identifier selected on the authenticated API key.")
     provider_code = serializers.SerializerMethodField()
     client_name = serializers.CharField(source="client.name", read_only=True, allow_null=True)
@@ -254,7 +441,7 @@ class SurveyListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Survey
         fields = [
-            "id", "local_id", "client", "client_name", "display_company_name", "source_id", "survey_id", "provider_code", "company_name", "name", "status", "sample_size", "completes", "remaining",
+            "id", "local_id", "client", "client_name", "display_company_name", "source_id", "display_source_id", "survey_id", "provider_code", "company_name", "name", "status", "sample_size", "completes", "remaining",
             "starts", "cpi", "cpi_cut_percent", "vendor_pricing", "loi", "incidence_rate", "country", "country_code", "country_label",
             "language", "language_code", "group_type", "buyer_id", "survey_type", "device_type", "entry_link", "start_link", "has_quota",
             "source_created_at", "source_modified_at", "source_created_display", "source_modified_display",
@@ -276,6 +463,18 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
     def get_source_id(self, obj):
+        return obj.source_identifier
+
+    @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
+    def get_display_source_id(self, obj):
+        if (
+            obj.integration_id
+            and obj.integration.provider_code == "toluna"
+            and ":" in str(obj.source_key or "")
+        ):
+            # Toluna's stable provider key remains SurveyID:WaveID in source_id
+            # and survey_id. Only this presentation value hides the WaveID.
+            return str(obj.source_key).split(":", 1)[0]
         return obj.source_identifier
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})

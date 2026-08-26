@@ -16,7 +16,7 @@ from vendors.serializers import ClientIntegrationSerializer
 from prescreener_vault.constants import DATABASE_ALIAS
 from prescreener_vault.models import PrescreenerSubmission
 
-from .models import Survey, SurveyAttempt, TargetingQuestion, TolunaMember, TolunaReferenceQuestion
+from .models import Survey, SurveyAttempt, SurveyQuota, TargetingQuestion, TolunaMember, TolunaReferenceQuestion
 from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaInviteRejected, TolunaProvider
@@ -198,6 +198,9 @@ class TolunaProviderTests(TestCase):
 
         data = SurveyListSerializer(survey, context={"request": request}).data
 
+        self.assertEqual(data["source_id"], "71:72")
+        self.assertEqual(data["display_source_id"], "71")
+        self.assertEqual(data["survey_id"], "71:72")
         self.assertIn("/survey/start?", data["start_link"])
         self.assertIn("surveyId=71%3A72", data["start_link"])
 
@@ -314,6 +317,138 @@ class TolunaProviderTests(TestCase):
             {"What is your age?", "What is your gender?"},
         )
 
+    def test_quota_serializer_preserves_layers_and_resolves_routable_reference_labels(self):
+        reference = copy.deepcopy(REFERENCE)
+        reference.append({
+            "IsRoutable": True,
+            "InternalName": "Annual Household Income",
+            "TranslatedQuestion": {
+                "QuestionID": 1001107,
+                "CultureID": 1,
+                "DisplayNameTranslation": "Household Yearly Income (Gross):",
+            },
+            "TranslatedAnswers": [{
+                "AnswerID": 2002334,
+                "Translation": "$200,000+",
+                "AnswerInternalName": "$200,000+",
+            }],
+            "AnswerType": "SingleSelect",
+        })
+        quotas = copy.deepcopy(QUOTAS)
+        quotas["Surveys"][0]["Quotas"][0]["Layers"] = [
+            {
+                "LayerID": 101,
+                "SubQuotas": [
+                    {
+                        "SubQuotaID": 1001,
+                        "CurrentCompletes": 4,
+                        "MaxTargetCompletes": 10,
+                        "QuestionsAndAnswers": [{
+                            "QuestionID": 1001107,
+                            "AnswerIDs": [2002334],
+                            "AnswerValues": [],
+                            "IsRoutable": True,
+                        }],
+                    },
+                    {
+                        "SubQuotaID": 1002,
+                        "CurrentCompletes": 8,
+                        "MaxTargetCompletes": 8,
+                        "QuestionsAndAnswers": [{
+                            "QuestionID": 1001538,
+                            "AnswerIDs": [2006361],
+                            "AnswerValues": [],
+                            "IsRoutable": False,
+                        }],
+                    },
+                ],
+            },
+            {
+                "LayerID": 102,
+                "SubQuotas": [{
+                    "SubQuotaID": 1003,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1001007,
+                        "AnswerIDs": [2000246, 2000247],
+                        "AnswerValues": [],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+        ]
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(reference), FakeResponse(quotas)
+            ),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        provider.refresh_details(survey)
+
+        self.assertFalse(survey.targeting_questions.filter(question_id=1001107).exists())
+        data = SurveyQuotaSerializer(survey.quotas.get()).data
+        self.assertEqual(len(data["toluna_layers"]), 2)
+        first_layer = data["toluna_layers"][0]
+        self.assertEqual(len(first_layer["subquotas"]), 2)
+        income_segment, age_segment = first_layer["subquotas"]
+        self.assertEqual(income_segment["target"], 10)
+        self.assertEqual(income_segment["completed"], 4)
+        self.assertEqual(income_segment["remaining"], 6)
+        self.assertEqual(income_segment["status"], "Open")
+        self.assertEqual(income_segment["targeting_details"], [{
+            "question_id": "1001107",
+            "name": "Household Yearly Income (Gross):",
+            "values": ["$200,000+"],
+            "is_routable": True,
+        }])
+        self.assertEqual(age_segment["status"], "Full")
+        self.assertEqual(age_segment["targeting_details"][0]["values"], ["65+"])
+        no_capacity = data["toluna_layers"][1]["subquotas"][0]
+        self.assertFalse(no_capacity["target_known"])
+        self.assertFalse(no_capacity["completed_known"])
+        self.assertFalse(no_capacity["remaining_known"])
+        self.assertIsNone(no_capacity["remaining"])
+
+    def test_quota_serializer_hides_unmapped_provider_ids(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="unmapped-reference",
+            raw_data={"_toluna": {"culture_code": "en-us"}},
+        )
+        quota = SurveyQuota.objects.create(
+            survey=survey,
+            source_key="404",
+            quota_id=404,
+            raw_data={
+                "Layers": [{
+                    "LayerID": 1,
+                    "SubQuotas": [{
+                        "SubQuotaID": 2,
+                        "QuestionsAndAnswers": [{
+                            "QuestionID": 9999999,
+                            "AnswerIDs": [8888888],
+                            "AnswerValues": [],
+                            "IsRoutable": True,
+                        }],
+                    }],
+                }],
+            },
+        )
+
+        detail = SurveyQuotaSerializer(quota).data["toluna_layers"][0]["subquotas"][0][
+            "targeting_details"
+        ][0]
+
+        self.assertEqual(detail["name"], "Toluna qualification")
+        self.assertEqual(detail["values"], ["Provider-defined answer"])
+
     def test_routable_quota_attribute_is_left_for_toluna_prescreener(self):
         reference = copy.deepcopy(REFERENCE)
         reference.append({
@@ -357,7 +492,7 @@ class TolunaProviderTests(TestCase):
 
         self.assertFalse(survey.targeting_questions.filter(question_id=2910077).exists())
         self.assertTrue(
-            survey.targeting_questions.filter(raw_data__adapter_version=3).exists()
+            survey.targeting_questions.filter(raw_data__adapter_version=4).exists()
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
@@ -426,6 +561,62 @@ class TolunaProviderTests(TestCase):
 
         self.assertEqual(matched.quota_id, 900)
 
+    def test_matching_quota_skips_full_subquota_segments(self):
+        quotas = copy.deepcopy(QUOTAS)
+        age_layer = quotas["Surveys"][0]["Quotas"][0]["Layers"][0]
+        age_layer["SubQuotas"] = [
+            {
+                "SubQuotaID": 10,
+                "CurrentCompletes": 10,
+                "MaxTargetCompletes": 10,
+                "QuestionsAndAnswers": [{
+                    "QuestionID": 1001538,
+                    "AnswerIDs": [],
+                    "AnswerValues": ["25-29"],
+                }],
+            },
+            {
+                "SubQuotaID": 11,
+                "CurrentCompletes": 0,
+                "MaxTargetCompletes": 10,
+                "QuestionsAndAnswers": [{
+                    "QuestionID": 1001538,
+                    "AnswerIDs": [],
+                    "AnswerValues": ["30-45"],
+                }],
+            },
+        ]
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(quotas)
+            ),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        provider.refresh_details(survey)
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        answers = {
+            str(questions[1001538].pk): {
+                "question_id": 1001538,
+                "values": ["27"],
+                "upstream_values": ["27"],
+            },
+            str(questions[1001007].pk): {
+                "question_id": 1001007,
+                "values": ["2000247"],
+                "upstream_values": ["2000247"],
+            },
+        }
+
+        with self.assertRaisesRegex(ProviderError, "does not match an open Toluna quota"):
+            provider._matching_quota(survey, answers)
+
     def test_text_and_answer_id_age_ranges_are_merged_for_prescreener(self):
         quotas = copy.deepcopy(QUOTAS)
         age_rows = [
@@ -462,12 +653,12 @@ class TolunaProviderTests(TestCase):
 
         age_question = survey.targeting_questions.get(question_id=1001538)
         self.assertEqual(age_question.options, [])
-        self.assertEqual(age_question.raw_data["adapter_version"], 3)
+        self.assertEqual(age_question.raw_data["adapter_version"], 4)
         self.assertEqual(age_question.raw_data["targeting_age_ranges"], [
             {"min": 21, "max": 29},
             {"min": 30, "max": 45},
             {"min": 46, "max": 64},
-            {"min": 65, "max": 120},
+            {"min": 65, "max": None},
         ])
         prepared = _prescreener_questions(survey)
         age_field = next(item for item in prepared if item["model"].question_id == 1001538)
@@ -476,15 +667,15 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(age_field["max_value"], 120)
         self.assertEqual(
             age_field["targeting_note"],
-            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65\u2013120",
+            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65+",
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
         answers = {
             str(questions[1001538].pk): {
                 "question_id": 1001538,
-                "values": ["70"],
-                "upstream_values": ["70"],
+                "values": ["66"],
+                "upstream_values": ["66"],
             },
             str(questions[1001007].pk): {
                 "question_id": 1001007,
@@ -493,6 +684,11 @@ class TolunaProviderTests(TestCase):
             },
         }
         self.assertEqual(provider._matching_quota(survey, answers).quota_id, 900)
+
+    def test_toluna_age_ranges_normalize_unsupported_upper_bounds(self):
+        self.assertEqual(TolunaProvider._age_range("65-130"), (65, 120))
+        self.assertEqual(TolunaProvider._age_range("18-125"), (18, 120))
+        self.assertEqual(TolunaProvider._age_range("65 and older"), (65, None))
 
     @patch("surveys.views.get_provider")
     def test_targeting_details_refresh_fresh_adapter_v2_rows(self, get_provider_mock):
