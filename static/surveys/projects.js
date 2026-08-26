@@ -20,6 +20,7 @@
     detailErrors: { targeting: null, quotas: null },
     timer: null,
     controller: null,
+    loading: false,
   };
 
   const els = {
@@ -50,6 +51,7 @@
     country: 'All countries', status: 'All statuses', company: 'All clients', client_name: 'All clients',
     buyer_id: 'All buyer IDs', survey_type: 'All survey types',
   };
+  const selectedBuyerValues = new Set();
   els.multiSelects.forEach((filter) => {
     if (filter.dataset.defaultLabel) filterDefaults[filter.dataset.multiFilter] = filter.dataset.defaultLabel;
   });
@@ -77,6 +79,9 @@
 
   function selectedValues(filter) {
     if (!filter) return [];
+    if (filter.dataset.multiFilter === 'buyer_id' && filter.dataset.lazyOptionsUrl) {
+      return [...selectedBuyerValues];
+    }
     return [...filter.querySelectorAll('input:checked')].map((input) => input.value);
   }
 
@@ -92,23 +97,76 @@
 
   const clientFilter = els.multiSelects.find((filter) => ['company', 'client_name'].includes(filter.dataset.multiFilter));
   const buyerFilter = els.multiSelects.find((filter) => filter.dataset.multiFilter === 'buyer_id');
+  let buyerOptionsLoaded = false;
+  let buyerOptionsKey = '';
+  let buyerOptionsTimer = null;
+  let buyerOptionsController = null;
+
+  function resetBuyerOptions() {
+    if (!buyerFilter?.dataset.lazyOptionsUrl) return;
+    buyerOptionsController?.abort();
+    buyerOptionsLoaded = false;
+    buyerOptionsKey = '';
+    buyerFilter.querySelector('.multi-options').innerHTML = '<span class="filter-empty">Open or search to load buyer IDs</span>';
+    const noResults = buyerFilter.querySelector('.multi-no-results');
+    if (noResults) noResults.hidden = true;
+    updateMultiLabel(buyerFilter);
+  }
+
+  async function loadBuyerOptions({ force = false } = {}) {
+    if (!buyerFilter?.dataset.lazyOptionsUrl) return;
+    const search = buyerFilter.querySelector('[data-multi-search]')?.value.trim() || '';
+    const clients = selectedValues(clientFilter);
+    const clientParameter = clientFilter?.dataset.multiFilter || '';
+    const key = JSON.stringify([search, clientParameter, clients]);
+    if (!force && buyerOptionsLoaded && key === buyerOptionsKey) return;
+
+    buyerOptionsController?.abort();
+    buyerOptionsController = new AbortController();
+    const options = buyerFilter.querySelector('.multi-options');
+    options.innerHTML = '<span class="filter-empty">Loading buyer IDs…</span>';
+    try {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (clientParameter && clients.length) params.set(clientParameter, clients.join(','));
+      const response = await fetch(`${buyerFilter.dataset.lazyOptionsUrl}?${params.toString()}`, {
+        signal: buyerOptionsController.signal,
+        credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const data = await response.json();
+      const rows = new Map();
+      (data.results || []).forEach((row) => {
+        const value = String(row.value || '');
+        if (value && !rows.has(value)) rows.set(value, row);
+      });
+      // Keep current selections visible even when a new search page does not
+      // contain them, so changing the search text never silently drops a filter.
+      selectedBuyerValues.forEach((value) => {
+        if (!rows.has(value)) rows.set(value, { value, client_value: '' });
+      });
+      options.innerHTML = rows.size
+        ? [...rows.values()].map((row) => {
+          const value = String(row.value);
+          const checked = selectedBuyerValues.has(value) ? ' checked' : '';
+          return `<label data-client-value="${escapeHtml(row.client_value || '')}"><input type="checkbox" value="${escapeHtml(value)}"${checked}><span>${escapeHtml(value)}</span></label>`;
+        }).join('') + (data.has_more ? '<span class="filter-empty">More matches available — refine your search</span>' : '')
+        : '<span class="filter-empty">No matching buyer ID</span>';
+      buyerOptionsLoaded = true;
+      buyerOptionsKey = key;
+      const noResults = buyerFilter.querySelector('.multi-no-results');
+      if (noResults) noResults.hidden = true;
+      updateMultiLabel(buyerFilter);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      options.innerHTML = `<span class="filter-empty">Could not load buyer IDs · ${escapeHtml(error.message)}</span>`;
+    }
+  }
 
   function updateBuyerOptions() {
-    if (!buyerFilter) return;
-    const selectedClients = new Set(selectedValues(clientFilter));
-    const searchTerm = buyerFilter.querySelector('[data-multi-search]')?.value.trim().toLocaleLowerCase() || '';
-    let visible = 0;
-    buyerFilter.querySelectorAll('.multi-options label').forEach((option) => {
-      const clientMatches = !selectedClients.size || selectedClients.has(option.dataset.clientValue || '');
-      const searchMatches = !searchTerm || option.textContent.toLocaleLowerCase().includes(searchTerm);
-      option.hidden = !(clientMatches && searchMatches);
-      const input = option.querySelector('input');
-      if (!clientMatches && input?.checked) input.checked = false;
-      if (!option.hidden) visible += 1;
-    });
-    const noResults = buyerFilter.querySelector('.multi-no-results');
-    if (noResults) noResults.hidden = visible > 0;
-    updateMultiLabel(buyerFilter);
+    if (!buyerFilter?.dataset.lazyOptionsUrl) return;
+    if (buyerFilter.classList.contains('open')) loadBuyerOptions({ force: true });
+    else resetBuyerOptions();
   }
 
   function closeMultiSelects(except = null) {
@@ -131,15 +189,30 @@
       filter.classList.toggle('open', willOpen);
       trigger.setAttribute('aria-expanded', String(willOpen));
       menu.hidden = !willOpen;
+      if (willOpen && filter === buyerFilter) loadBuyerOptions();
     });
     menu.addEventListener('click', (event) => event.stopPropagation());
-    menu.addEventListener('change', () => {
+    menu.addEventListener('change', (event) => {
+      if (filter === buyerFilter && event.target.matches('input[type="checkbox"]')) {
+        if (event.target.checked) selectedBuyerValues.add(event.target.value);
+        else selectedBuyerValues.delete(event.target.value);
+      }
       updateMultiLabel(filter);
-      if (filter === clientFilter) updateBuyerOptions();
+      if (filter === clientFilter) {
+        // Buyer IDs are a child filter. Changing clients invalidates prior
+        // buyer choices exactly as the former embedded-option implementation.
+        selectedBuyerValues.clear();
+        updateBuyerOptions();
+      }
       scheduleLoad();
     });
     const search = menu.querySelector('[data-multi-search]');
     search?.addEventListener('input', () => {
+      if (filter === buyerFilter && buyerFilter.dataset.lazyOptionsUrl) {
+        clearTimeout(buyerOptionsTimer);
+        buyerOptionsTimer = setTimeout(() => loadBuyerOptions({ force: true }), 180);
+        return;
+      }
       const term = search.value.trim().toLocaleLowerCase();
       const options = [...menu.querySelectorAll('.multi-options label')];
       let visible = 0;
@@ -262,14 +335,20 @@
   }
 
   async function loadSurveys({ silent = false } = {}) {
+    // A background refresh must never abort a still-running foreground load.
+    // On a saturated database the former 30-second timer could repeatedly
+    // cancel and restart the request, leaving the table on its loader forever.
+    if (silent && state.loading) return;
     state.controller?.abort();
-    state.controller = new AbortController();
+    const controller = new AbortController();
+    state.controller = controller;
+    state.loading = true;
     if (!silent) {
       els.rows.innerHTML = `<tr><td colspan="${visibleColumnCount}"><div class="table-loader"><i></i><span>Fetching survey inventory…</span></div></td></tr>`;
       els.cards.innerHTML = '<div class="mobile-loading">Fetching surveys…</div>';
     }
     try {
-      const response = await fetch(`/api/v1/surveys/?${queryString()}`, { signal: state.controller.signal });
+      const response = await fetch(`/api/v1/surveys/?${queryString()}`, { signal: controller.signal });
       if (!response.ok) throw new Error(`Request failed (${response.status})`);
       const data = await response.json();
       state.results = data.results || [];
@@ -282,6 +361,8 @@
       els.rows.innerHTML = `<tr><td colspan="${visibleColumnCount}"><div class="error-state"><strong>Could not load surveys</strong><span>${escapeHtml(error.message)}</span><button id="retryLoad">Try again</button></div></td></tr>`;
       els.cards.innerHTML = '';
       $('retryLoad')?.addEventListener('click', loadSurveys);
+    } finally {
+      if (state.controller === controller) state.loading = false;
     }
   }
 
@@ -345,13 +426,17 @@
     if (els.dateField) els.dateField.value = 'modified';
     if (els.from) els.from.value = '';
     if (els.to) els.to.value = '';
+    selectedBuyerValues.clear();
     els.multiSelects.forEach((filter) => {
       filter.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
       const search = filter.querySelector('[data-multi-search]');
-      if (search) { search.value = ''; search.dispatchEvent(new Event('input')); }
+      if (search) {
+        search.value = '';
+        if (filter !== buyerFilter) search.dispatchEvent(new Event('input'));
+      }
       updateMultiLabel(filter);
     });
-    updateBuyerOptions();
+    resetBuyerOptions();
     resetCpiControl();
     closeMultiSelects(); closeCpiFilter(); state.page = 1; loadSurveys();
   });

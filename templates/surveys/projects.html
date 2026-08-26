@@ -59,11 +59,11 @@
   {% if project_filters.buyer %}
   <div class="field multi-field">
     <label id="buyerLabel">Buyer ID</label>
-    <div class="multi-select" data-multi-filter="buyer_id" data-default-label="All buyer IDs">
+    <div class="multi-select" data-multi-filter="buyer_id" data-default-label="All buyer IDs" data-lazy-options-url="{% url 'survey-buyer-options' %}">
       <button class="multi-trigger" type="button" aria-labelledby="buyerLabel" aria-expanded="false"><span>All buyer IDs</span><i>⌄</i></button>
       <div class="multi-menu" hidden>
         <div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search buyer ID…" aria-label="Search buyer IDs" autocomplete="off"></div>
-        <div class="multi-options">{% for buyer in buyer_options %}<label data-client-value="{{ buyer.client_value }}"><input type="checkbox" value="{{ buyer.value }}"><span>{{ buyer.value }}</span></label>{% empty %}<span class="filter-empty">No buyer IDs yet</span>{% endfor %}</div>
+        <div class="multi-options"><span class="filter-empty">Open or search to load buyer IDs</span></div>
         <p class="multi-no-results" hidden>No matching buyer ID</p>
       </div>
     </div>
@@ -167,4 +167,4 @@
   <div class="drawer-content" id="drawerContent"></div>
 </aside>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=25" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/projects.js' %}?v=26" defer></script>{% endblock %}

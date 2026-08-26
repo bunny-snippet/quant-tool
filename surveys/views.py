@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from urllib.parse import quote, urlencode
 
 from django.conf import settings
@@ -341,28 +342,16 @@ def dashboard_page(request):
 @function_permission_required("projects.view")
 def projects_page(request):
     codes = effective_permission_codes(request.user)
-    visible_surveys = annotate_survey_pricing_for_user(
-        scope_surveys_for_user(Survey.objects.all(), request.user),
-        request.user,
-    )
+    visible_surveys = scope_surveys_for_user(Survey.objects.all(), request.user)
     countries = visible_surveys.exclude(country_code="").values_list("country_code", "country").distinct().order_by("country_code")
     is_client_scoped_panel = bool(
-        vendor_scope_user_id(request.user) or organization_client_ids_for_user(request.user) is not None
+        vendor_scope_user_id(request.user)
+        or organization_client_ids_for_user(request.user) is not None
     )
     if is_client_scoped_panel:
         companies = visible_surveys.filter(client__isnull=False).values_list("client__name", flat=True).distinct().order_by("client__name")
     else:
         companies = visible_surveys.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name")
-    buyer_rows = visible_surveys.exclude(buyer_id="").values(
-        "buyer_id", "client__name", "company_name"
-    ).distinct().order_by("buyer_id")
-    buyer_options = [
-        {
-            "value": row["buyer_id"],
-            "client_value": (row["client__name"] if is_client_scoped_panel else row["company_name"]) or "",
-        }
-        for row in buyer_rows
-    ]
     survey_types = list(
         visible_surveys.exclude(survey_type="").values_list("survey_type", flat=True).distinct().order_by("survey_type")
     )
@@ -371,7 +360,13 @@ def projects_page(request):
     can_sort_cpi = project_filters["cpi"]
     cpi_min, cpi_max = 0, 100
     if can_sort_cpi:
-        cpi_bounds = visible_surveys.aggregate(
+        # Keep the exact viewer-visible slider bounds. The pricing expression is
+        # isolated to this one aggregate so it no longer widens every country,
+        # client and survey-type metadata query on the page.
+        cpi_queryset = annotate_survey_pricing_for_user(
+            visible_surveys, request.user
+        )
+        cpi_bounds = cpi_queryset.aggregate(
             minimum=Min("visible_cpi"),
             maximum=Max("visible_cpi"),
         )
@@ -381,7 +376,11 @@ def projects_page(request):
             cpi_max = cpi_min + 1
     return render(request, "surveys/projects.html", {
         "active_page": "projects", "countries": countries, "companies": companies,
-        "buyer_options": buyer_options, "survey_types": survey_types,
+        # Buyer IDs are intentionally loaded only when the filter is opened.
+        # Large inventories can contain tens of thousands of distinct values;
+        # embedding them made the browser parse megabytes before projects.js
+        # could issue the first survey-list request.
+        "buyer_options": [], "survey_types": survey_types,
         "company_filter_label": "Client",
         "company_filter_param": "client_name" if is_client_scoped_panel else "company",
         "company_filter_default": "All clients",
@@ -1107,7 +1106,9 @@ def workspace_home(request):
     raise PermissionDenied("No workspace page is assigned to this account.")
 
 
-def _rfg_qualifying_option_values(question):
+def _qualifying_option_values(question):
+    """Return provider-approved option IDs from normalized targeting data."""
+
     raw = question.raw_data or {}
     if "targeting_choices" not in raw:
         return None
@@ -1217,6 +1218,53 @@ def _innovatemr_postal_targeting_note(values):
     )
 
 
+def _rfg_profile_dimension(question):
+    """Return the mandatory respondent-profile dimension for one RFG row."""
+
+    key = re.sub(r"[^a-z0-9]+", " ", str(question.key or "").lower()).strip()
+    text = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        clean_rfg_display_text(question.text or "").lower(),
+    ).strip()
+    combined = f"{key} {text}"
+    if re.search(r"\b(gender|sex)\b", combined):
+        return "gender"
+    if re.search(r"\b(date of birth|birthday|dob|age)\b", combined):
+        return "age"
+    if re.search(r"\b(postal code|postcode|zip code|zipcode|zip)\b", combined):
+        return "postal"
+    return ""
+
+
+def _rfg_alias_allowed_values(question, dimension):
+    choices = {
+        str(value) for value in (question.raw_data or {}).get("targeting_choices") or []
+    }
+    if dimension == "gender":
+        return {
+            "M" if value == "1" else "F" if value == "2" else value
+            for value in choices
+        }
+    return choices
+
+
+def _rfg_alias_upstream_values(alias, dimension, values):
+    """Translate a displayed mandatory-profile answer to an alias answer ID."""
+
+    if dimension != "gender" or not values:
+        return list(values)
+    selected = str(values[0]).upper()
+    wanted_label = "male" if selected in {"M", "1"} else "female"
+    for option in alias.options or []:
+        if not isinstance(option, dict):
+            continue
+        label = clean_rfg_display_text(option.get("OptionText") or "").lower().strip()
+        if label == wanted_label and option.get("OptionId") not in (None, ""):
+            return [str(option["OptionId"])]
+    return ["1" if wanted_label == "male" else "2"]
+
+
 def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_only=True):
     prepared = []
     provider_code = str(
@@ -1225,7 +1273,63 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
     ).lower()
     is_rfg = provider_code == "rfg"
     is_toluna = provider_code == "toluna"
-    for question in survey.targeting_questions.all():
+    question_rows = list(survey.targeting_questions.all())
+    if provider_code == "cint" and not question_rows:
+        # No-qualification Cint opportunities still collect a minimal reusable
+        # profile. Empty question IDs and upstream values keep these controls
+        # out of the signed provider entry URL.
+        question_rows = [
+            SimpleNamespace(
+                pk="platform_profile_age",
+                question_id="",
+                key="AGE",
+                text="What is your age?",
+                question_type="Numeric",
+                category="Required profile",
+                options=[],
+                raw_data={
+                    "platform_only": True,
+                    "targeting_age_ranges": [{"min": 13, "max": OPEN_ENDED_AGE_MAX}],
+                },
+            ),
+            SimpleNamespace(
+                pk="platform_profile_gender",
+                question_id="",
+                key="GENDER",
+                text="What is your gender?",
+                question_type="Single Punch",
+                category="Required profile",
+                options=[
+                    {"OptionId": "male", "OptionText": "Male"},
+                    {"OptionId": "female", "OptionText": "Female"},
+                ],
+                raw_data={"platform_only": True},
+            ),
+        ]
+
+    profile_aliases = {}
+    aliased_question_ids = set()
+    if is_rfg:
+        required = {}
+        for question in question_rows:
+            dimension = _rfg_profile_dimension(question)
+            is_required = (
+                str(question.category or "").strip().lower() == "required profile"
+                or str(question.key or "").upper()
+                in {"RFG_BIRTHDAY", "RFG_GENDER", "RFG_POSTAL_CODE"}
+            )
+            if dimension and is_required:
+                required[dimension] = question
+        for question in question_rows:
+            dimension = _rfg_profile_dimension(question)
+            primary = required.get(dimension)
+            if primary and primary.pk != question.pk:
+                profile_aliases.setdefault(primary.pk, []).append(question)
+                aliased_question_ids.add(question.pk)
+
+    for question in question_rows:
+        if question.pk in aliased_question_ids:
+            continue
         display_text = clean_rfg_display_text(question.text or question.key)
         lowered_type = question.question_type.lower()
         normalized_key = str(question.key or "").upper()
@@ -1245,15 +1349,35 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
         )
         options = []
         age_ranges = []
-        allowed_values = (
-            _rfg_qualifying_option_values(question)
-            if is_rfg
-            else _toluna_required_option_values(question) if is_toluna else None
-        )
+        allowed_values = _qualifying_option_values(question)
+        if is_toluna:
+            toluna_required_values = _toluna_required_option_values(question)
+            if toluna_required_values is not None:
+                allowed_values = (
+                    set(toluna_required_values)
+                    if allowed_values is None
+                    else set(allowed_values).intersection(toluna_required_values)
+                )
+        dimension = _rfg_profile_dimension(question) if is_rfg else ""
+        alias_allowed_sets = [
+            _rfg_alias_allowed_values(alias, dimension)
+            for alias in profile_aliases.get(question.pk, [])
+            if (alias.raw_data or {}).get("targeting_choices")
+        ]
+        for alias_allowed in alias_allowed_sets:
+            allowed_values = (
+                set(alias_allowed)
+                if allowed_values is None
+                else set(allowed_values).intersection(alias_allowed)
+            )
         postal_targeting_values = (
             _innovatemr_postal_targeting_values(question)
             if provider_code == "innovatemr" and is_postal_question else []
         )
+        if postal_targeting_values:
+            # InnovateMR ZIP OptionIds are sequence numbers; OptionText holds
+            # the canonical provider value which the respondent must submit.
+            allowed_values = set(postal_targeting_values)
         rendered_option_rows = (
             [] if postal_targeting_values else question.options or []
         )
@@ -1267,19 +1391,26 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             )
             if parsed_age_range is not None:
                 label = f"{parsed_age_range[0]}–{parsed_age_range[1]}"
-                age_ranges.append({
-                    "ageStart": parsed_age_range[0],
-                    "ageEnd": parsed_age_range[1],
-                })
             else:
                 label = clean_rfg_display_text(
                     option.get("OptionText") or str(option_id or "Option")
                 )
             value = str(option_id if option_id is not None else label)
-            if qualifying_options_only and allowed_values and value not in allowed_values:
+            option_is_qualified = not allowed_values or value in allowed_values
+            if parsed_age_range is not None and option_is_qualified:
+                age_ranges.append({
+                    "ageStart": parsed_age_range[0],
+                    "ageEnd": parsed_age_range[1],
+                })
+            if qualifying_options_only and not option_is_qualified:
                 continue
             options.append({"value": value, "label": label})
         if is_dob_question or is_age_question:
+            age_constraints_present = bool(
+                question.options
+                or (question.raw_data or {}).get("targeting_age_ranges")
+                or allowed_values
+            )
             for item in (question.raw_data or {}).get("targeting_age_ranges") or []:
                 parsed_age_range = normalize_age_range(item)
                 if parsed_age_range is not None:
@@ -1287,8 +1418,65 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                         "ageStart": parsed_age_range[0],
                         "ageEnd": parsed_age_range[1],
                     })
-            if not age_ranges:
-                age_ranges.append({"ageStart": 1, "ageEnd": OPEN_ENDED_AGE_MAX})
+            has_effective_age_ranges = bool(age_ranges)
+            for alias in profile_aliases.get(question.pk, []):
+                age_constraints_present = age_constraints_present or bool(
+                    alias.options
+                    or (alias.raw_data or {}).get("targeting_age_ranges")
+                    or (alias.raw_data or {}).get("targeting_choices")
+                )
+                alias_age_ranges = []
+                alias_allowed = {
+                    str(value)
+                    for value in (alias.raw_data or {}).get("targeting_choices") or []
+                }
+                for option in alias.options or []:
+                    option_id = (
+                        option.get("OptionId")
+                        if isinstance(option, dict) else option
+                    )
+                    if alias_allowed and str(option_id) not in alias_allowed:
+                        continue
+                    parsed_age_range = normalize_age_range(option)
+                    if parsed_age_range is not None:
+                        alias_age_ranges.append({
+                            "ageStart": parsed_age_range[0],
+                            "ageEnd": parsed_age_range[1],
+                        })
+                for item in (alias.raw_data or {}).get("targeting_age_ranges") or []:
+                    parsed_age_range = normalize_age_range(item)
+                    if parsed_age_range is not None:
+                        alias_age_ranges.append({
+                            "ageStart": parsed_age_range[0],
+                            "ageEnd": parsed_age_range[1],
+                        })
+                if alias_age_ranges and has_effective_age_ranges:
+                    age_ranges = [
+                        {
+                            "ageStart": max(
+                                int(primary["ageStart"]),
+                                int(alias_range["ageStart"]),
+                            ),
+                            "ageEnd": min(
+                                int(primary["ageEnd"]),
+                                int(alias_range["ageEnd"]),
+                            ),
+                        }
+                        for primary in age_ranges
+                        for alias_range in alias_age_ranges
+                        if max(
+                            int(primary["ageStart"]),
+                            int(alias_range["ageStart"]),
+                        ) <= min(
+                            int(primary["ageEnd"]),
+                            int(alias_range["ageEnd"]),
+                        )
+                    ]
+                elif alias_age_ranges:
+                    age_ranges = alias_age_ranges
+                    has_effective_age_ranges = True
+        else:
+            age_constraints_present = False
         if is_dob_question:
             input_kind = "date_mask"
             display_text = "What is your date of birth?"
@@ -1326,9 +1514,18 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                 pass
         for option in options:
             option["selected"] = option["value"] in selected_values
-        age_ranges = list(dict.fromkeys(
+        unique_age_ranges = sorted({
             (int(item["ageStart"]), int(item["ageEnd"])) for item in age_ranges
-        ))
+        })
+        age_ranges = []
+        for minimum, maximum in unique_age_ranges:
+            if age_ranges and minimum <= age_ranges[-1][1] + 1:
+                age_ranges[-1] = (
+                    age_ranges[-1][0],
+                    max(age_ranges[-1][1], maximum),
+                )
+            else:
+                age_ranges.append((minimum, maximum))
         min_value = min((item[0] for item in age_ranges), default=None)
         max_value = max((item[1] for item in age_ranges), default=None)
         age_range_labels = [
@@ -1340,8 +1537,13 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             if is_toluna and input_kind not in {"radio", "checkbox"}
             else ""
         )
+        provider_targeting_note = clean_rfg_display_text(
+            (question.raw_data or {}).get("targeting_note") or ""
+        )
         prepared.append({
             "model": question,
+            "profile_dimension": dimension,
+            "aliases": profile_aliases.get(question.pk, []),
             "display_text": display_text,
             "field_name": field_name,
             "input_kind": input_kind,
@@ -1370,21 +1572,31 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             "is_age_question": is_age_question,
             "is_postal_question": is_postal_question,
             "postal_allowed_values": postal_targeting_values,
+            "allowed_values": sorted(allowed_values or []),
+            # RFG deliberately accepts a visible non-qualifying answer and
+            # records a local early-termination reason. Other providers use
+            # strict prescreener validation because no equivalent outcome
+            # contract exists for a disallowed value.
+            "enforce_allowed_values": not is_rfg,
             "age_ranges": age_ranges,
+            "age_constraints_present": age_constraints_present,
             "qualifying_options_only": bool(
                 qualifying_options_only and allowed_values
             ),
             "targeting_note": (
-                f"Qualifying age: {', '.join(age_range_labels)}"
-                if (is_age_question or is_dob_question) and age_range_labels
-                else required_value_note
-                if required_value_note
-                else _innovatemr_postal_targeting_note(postal_targeting_values)
-                if postal_targeting_values
-                else "Only answers accepted by this survey are shown."
-                if qualifying_options_only and (
-                    allowed_values or (is_toluna and (question.raw_data or {}).get("required_by_provider") and options)
-                ) else ""
+                provider_targeting_note
+                or (
+                    f"Qualifying age: {', '.join(age_range_labels)}"
+                    if (is_age_question or is_dob_question) and age_range_labels
+                    else required_value_note
+                    if required_value_note
+                    else _innovatemr_postal_targeting_note(postal_targeting_values)
+                    if postal_targeting_values
+                    else "Only answers accepted by this survey are shown."
+                    if qualifying_options_only and (
+                        allowed_values or (is_toluna and (question.raw_data or {}).get("required_by_provider") and options)
+                    ) else ""
+                )
             ),
         })
     return prepared
@@ -1428,9 +1640,20 @@ def _collect_prescreener_answers(request, survey):
             continue
 
         valid_options = {item["value"] for item in prepared["options"]}
+        allowed_values = set(prepared.get("allowed_values") or [])
+        enforced_allowed_values = (
+            allowed_values if prepared.get("enforce_allowed_values", True) else set()
+        )
         upstream_values = values.copy()
         if prepared["input_kind"] in {"radio", "checkbox"}:
-            invalid = [value for value in values if value not in valid_options]
+            invalid = [
+                value for value in values
+                if value not in valid_options
+                or (
+                    enforced_allowed_values
+                    and value not in enforced_allowed_values
+                )
+            ]
             if invalid:
                 errors.append(f"Invalid answer for: {prepared['display_text']}")
                 continue
@@ -1446,9 +1669,9 @@ def _collect_prescreener_answers(request, survey):
             upstream_values = [str(numeric_value)]
             if prepared["is_age_question"]:
                 respondent_age = numeric_value
-        elif prepared.get("is_postal_question") and prepared.get("postal_allowed_values"):
+        elif prepared.get("is_postal_question") and enforced_allowed_values:
             accepted = {}
-            for value in prepared["postal_allowed_values"]:
+            for value in enforced_allowed_values:
                 accepted.setdefault(
                     _normalized_postal_targeting_value(value),
                     str(value),
@@ -1466,21 +1689,43 @@ def _collect_prescreener_answers(request, survey):
 
         if respondent_age is not None and (
             not 1 <= respondent_age <= OPEN_ENDED_AGE_MAX
-            or not any(
+            or bool(prepared["age_ranges"]) and not any(
                 minimum <= respondent_age <= maximum
                 for minimum, maximum in prepared["age_ranges"]
             )
+            or prepared.get("age_constraints_present") and not prepared["age_ranges"]
         ):
             errors.append(f"Enter an age within the accepted range for: {prepared['display_text']}")
             continue
+
+        platform_only = bool((question.raw_data or {}).get("platform_only"))
+        if platform_only:
+            upstream_values = []
 
         answers[str(question.pk)] = {
             "question_id": question.question_id,
             "question_key": question.key,
             "question_text": prepared["display_text"],
+            "question_type": question.question_type,
+            "question_category": question.category,
             "values": values,
             "upstream_values": upstream_values,
+            "platform_only": platform_only,
         }
+        for alias in prepared.get("aliases", []):
+            alias_upstream_values = _rfg_alias_upstream_values(
+                alias,
+                prepared.get("profile_dimension", ""),
+                upstream_values,
+            )
+            answers[str(alias.pk)] = {
+                "question_id": alias.question_id,
+                "question_key": alias.key,
+                "question_text": clean_rfg_display_text(alias.text or alias.key),
+                "values": values,
+                "upstream_values": alias_upstream_values,
+                "profile_alias": question.key,
+            }
     return answers, errors
 
 
@@ -2509,7 +2754,7 @@ def survey_status(request):
     ),
 )
 class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Survey.objects.select_related("client", "integration").all().prefetch_related("quotas", "targeting_questions")
+    queryset = Survey.objects.select_related("client", "integration").all()
     lookup_field = "local_id"
     filterset_class = SurveyFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -2521,22 +2766,74 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         queryset = scope_surveys_for_user(super().get_queryset(), self.request.user)
         queryset = scope_surveys_for_api_key(queryset, self.request.auth)
-        queryset = annotate_survey_pricing_for_user(queryset, self.request.user)
-        completed_attempts = (
+
+        # Visible CPI needs SQL expressions only when the database must filter,
+        # order or export by it. Ordinary project-list rows are priced by the
+        # serializer from the already scoped/prefetched allocation context.
+        cpi_ordering = self.request.query_params.get("ordering", "").lstrip("-") == "cpi"
+        cpi_filtering = any(
+            self.request.query_params.get(name) not in {None, ""}
+            for name in ("min_cpi", "max_cpi")
+        )
+        if self.action in {"retrieve", "export"} or cpi_ordering or cpi_filtering:
+            queryset = annotate_survey_pricing_for_user(queryset, self.request.user)
+
+        # Keep the wider detail relationship graph off list/count queries.
+        if self.action in {"retrieve", "quotas", "targeting"}:
+            queryset = queryset.prefetch_related("quotas", "targeting_questions")
+
+        # Export is unpaginated, so retain the correlated completes annotation
+        # there. List pages attach the same totals with one grouped query for
+        # only the 20-100 surveys actually returned.
+        if self.action in {"retrieve", "export"}:
+            completed_attempts = (
+                SurveyAttempt.objects.filter(
+                    survey_id=OuterRef("pk"),
+                    status=SurveyAttempt.Status.COMPLETED,
+                )
+                .values("survey_id")
+                .annotate(total=Count("pk"))
+                .values("total")[:1]
+            )
+            queryset = queryset.annotate(
+                platform_completes=Coalesce(
+                    Subquery(completed_attempts, output_field=IntegerField()),
+                    Value(0),
+                )
+            )
+        return queryset
+
+    @staticmethod
+    def _attach_page_platform_completes(surveys):
+        """Attach exact platform completes with one query for this page only."""
+
+        survey_ids = [survey.pk for survey in surveys]
+        if not survey_ids:
+            return
+        totals = dict(
             SurveyAttempt.objects.filter(
-                survey_id=OuterRef("pk"),
+                survey_id__in=survey_ids,
                 status=SurveyAttempt.Status.COMPLETED,
             )
             .values("survey_id")
             .annotate(total=Count("pk"))
-            .values("total")[:1]
+            .values_list("survey_id", "total")
         )
-        return queryset.annotate(
-            platform_completes=Coalesce(
-                Subquery(completed_attempts, output_field=IntegerField()),
-                Value(0),
-            )
-        )
+        for survey in surveys:
+            survey.platform_completes = totals.get(survey.pk, 0)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            self._attach_page_platform_completes(page)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        rows = list(queryset)
+        self._attach_page_platform_completes(rows)
+        serializer = self.get_serializer(rows, many=True)
+        return Response(serializer.data)
 
     def get_required_function_permission(self):
         if self.action == "export":
@@ -2569,6 +2866,63 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_serializer_class(self):
         return SurveyDetailSerializer if self.action == "retrieve" else SurveyListSerializer
+
+    @extend_schema(
+        tags=["Surveys"],
+        summary="Search buyer IDs visible in Projects",
+        parameters=[
+            OpenApiParameter("search", OpenApiTypes.STR, description="Buyer ID substring."),
+            OpenApiParameter("company", OpenApiTypes.STR, description="Comma-separated client/company names."),
+            OpenApiParameter("client_name", OpenApiTypes.STR, description="Comma-separated allocated client names."),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["get"], url_path="buyer-options")
+    def buyer_options(self, request):
+        """Return a bounded, scoped buyer-ID search instead of embedding all IDs."""
+
+        if not has_function_access(request.user, "projects.filter.buyer"):
+            raise PermissionDenied("Your account cannot use the projects buyer filter.")
+
+        queryset = self.get_queryset().exclude(buyer_id="")
+        client_scoped = bool(
+            vendor_scope_user_id(request.user)
+            or organization_client_ids_for_user(request.user) is not None
+        )
+        client_parameter = "client_name" if client_scoped else "company"
+        selected_clients = [
+            value.strip()
+            for value in str(request.query_params.get(client_parameter) or "").split(",")
+            if value.strip()
+        ]
+        if selected_clients:
+            if not has_function_access(request.user, "projects.filter.client"):
+                raise PermissionDenied("Your account cannot use the projects client filter.")
+            queryset = queryset.filter(**{
+                "client__name__in" if client_scoped else "company_name__in": selected_clients
+            })
+
+        search = str(request.query_params.get("search") or "").strip()[:160]
+        if search:
+            queryset = queryset.filter(buyer_id__icontains=search)
+
+        limit = 200
+        buyer_values = list(
+            queryset.values_list("buyer_id", flat=True)
+            .distinct()
+            .order_by("buyer_id")[: limit + 1]
+        )
+        selected_client = selected_clients[0] if len(selected_clients) == 1 else ""
+        return Response({
+            "results": [
+                {
+                    "value": buyer_id,
+                    "client_value": selected_client,
+                }
+                for buyer_id in buyer_values[:limit]
+            ],
+            "has_more": len(buyer_values) > limit,
+        })
 
     @extend_schema(
         tags=["Surveys"],
@@ -2672,7 +3026,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             self._refresh_if_stale(survey, "quotas")
         except (InnovateMRAPIError, ProviderError) as exc:
-            if survey.quota_synced_at is None:
+            if survey.quota_synced_at is None and not survey.quotas.exists():
                 raise UpstreamUnavailable(str(exc)) from exc
         return Response(SurveyQuotaSerializer(survey.quotas.all(), many=True).data)
 
@@ -2688,7 +3042,10 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             self._refresh_if_stale(survey, "targeting")
         except (InnovateMRAPIError, ProviderError) as exc:
-            if survey.targeting_synced_at is None:
+            if (
+                survey.targeting_synced_at is None
+                and not survey.targeting_questions.exists()
+            ):
                 raise UpstreamUnavailable(str(exc)) from exc
         return Response(TargetingQuestionSerializer(survey.targeting_questions.all(), many=True).data)
 

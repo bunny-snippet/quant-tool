@@ -16,7 +16,7 @@ from vendors.models import Client, ClientIntegration
 from .models import Survey, SurveyAttempt, SurveyQuota, TargetingQuestion
 from .provider_services import sync_client_integration
 from .providers.base import NormalizedSurvey, ProviderConfigurationError
-from .providers.rfg import ResearchForGoodProvider
+from .providers.rfg import RFG_TARGETING_ADAPTER_VERSION, ResearchForGoodProvider
 from .serializers import SurveyQuotaSerializer, TargetingQuestionSerializer
 from .views import SurveyViewSet
 
@@ -324,7 +324,10 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertEqual([item["OptionId"] for item in question.options], [1, 2])
         self.assertEqual(question.options[1]["OptionText"], "Target")
         self.assertEqual(question.raw_data["targeting_choices"], [2])
-        self.assertEqual(question.raw_data["adapter_version"], 2)
+        self.assertEqual(
+            question.raw_data["adapter_version"],
+            RFG_TARGETING_ADAPTER_VERSION,
+        )
         serialized = TargetingQuestionSerializer(question).data
         self.assertFalse(serialized["options"][0]["Qualifies"])
         self.assertTrue(serialized["options"][1]["Qualifies"])

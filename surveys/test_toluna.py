@@ -867,7 +867,7 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(age_field["max_value"], 99)
         self.assertEqual(
             age_field["targeting_note"],
-            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65\u201399",
+            "Qualifying age: 21\u201399",
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}

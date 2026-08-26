@@ -276,17 +276,21 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         return obj.status or "Open"
 
     def get_target_known(self, obj) -> bool:
+        raw = obj.raw_data or {}
+        if "_target_known" in raw:
+            return bool(raw["_target_known"])
         if not self._is_rfg(obj):
             return True
-        raw = obj.raw_data or {}
         return obj.sample_size > 0 or any(
             raw.get(key) is not None for key in ("limit", "quotaTarget", "sampleSize")
         )
 
     def get_completed_known(self, obj) -> bool:
+        raw = obj.raw_data or {}
+        if "_completed_known" in raw:
+            return bool(raw["_completed_known"])
         if not self._is_rfg(obj):
             return True
-        raw = obj.raw_data or {}
         return any(raw.get(key) is not None for key in ("currentCompletes", "completes", "completed"))
 
     def get_limit_type(self, obj) -> str:
@@ -303,6 +307,10 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
     def get_scope_label(self, obj) -> str:
         if self._is_toluna(obj):
             return "Targeted respondent quota" if self._toluna_question_rows(obj) else "Overall survey quota"
+        raw = obj.raw_data or {}
+        quota_type = str(raw.get("SurveyQuotaType") or "").strip().lower()
+        if quota_type:
+            return "Overall survey quota" if quota_type == "total" else f"{quota_type.title()} quota"
         return "Targeted respondent quota" if self._quota_datapoints(obj) else "Overall survey quota"
 
     @staticmethod
@@ -412,6 +420,9 @@ class TargetingQuestionSerializer(serializers.ModelSerializer):
 
     def get_targeting_note(self, obj) -> str:
         raw = obj.raw_data or {}
+        provider_note = clean_rfg_display_text(raw.get("targeting_note") or "")
+        if provider_note:
+            return provider_note
         ranges = raw.get("targeting_age_ranges") or []
         if ranges:
             labels = [

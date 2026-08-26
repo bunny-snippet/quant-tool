@@ -5,8 +5,19 @@ import re
 
 OPEN_ENDED_AGE_MAX = 99
 
-_CLOSED_RANGE = re.compile(r"^(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})$", re.I)
-_OPEN_RANGE = re.compile(r"^(\d{1,3})\s*(?:\+|and\s+older|or\s+older)$", re.I)
+_CLOSED_RANGE = re.compile(
+    r"(?<!\d)(\d{1,3})\s*(?:-|\u2013|\u2014|to|through)\s*(\d{1,3})(?!\d)",
+    re.I,
+)
+_OPEN_RANGE = re.compile(
+    r"(?<!\d)(\d{1,3})\s*(?:years?|yrs?)?\s*(?:\+|plus\b|"
+    r"(?:(?:and|or)\s+)?(?:older|over|above|more|up)\b)",
+    re.I,
+)
+_PREFIX_OPEN_RANGE = re.compile(
+    r"\b(?:over|above|older\s+than)\s*(\d{1,3})\b",
+    re.I,
+)
 _EXACT_AGE = re.compile(r"^\d{1,3}$")
 
 
@@ -14,16 +25,43 @@ def normalize_age_range(value):
     """Return ``(minimum, maximum)`` with every open maximum capped at 99."""
 
     if isinstance(value, dict):
-        label = str(value.get("OptionText") or value.get("label") or "").strip()
+        label = ""
+        for key in (
+            "OptionText", "Translation", "Label", "label", "Range", "range",
+            "DisplayText", "display_text", "Name", "name", "Text", "text",
+            "Description", "description", "Title", "title",
+        ):
+            candidate_value = value.get(key)
+            if isinstance(candidate_value, dict):
+                if (parsed := normalize_age_range(candidate_value)) is not None:
+                    return parsed
+                continue
+            candidate = str(candidate_value or "").strip()
+            if candidate:
+                label = candidate
+                break
         # A range-bearing label is authoritative, but a bare label such as
         # ``65`` must not turn ``ageStart=65, ageEnd=None`` into the exact age
         # 65; missing metadata maxima are open-ended and therefore end at 99.
-        if label and (_CLOSED_RANGE.fullmatch(label) or _OPEN_RANGE.fullmatch(label)):
-            if (parsed := normalize_age_range(label)) is not None:
+        normalized_label = label.replace("&", " and ")
+        if label and (
+            _CLOSED_RANGE.search(normalized_label)
+            or _OPEN_RANGE.search(normalized_label)
+            or _PREFIX_OPEN_RANGE.search(normalized_label)
+        ):
+            if (parsed := normalize_age_range(normalized_label)) is not None:
                 return parsed
-        minimum = value.get("min", value.get("ageStart"))
-        maximum_present = "max" in value or "ageEnd" in value
-        maximum = value.get("max") if "max" in value else value.get("ageEnd")
+
+        def first_value(*keys):
+            for key in keys:
+                if key in value and value.get(key) not in (None, ""):
+                    return value.get(key)
+            return None
+
+        minimum = first_value("min", "ageStart", "start", "from")
+        maximum_keys = ("max", "ageEnd", "end", "to")
+        maximum_present = any(key in value for key in maximum_keys)
+        maximum = first_value(*maximum_keys)
         try:
             minimum = int(minimum)
             maximum = (
@@ -34,10 +72,12 @@ def normalize_age_range(value):
         except (TypeError, ValueError):
             return None
     else:
-        raw = str(value or "").strip()
-        if match := _CLOSED_RANGE.fullmatch(raw):
+        raw = str(value or "").strip().replace("&", " and ")
+        if match := _CLOSED_RANGE.search(raw):
             minimum, maximum = int(match.group(1)), int(match.group(2))
-        elif match := _OPEN_RANGE.fullmatch(raw):
+        elif match := _OPEN_RANGE.search(raw):
+            minimum, maximum = int(match.group(1)), OPEN_ENDED_AGE_MAX
+        elif match := _PREFIX_OPEN_RANGE.search(raw):
             minimum, maximum = int(match.group(1)), OPEN_ENDED_AGE_MAX
         elif _EXACT_AGE.fullmatch(raw):
             minimum = maximum = int(raw)
