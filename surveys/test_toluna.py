@@ -641,6 +641,8 @@ class TolunaProviderTests(TestCase):
             "Only answers accepted by this survey are shown.",
         )
         self.assertEqual(prepared[1001042]["input_kind"], "text")
+        self.assertEqual(prepared[1001042]["allowed_values"], ["100", "90210"])
+        self.assertTrue(prepared[1001042]["postal_prefix_match"])
         self.assertEqual(
             prepared[1001042]["targeting_note"],
             "Required postal codes or prefixes: 100, 90210",
@@ -655,6 +657,31 @@ class TolunaProviderTests(TestCase):
         _, errors = _collect_prescreener_answers(incomplete_request, survey)
         self.assertIn("Please answer: What is your household income?", errors)
         self.assertIn("Please answer: What is your postal code?", errors)
+
+        accepted_request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{age.pk}": "27",
+            f"question_{gender.pk}": "2000247",
+            f"question_{income.pk}": "2002334",
+            # 100 is a provider-returned prefix; retain the respondent's full
+            # ZIP for the Toluna member payload and quota matching.
+            f"question_{postal.pk}": "10023",
+        })
+        collected, errors = _collect_prescreener_answers(accepted_request, survey)
+        self.assertEqual(errors, [])
+        self.assertEqual(collected[str(postal.pk)]["values"], ["10023"])
+        self.assertEqual(collected[str(postal.pk)]["upstream_values"], ["10023"])
+
+        rejected_request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{age.pk}": "27",
+            f"question_{gender.pk}": "2000247",
+            f"question_{income.pk}": "2002334",
+            f"question_{postal.pk}": "77777",
+        })
+        _, errors = _collect_prescreener_answers(rejected_request, survey)
+        self.assertIn(
+            "Enter a ZIP/postal code accepted by this survey for: What is your postal code?",
+            errors,
+        )
 
         attempt = SurveyAttempt.objects.create(
             rid="Req123AbC9",
@@ -705,6 +732,67 @@ class TolunaProviderTests(TestCase):
         }
         self.assertFalse(provider._answer_matches(
             postal_requirement, rejected_postal, postal
+        ))
+
+        # Some Toluna open-ended questions supply only a synthetic AnswerID.
+        # It is provider metadata, not a value the respondent should type.
+        postal.raw_data = {
+            **postal.raw_data,
+            "allowed_answer_values": [],
+        }
+        postal.save(update_fields=["raw_data"])
+        open_postal = next(
+            item for item in _prescreener_questions(survey)
+            if item["model"].question_id == 1001042
+        )
+        self.assertEqual(open_postal["allowed_values"], [])
+        self.assertFalse(open_postal["postal_prefix_match"])
+        unrestricted_request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{age.pk}": "27",
+            f"question_{gender.pk}": "2000247",
+            f"question_{income.pk}": "2002334",
+            f"question_{postal.pk}": "60601",
+        })
+        unrestricted_answers, errors = _collect_prescreener_answers(
+            unrestricted_request, survey
+        )
+        self.assertEqual(errors, [])
+        synthetic_only_requirement = {
+            **postal_requirement,
+            "AnswerValues": [],
+        }
+        self.assertTrue(provider._answer_matches(
+            synthetic_only_requirement,
+            unrestricted_answers[str(postal.pk)],
+            postal,
+        ))
+
+        # Malformed provider values must never normalize to an empty prefix,
+        # because every submitted postal code would otherwise match it.
+        postal.raw_data = {
+            **postal.raw_data,
+            "allowed_answer_values": ["-"],
+        }
+        postal.save(update_fields=["raw_data"])
+        malformed_postal = next(
+            item for item in _prescreener_questions(survey)
+            if item["model"].question_id == 1001042
+        )
+        self.assertEqual(malformed_postal["allowed_values"], [])
+        self.assertTrue(malformed_postal["postal_prefix_match"])
+        _, errors = _collect_prescreener_answers(unrestricted_request, survey)
+        self.assertIn(
+            "Enter a ZIP/postal code accepted by this survey for: What is your postal code?",
+            errors,
+        )
+        malformed_requirement = {
+            **postal_requirement,
+            "AnswerValues": ["-"],
+        }
+        self.assertFalse(provider._answer_matches(
+            malformed_requirement,
+            unrestricted_answers[str(postal.pk)],
+            postal,
         ))
 
     def test_multiple_ranges_for_same_question_are_or_conditions(self):
@@ -1100,6 +1188,17 @@ class TolunaProviderTests(TestCase):
             attempt.upstream_transaction_data["toluna_invite_rejection"]["result_code"],
             15,
         )
+        landing = self.client.get(response.url)
+        self.assertEqual(landing.status_code, 200)
+        self.assertContains(landing, "Survey not available")
+        self.assertNotContains(landing, "Invalid Toluna callback")
+
+        tampered = self.client.get(
+            reverse("survey-status"),
+            {"status": "1", "rid": attempt.rid},
+        )
+        self.assertEqual(tampered.status_code, 403)
+        self.assertContains(tampered, "Invalid Toluna callback", status_code=403)
 
     def test_toluna_validation_error_exposes_only_safe_diagnostic_fields(self):
         provider = TolunaProvider(

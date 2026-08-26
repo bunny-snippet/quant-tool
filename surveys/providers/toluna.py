@@ -846,7 +846,18 @@ class TolunaProvider(SurveyProvider):
         if allowed_values:
             raw_value = str(next(iter(answer.get("values") or []), "")).strip().lower()
             if kind == "postal":
-                return any(raw_value.startswith(candidate.lower()) for candidate in allowed_values)
+                normalized_value = re.sub(r"[\s-]+", "", raw_value)
+                normalized_candidates = [
+                    re.sub(r"[\s-]+", "", candidate.casefold())
+                    for candidate in allowed_values
+                ]
+                normalized_candidates = [
+                    candidate for candidate in normalized_candidates if candidate
+                ]
+                return bool(normalized_value) and any(
+                    normalized_value.startswith(candidate)
+                    for candidate in normalized_candidates
+                )
             return raw_value in {candidate.lower() for candidate in allowed_values}
         if allowed_ids and "text" in question.question_type.lower():
             option_ids = {str(option.get("OptionId")) for option in question.options}

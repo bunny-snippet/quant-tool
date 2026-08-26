@@ -85,6 +85,7 @@ from .serializers import (
     TargetingQuestionSerializer,
     UserHitsResponseSerializer,
 )
+from .status_context import verified_toluna_notification_summary
 from .pagination import SurveyPagination
 from prescreener_vault.services import (
     PrescreenerVaultError,
@@ -1127,6 +1128,18 @@ def _toluna_required_option_values(question):
     raw = question.raw_data or {}
     if not raw.get("required_by_provider"):
         return None
+    if raw.get("toluna_kind") == "postal" or "open" in str(
+        raw.get("reference_answer_type") or ""
+    ).lower():
+        # Open-ended AnswerIDs describe Toluna's answer envelope; they are not
+        # respondent-facing values.  Use concrete AnswerValues when supplied,
+        # otherwise accept any non-empty text and let the provider contract
+        # carry the synthetic ID during member registration.
+        return {
+            str(value).strip()
+            for value in raw.get("allowed_answer_values") or []
+            if str(value).strip()
+        } or None
     allowed = {str(value) for value in raw.get("allowed_answer_ids") or []}
     if allowed:
         return allowed
@@ -1358,6 +1371,26 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                     if allowed_values is None
                     else set(allowed_values).intersection(toluna_required_values)
                 )
+        toluna_postal_prefixes = []
+        toluna_postal_constraints_present = False
+        if is_toluna and is_postal_question:
+            # Toluna open-ended postal questions usually carry a synthetic
+            # AnswerID plus the actual qualifying ZIP/postal prefixes in
+            # AnswerValues.  The synthetic ID is registration metadata, not a
+            # value a respondent can type, so validate against AnswerValues.
+            raw_toluna_postal_values = [
+                str(value).strip()
+                for value in (question.raw_data or {}).get("allowed_answer_values") or []
+                if str(value).strip()
+            ]
+            toluna_postal_constraints_present = bool(raw_toluna_postal_values)
+            toluna_postal_prefixes = [
+                value
+                for value in raw_toluna_postal_values
+                if _normalized_postal_targeting_value(value)
+            ]
+            if toluna_postal_constraints_present:
+                allowed_values = set(toluna_postal_prefixes)
         dimension = _rfg_profile_dimension(question) if is_rfg else ""
         alias_allowed_sets = [
             _rfg_alias_allowed_values(alias, dimension)
@@ -1572,6 +1605,7 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             "is_age_question": is_age_question,
             "is_postal_question": is_postal_question,
             "postal_allowed_values": postal_targeting_values,
+            "postal_prefix_match": toluna_postal_constraints_present,
             "allowed_values": sorted(allowed_values or []),
             # RFG deliberately accepts a visible non-qualifying answer and
             # records a local early-termination reason. Other providers use
@@ -1669,23 +1703,31 @@ def _collect_prescreener_answers(request, survey):
             upstream_values = [str(numeric_value)]
             if prepared["is_age_question"]:
                 respondent_age = numeric_value
-        elif prepared.get("is_postal_question") and enforced_allowed_values:
+        elif prepared.get("is_postal_question") and (
+            enforced_allowed_values or prepared.get("postal_prefix_match")
+        ):
             accepted = {}
             for value in enforced_allowed_values:
-                accepted.setdefault(
-                    _normalized_postal_targeting_value(value),
-                    str(value),
+                normalized_allowed_value = _normalized_postal_targeting_value(value)
+                if normalized_allowed_value:
+                    accepted.setdefault(normalized_allowed_value, str(value))
+            normalized_value = _normalized_postal_targeting_value(values[0])
+            if prepared.get("postal_prefix_match"):
+                postal_is_accepted = any(
+                    normalized_value.startswith(normalized)
+                    for normalized in accepted
                 )
-            canonical_value = accepted.get(
-                _normalized_postal_targeting_value(values[0])
-            )
+                canonical_value = values[0] if postal_is_accepted else None
+            else:
+                canonical_value = accepted.get(normalized_value)
             if canonical_value is None:
                 errors.append(
                     f"Enter a ZIP/postal code accepted by this survey for: {prepared['display_text']}"
                 )
                 continue
-            values = [canonical_value]
-            upstream_values = [canonical_value]
+            if not prepared.get("postal_prefix_match"):
+                values = [canonical_value]
+                upstream_values = [canonical_value]
 
         if respondent_age is not None and (
             not 1 <= respondent_age <= OPEN_ENDED_AGE_MAX
@@ -2592,16 +2634,25 @@ def survey_status(request):
         )
     canonical_rid = attempt.rid if attempt else rid
     ip_address = get_request_ip(request)
+    toluna_notification = verified_toluna_notification_summary(attempt)
     if attempt:
         provider_code = (
             attempt.survey.integration.provider_code
             if attempt.survey.integration_id
             else "innovatemr"
         )
+        trusted_recorded_source = (
+            attempt.status_source in {
+                "local_country_guard",
+                "local_duplicate_ip_guard",
+                "toluna_invite_rejection",
+            }
+            or (provider_code == "toluna" and toluna_notification is not None)
+        )
         canonical_query = (
             set(request.GET.keys()) == {"status", "rid"}
             and request.GET.get("rid", "").strip() == attempt.rid
-            and attempt.status_source in {"local_country_guard", "local_duplicate_ip_guard"}
+            and trusted_recorded_source
             and str(attempt.status) == status_code
         )
         if status_code not in STATUS_PAGES and provider_code != "toluna":
@@ -2640,72 +2691,73 @@ def survey_status(request):
                     "message": "This survey result could not be verified and was not recorded.",
                 }, status=403)
             innovate_callback_verified = True
-        with transaction.atomic():
-            attempt = SurveyAttempt.objects.select_for_update().select_related(
-                "survey__integration"
-            ).get(pk=attempt.pk)
-            now = timezone.now()
-            exit_client_data = get_request_client_data(request)
-            if innovate_callback_verified:
-                exit_client_data["innovatemr_callback"] = {
-                    "status": status_code,
-                    "termReason": str(
-                        request.GET.get("termReason")
-                        or request.GET.get("term_reason")
-                        or request.GET.get("reason")
-                        or ""
-                    ).strip()[:1000],
-                    "closeQuotaId": str(request.GET.get("closeQuotaId") or "").strip()[:160],
-                    "surveyId": str(request.GET.get("surveyId") or "").strip()[:160],
-                    "verifiedAt": now.isoformat(),
-                }
-            if attempt.callback_at is None:
-                attempt.callback_at = now
-                attempt.callback_ip = ip_address
-                attempt.loi_seconds = attempt.calculate_loi_seconds(now)
-                attempt.status = status_code
-                attempt.exit_user_agent = exit_client_data.get("user_agent", "")
-                attempt.exit_browser = exit_client_data.get("browser", "")
-                attempt.exit_device = exit_client_data.get("device", "")
-                attempt.exit_os = exit_client_data.get("os", "")
-                attempt.exit_client_data = exit_client_data
-                attempt.status_source = (
-                    "toluna_callback"
-                    if provider_code == "toluna"
-                    else "innovatemr_signed_redirect"
-                    if innovate_callback_verified
-                    else "browser_callback"
-                )
-                if provider_code == "toluna":
-                    attempt.is_verified = callback_verified
+        if not canonical_query:
+            with transaction.atomic():
+                attempt = SurveyAttempt.objects.select_for_update().select_related(
+                    "survey__integration"
+                ).get(pk=attempt.pk)
+                now = timezone.now()
+                exit_client_data = get_request_client_data(request)
+                if innovate_callback_verified:
+                    exit_client_data["innovatemr_callback"] = {
+                        "status": status_code,
+                        "termReason": str(
+                            request.GET.get("termReason")
+                            or request.GET.get("term_reason")
+                            or request.GET.get("reason")
+                            or ""
+                        ).strip()[:1000],
+                        "closeQuotaId": str(request.GET.get("closeQuotaId") or "").strip()[:160],
+                        "surveyId": str(request.GET.get("surveyId") or "").strip()[:160],
+                        "verifiedAt": now.isoformat(),
+                    }
+                if attempt.callback_at is None:
+                    attempt.callback_at = now
+                    attempt.callback_ip = ip_address
+                    attempt.loi_seconds = attempt.calculate_loi_seconds(now)
+                    attempt.status = status_code
+                    attempt.exit_user_agent = exit_client_data.get("user_agent", "")
+                    attempt.exit_browser = exit_client_data.get("browser", "")
+                    attempt.exit_device = exit_client_data.get("device", "")
+                    attempt.exit_os = exit_client_data.get("os", "")
+                    attempt.exit_client_data = exit_client_data
+                    attempt.status_source = (
+                        "toluna_callback"
+                        if provider_code == "toluna"
+                        else "innovatemr_signed_redirect"
+                        if innovate_callback_verified
+                        else "browser_callback"
+                    )
+                    if provider_code == "toluna":
+                        attempt.is_verified = callback_verified
+                        attempt.upstream_transaction_data = {
+                            **(attempt.upstream_transaction_data or {}),
+                            "toluna_callback": dict(request.GET.items()),
+                            "toluna_outcome": {
+                                "code": status_code,
+                                "status": page["status_label"],
+                                "title": page["title"],
+                            },
+                        }
+                if innovate_callback_verified:
+                    callback_data = dict(request.GET.items())
+                    for callback_key in list(callback_data):
+                        if callback_key.casefold() in {"hash", "hashdata"}:
+                            callback_data[callback_key] = "[redacted]"
                     attempt.upstream_transaction_data = {
                         **(attempt.upstream_transaction_data or {}),
-                        "toluna_callback": dict(request.GET.items()),
-                        "toluna_outcome": {
-                            "code": status_code,
-                            "status": page["status_label"],
-                            "title": page["title"],
-                        },
+                        "innovatemr_browser_return": callback_data,
                     }
-            if innovate_callback_verified:
-                callback_data = dict(request.GET.items())
-                for callback_key in list(callback_data):
-                    if callback_key.casefold() in {"hash", "hashdata"}:
-                        callback_data[callback_key] = "[redacted]"
-                attempt.upstream_transaction_data = {
-                    **(attempt.upstream_transaction_data or {}),
-                    "innovatemr_browser_return": callback_data,
-                }
-                attempt.exit_client_data = exit_client_data
-                attempt.is_verified = True
-            attempt.last_callback_at = now
-            attempt.callback_count += 1
-            attempt.save(update_fields=[
-                "callback_at", "callback_ip", "loi_seconds", "status", "exit_user_agent", "exit_browser",
-                "exit_device", "exit_os", "exit_client_data", "status_source", "last_callback_at",
-                "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
-            ])
-            finalize_attempt_capacity(attempt)
+                    attempt.exit_client_data = exit_client_data
+                    attempt.is_verified = True
+                attempt.last_callback_at = now
+                attempt.callback_count += 1
+                attempt.save(update_fields=[
+                    "callback_at", "callback_ip", "loi_seconds", "status", "exit_user_agent", "exit_browser",
+                    "exit_device", "exit_os", "exit_client_data", "status_source", "last_callback_at",
+                    "callback_count", "is_verified", "upstream_transaction_data", "updated_at"
+                ])
+                finalize_attempt_capacity(attempt)
         if not canonical_query:
             supplier_callback_url = _external_supplier_result_url(attempt, status_code)
             if supplier_callback_url:
@@ -2727,6 +2779,7 @@ def survey_status(request):
         "ip_address": ip_address,
         "loi_seconds": attempt.loi_seconds if attempt else None,
         "attempt_found": bool(attempt),
+        "toluna_notification": toluna_notification,
     }, status=200 if attempt else 404)
 
 
