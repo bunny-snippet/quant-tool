@@ -24,6 +24,17 @@ from .report_pricing import viewer_attempt_cpi
 from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
 
+def _display_source_identifier(survey):
+    """Return the identifier shown in UI without changing provider routing keys."""
+    if (
+        survey.integration_id
+        and survey.integration.provider_code == "toluna"
+        and ":" in str(survey.source_key or "")
+    ):
+        return str(survey.source_key).split(":", 1)[0]
+    return survey.source_identifier
+
+
 class SurveyQuotaSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField(help_text="Readable quota title without exposing provider-internal quota IDs.")
     status = serializers.SerializerMethodField(help_text="Current quota state; RFG zero-remaining quotas are reported as Full.")
@@ -494,15 +505,9 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
     def get_display_source_id(self, obj):
-        if (
-            obj.integration_id
-            and obj.integration.provider_code == "toluna"
-            and ":" in str(obj.source_key or "")
-        ):
-            # Toluna's stable provider key remains SurveyID:WaveID in source_id
-            # and survey_id. Only this presentation value hides the WaveID.
-            return str(obj.source_key).split(":", 1)[0]
-        return obj.source_identifier
+        # Toluna's stable provider key remains SurveyID:WaveID in source_id and
+        # survey_id. Only this presentation value hides the WaveID.
+        return _display_source_identifier(obj)
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
     def get_survey_id(self, obj):
@@ -823,7 +828,7 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
         return bool(obj.provider_profile_uid)
 
     def get_survey_source_id(self, obj) -> str:
-        return str(obj.survey.source_identifier)
+        return str(_display_source_identifier(obj.survey))
 
     def get_client_name(self, obj) -> str:
         client = obj.client or obj.survey.client

@@ -12,6 +12,20 @@ APP_LABEL="${APP_LABEL:-Quest Tool}"
 
 cd "$APP_DIR"
 test -f "$ENV_FILE" || { echo "Missing $ENV_FILE" >&2; exit 1; }
+
+# python-dotenv accepts duplicate assignments and silently uses the last one.
+# A duplicate proxy-trust switch can therefore make every proxied respondent
+# appear to come from localhost and leave Traffic Report entry IPs empty. Fail
+# without printing either configured value. Other environment keys retain
+# their existing deployment semantics.
+trust_proxy_assignment_count="$(
+  grep -Ec '^[[:space:]]*(export[[:space:]]+)?TRUST_X_FORWARDED_FOR[[:space:]]*=' "$ENV_FILE" || true
+)"
+if (( trust_proxy_assignment_count > 1 )); then
+  echo "Duplicate TRUST_X_FORWARDED_FOR assignments in $ENV_FILE; keep exactly one." >&2
+  exit 1
+fi
+
 grep -Eqi '^DB_ENGINE=mysql$' "$ENV_FILE" || { echo "DB_ENGINE must be mysql" >&2; exit 1; }
 grep -Eq '^DB_PASSWORD=.+$' "$ENV_FILE" || { echo "DB_PASSWORD is empty" >&2; exit 1; }
 grep -Eq '^DJANGO_DEBUG=false$' "$ENV_FILE" || { echo "DJANGO_DEBUG must be false" >&2; exit 1; }

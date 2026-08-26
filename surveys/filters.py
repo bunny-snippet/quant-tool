@@ -49,7 +49,10 @@ class SurveyAttemptFilter(django_filters.FilterSet):
     branch = CharInFilter(method="filter_branch", help_text="Comma-separated organization Branch IDs or legacy labels")
     sub_branch = CharInFilter(method="filter_sub_branch", help_text="Comma-separated organization Sub-branch IDs or legacy labels")
     shift = CharInFilter(method="filter_shift", help_text="Comma-separated organization Shift IDs or legacy labels")
-    survey_id = django_filters.CharFilter(field_name="survey__source_key", lookup_expr="iexact")
+    survey_id = django_filters.CharFilter(
+        method="filter_survey_id",
+        help_text="Exact provider survey key, Toluna SurveyID, or Toluna WaveID.",
+    )
     internal_id = django_filters.CharFilter(field_name="survey__local_id", lookup_expr="iexact")
     initiated_from = django_filters.IsoDateTimeFilter(field_name="initiated_at", lookup_expr="gte")
     initiated_to = django_filters.IsoDateTimeFilter(field_name="initiated_at", lookup_expr="lte")
@@ -57,6 +60,20 @@ class SurveyAttemptFilter(django_filters.FilterSet):
     callback_to = django_filters.IsoDateTimeFilter(field_name="callback_at", lookup_expr="lte")
     entry_ip = django_filters.CharFilter(field_name="initiation_ip", lookup_expr="iexact")
     exit_ip = django_filters.CharFilter(field_name="callback_ip", lookup_expr="iexact")
+
+    def filter_survey_id(self, queryset, _name, value):
+        identifier = str(value or "").strip()
+        if not identifier:
+            return queryset
+        return queryset.filter(
+            Q(survey__source_key__iexact=identifier)
+            | Q(survey__source_id__iexact=identifier)
+            | Q(survey__buyer_id__iexact=identifier)
+            | Q(
+                survey__integration__provider_code="toluna",
+                survey__source_key__istartswith=f"{identifier}:",
+            )
+        )
 
     @staticmethod
     def _split_hierarchy_values(value):

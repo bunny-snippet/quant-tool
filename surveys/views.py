@@ -2758,7 +2758,11 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = "local_id"
     filterset_class = SurveyFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["local_id", "=source_key", "=source_id", "name", "company_name", "buyer_id", "survey_type", "country", "country_code", "job_category"]
+    # Some providers (notably Toluna) use a composite stable key such as
+    # ``SurveyID:WaveID`` while the project table intentionally displays the
+    # SurveyID portion. Prefix search keeps that displayed identifier
+    # searchable without discarding the WaveID needed for row uniqueness.
+    search_fields = ["local_id", "^source_key", "=source_id", "name", "company_name", "buyer_id", "survey_type", "country", "country_code", "job_category"]
     ordering_fields = ["source_modified_at", "source_created_at", "cpi", "sample_size", "completes", "created_at"]
     ordering = ["-source_modified_at", "-created_at"]
     permission_classes = [HasFunctionPermission]
@@ -3126,7 +3130,7 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = SurveyAttemptFilter
     search_fields = [
-        "rid", "prescreener_uid", "user_id", "survey__local_id", "=survey__source_key", "=survey__source_id", "survey__name", "survey__company_name",
+        "rid", "prescreener_uid", "user_id", "survey__local_id", "^survey__source_key", "=survey__source_id", "survey__buyer_id", "survey__name", "survey__company_name",
         "platform_user__username", "platform_user__first_name", "platform_user__last_name", "platform_user__email",
         "initiation_ip", "callback_ip", "entry_browser", "entry_device", "entry_os",
     ]
@@ -3261,7 +3265,11 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             OpenApiParameter("company", OpenApiTypes.STR, description="Comma-separated survey company names."),
             OpenApiParameter("client", OpenApiTypes.STR, description="Comma-separated internal client IDs."),
             OpenApiParameter("buyer_id", OpenApiTypes.STR, description="Comma-separated buyer/sub-client IDs."),
-            OpenApiParameter("survey_id", OpenApiTypes.INT, description="Exact upstream survey ID."),
+            OpenApiParameter(
+                "survey_id",
+                OpenApiTypes.STR,
+                description="Exact provider key; Toluna also accepts its SurveyID or WaveID.",
+            ),
             OpenApiParameter("internal_id", OpenApiTypes.STR, description="Exact internal 14-digit project ID."),
             OpenApiParameter("entry_ip", OpenApiTypes.STR, description="Exact entry IP address."),
             OpenApiParameter("exit_ip", OpenApiTypes.STR, description="Exact exit IP address."),
