@@ -2754,7 +2754,7 @@ def survey_status(request):
     ),
 )
 class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Survey.objects.select_related("client", "integration").all()
+    queryset = Survey.objects.all()
     lookup_field = "local_id"
     filterset_class = SurveyFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -2778,7 +2778,14 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action in {"retrieve", "export"} or cpi_ordering or cpi_filtering:
             queryset = annotate_survey_pricing_for_user(queryset, self.request.user)
 
-        # Keep the wider detail relationship graph off list/count queries.
+        # MySQL is markedly faster at resolving the two nullable foreign keys
+        # for a page in separate bounded queries than through one wide LEFT
+        # JOIN. Detail/export paths still use joins because they resolve one
+        # project or intentionally stream the full export queryset.
+        if self.action == "list":
+            queryset = queryset.prefetch_related("client", "integration")
+        elif self.action in {"retrieve", "quotas", "targeting", "export"}:
+            queryset = queryset.select_related("client", "integration")
         if self.action in {"retrieve", "quotas", "targeting"}:
             queryset = queryset.prefetch_related("quotas", "targeting_questions")
 

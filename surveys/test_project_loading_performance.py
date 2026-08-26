@@ -100,6 +100,11 @@ class ProjectLoadingPerformanceTests(TestCase):
         sql = [query["sql"].lower() for query in captured.captured_queries]
         self.assertFalse(any("surveys_surveyquota" in query for query in sql))
         self.assertFalse(any("surveys_targetingquestion" in query for query in sql))
+        self.assertFalse(any(
+            "left outer join" in query and "vendors_client" in query
+            for query in sql
+            if "surveys_survey" in query
+        ))
         self.assertEqual(
             sum("surveys_surveyattempt" in query for query in sql),
             1,
