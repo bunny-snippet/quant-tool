@@ -1,4 +1,3 @@
-import re
 from urllib.parse import urlencode
 from django.conf import settings
 from django.urls import reverse
@@ -11,6 +10,7 @@ from vendors.models import VendorAPIKey
 from vendors.security import generate_delivery_token
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
+from .age_rules import normalize_age_range
 from .models import (
     Survey,
     SurveyAttempt,
@@ -20,7 +20,6 @@ from .models import (
     TolunaReferenceQuestion,
 )
 from .outcomes import provider_outcome
-from .providers.toluna import TOLUNA_MAX_RESPONDENT_AGE
 from .report_pricing import viewer_attempt_cpi
 from .rfg_text import clean_rfg_display_text, clean_rfg_options
 
@@ -87,17 +86,8 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
     def _toluna_display_value(question_id: str, value) -> str:
         label = str(value or "").strip()
         if question_id == "1001538":
-            if label.lower() in {"65 and older", "65 or older", "65+"}:
-                return "65+"
-            match = re.fullmatch(
-                r"(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})",
-                label,
-                re.I,
-            )
-            if match:
-                minimum, maximum = int(match.group(1)), int(match.group(2))
-                if minimum <= maximum:
-                    return f"{minimum}\u2013{min(maximum, TOLUNA_MAX_RESPONDENT_AGE)}"
+            if parsed := normalize_age_range(label):
+                return f"{parsed[0]}\u2013{parsed[1]}"
         return label
 
     def _toluna_reference_map(self, obj) -> dict:
@@ -316,7 +306,9 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         return "Targeted respondent quota" if self._quota_datapoints(obj) else "Overall survey quota"
 
     @staticmethod
-    def _range_label(value) -> str:
+    def _range_label(value, *, age=False) -> str:
+        if age and (parsed := normalize_age_range(value)):
+            return f"{parsed[0]}\u2013{parsed[1]}"
         minimum, maximum = value.get("min"), value.get("max")
         if minimum is None and maximum is None:
             return ""
@@ -354,7 +346,7 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
                 if not isinstance(value, dict):
                     values.append(str(value))
                     continue
-                range_label = self._range_label(value)
+                range_label = self._range_label(value, age=name.strip().lower() == "age")
                 if range_label:
                     values.append(range_label)
                     continue
@@ -386,6 +378,27 @@ class TargetingQuestionSerializer(serializers.ModelSerializer):
 
     def get_options(self, obj) -> list:
         options = clean_rfg_options(obj.options)
+        normalized_key = str(obj.key or "").strip().upper()
+        normalized_text = str(obj.text or "").strip().lower()
+        if normalized_key == "AGE" or "your age" in normalized_text:
+            normalized_options = []
+            for option in options:
+                normalized_option = (
+                    option
+                    if isinstance(option, dict)
+                    else {"OptionId": option, "OptionText": str(option)}
+                )
+                parsed = normalize_age_range(normalized_option)
+                normalized_options.append(
+                    {
+                        **normalized_option,
+                        "ageStart": parsed[0],
+                        "ageEnd": parsed[1],
+                        "OptionText": f"{parsed[0]}\u2013{parsed[1]}",
+                    }
+                    if parsed else normalized_option
+                )
+            options = normalized_options
         raw = obj.raw_data or {}
         if "targeting_choices" not in raw:
             return options
@@ -401,7 +414,10 @@ class TargetingQuestionSerializer(serializers.ModelSerializer):
         raw = obj.raw_data or {}
         ranges = raw.get("targeting_age_ranges") or []
         if ranges:
-            labels = [SurveyQuotaSerializer._range_label(item) for item in ranges if isinstance(item, dict)]
+            labels = [
+                SurveyQuotaSerializer._range_label(item, age=True)
+                for item in ranges if isinstance(item, dict)
+            ]
             labels = [label for label in labels if label]
             if labels:
                 return f"Qualifying age: {', '.join(labels)}"

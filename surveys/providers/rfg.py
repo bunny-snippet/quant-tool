@@ -11,6 +11,7 @@ import requests
 from django.db import transaction
 from django.utils import timezone
 
+from surveys.age_rules import OPEN_ENDED_AGE_MAX, age_range_dict
 from surveys.models import Survey, SurveyQuota, TargetingQuestion
 from surveys.rfg_text import clean_rfg_display_text
 
@@ -21,6 +22,8 @@ from .base import (
     SurveyProvider,
     environment_value,
 )
+
+RFG_TARGETING_ADAPTER_VERSION = 4
 
 
 class ResearchForGoodProvider(SurveyProvider):
@@ -207,9 +210,10 @@ class ResearchForGoodProvider(SurveyProvider):
                 continue
             if target.get("name") == "Age":
                 age_ranges = [
-                    {"min": item.get("min"), "max": item.get("max")}
+                    normalized
                     for item in target.get("values", [])
-                    if isinstance(item, dict) and item.get("min") is not None and item.get("max") is not None
+                    if isinstance(item, dict)
+                    and (normalized := age_range_dict(item)) is not None
                 ]
             elif target.get("name") == "Gender":
                 gender_choices = [
@@ -218,7 +222,7 @@ class ResearchForGoodProvider(SurveyProvider):
                     if isinstance(item, dict) and str(item.get("choice", "")).isdigit()
                 ]
         questions = [
-            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your date of birth?", question_type="date", category="Required profile", options=[], raw_data={"adapter_version": 3, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges, "respondent_input": "date_mask"}),
+            TargetingQuestion(survey=survey, question_id=self._question_id("rfg-birthday"), key="RFG_BIRTHDAY", text="What is your date of birth?", question_type="date", category="Required profile", options=[], raw_data={"adapter_version": RFG_TARGETING_ADAPTER_VERSION, "mandatory_link_parameter": "birthday", "targeting_age_ranges": age_ranges, "respondent_input": "date_mask"}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-gender"), key="RFG_GENDER", text="What is your gender?", question_type="single", category="Required profile", options=[{"OptionId": "M", "OptionText": "Male"}, {"OptionId": "F", "OptionText": "Female"}], raw_data={"adapter_version": 2, "mandatory_link_parameter": "gender", "targeting_choices": gender_choices}),
             TargetingQuestion(survey=survey, question_id=self._question_id("rfg-postal"), key="RFG_POSTAL_CODE", text="What is your postal code?", question_type="text", category="Required profile", options=[], raw_data={"adapter_version": 2, "mandatory_link_parameter": "postalCode", "country": survey.country_code}),
         ]
@@ -325,7 +329,7 @@ class ResearchForGoodProvider(SurveyProvider):
         try:
             birthday = self._birthday_from_age_or_date(age_or_birthday)
         except (TypeError, ValueError) as exc:
-            raise ProviderError("Enter a valid age between 1 and 120.") from exc
+            raise ProviderError(f"Enter a valid age between 1 and {OPEN_ENDED_AGE_MAX}.") from exc
         if str(gender).upper() not in {"M", "F", "1", "2"}:
             raise ProviderError("Select a valid gender for Research For Good.")
         if not postal:
@@ -362,10 +366,12 @@ class ResearchForGoodProvider(SurveyProvider):
         """
         raw_value = str(value or "").strip()
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_value):
-            datetime.strptime(raw_value, "%Y-%m-%d")
+            age = ResearchForGoodProvider._age_on(raw_value, today=today)
+            if not 1 <= age <= OPEN_ENDED_AGE_MAX:
+                raise ValueError("age outside supported range")
             return raw_value
         age = int(raw_value)
-        if not 1 <= age <= 120:
+        if not 1 <= age <= OPEN_ENDED_AGE_MAX:
             raise ValueError("age outside supported range")
         today = today or date.today()
         try:
@@ -379,10 +385,13 @@ class ResearchForGoodProvider(SurveyProvider):
         raw_value = str(value or "").strip()
         if raw_value.isdigit():
             age = int(raw_value)
-            if not 1 <= age <= 120:
+            if not 1 <= age <= OPEN_ENDED_AGE_MAX:
                 raise ValueError("age outside supported range")
             return age
-        return cls._age_on(raw_value, today=today)
+        age = cls._age_on(raw_value, today=today)
+        if not 1 <= age <= OPEN_ENDED_AGE_MAX:
+            raise ValueError("age outside supported range")
+        return age
 
     @staticmethod
     def _postal_is_valid(country, postal):
@@ -419,8 +428,14 @@ class ResearchForGoodProvider(SurveyProvider):
             raw = question.raw_data or {}
             selected = {str(value) for value in values.get(question.key, [])}
             if question.key == "RFG_BIRTHDAY":
-                ranges = raw.get("targeting_age_ranges") or []
-                if strict_targeting and ranges and not any(int(item["min"]) <= age <= int(item["max"]) for item in ranges):
+                ranges = [
+                    normalized
+                    for item in raw.get("targeting_age_ranges") or []
+                    if (normalized := age_range_dict(item)) is not None
+                ]
+                if strict_targeting and ranges and not any(
+                    item["min"] <= age <= item["max"] for item in ranges
+                ):
                     return False, "The respondent's age does not match this survey's targeting requirements."
             elif question.key == "RFG_GENDER":
                 allowed = {str(value) for value in raw.get("targeting_choices") or []}

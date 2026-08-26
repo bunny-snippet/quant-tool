@@ -94,8 +94,10 @@ from prescreener_vault.services import (
 )
 from prescreener_vault.models import PrescreenerSubmission
 from prescreener_vault.reuse import effective_profile_uid, maybe_assign_reusable_profile
+from .age_rules import OPEN_ENDED_AGE_MAX, normalize_age_range
 from .providers import ProviderError, TolunaInviteRejected, get_provider
-from .providers.toluna import TOLUNA_ADAPTER_VERSION, TOLUNA_MAX_RESPONDENT_AGE
+from .providers.rfg import RFG_TARGETING_ADAPTER_VERSION
+from .providers.toluna import TOLUNA_ADAPTER_VERSION
 from .geolocation import (
     geolocation_client_data,
     is_wrong_target_country,
@@ -1120,11 +1122,109 @@ def _rfg_qualifying_option_values(question):
     return allowed
 
 
+def _toluna_required_option_values(question):
+    raw = question.raw_data or {}
+    if not raw.get("required_by_provider"):
+        return None
+    allowed = {str(value) for value in raw.get("allowed_answer_ids") or []}
+    if allowed:
+        return allowed
+    # The Toluna adapter has already reduced value-backed choice questions to
+    # the provider-required options. Preserve that closed list in the UI and
+    # in POST validation even when the quota supplied values instead of IDs.
+    return {
+        str(option.get("OptionId"))
+        for option in question.options or []
+        if isinstance(option, dict) and option.get("OptionId") is not None
+    } or None
+
+
+def _toluna_required_value_note(question, *, is_postal=False):
+    raw = question.raw_data or {}
+    if not raw.get("required_by_provider"):
+        return ""
+    values = []
+    for value in raw.get("allowed_answer_values") or []:
+        normalized = str(value).strip()
+        if normalized and normalized not in values:
+            values.append(normalized)
+    if not values:
+        return ""
+    visible_limit = 20
+    shown = ", ".join(values[:visible_limit])
+    remainder = len(values) - visible_limit
+    if remainder > 0:
+        shown = f"{shown} (+{remainder} more)"
+    if is_postal:
+        label = "Required postal code or prefix" if len(values) == 1 else "Required postal codes or prefixes"
+    else:
+        label = "Required value" if len(values) == 1 else "Required values"
+    return f"{label}: {shown}"
+
+
+def _is_postal_targeting_question(key, text):
+    """Recognize ZIP/postal/PIN qualifications across provider naming variants."""
+
+    normalized = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        f"{key or ''} {text or ''}".lower(),
+    ).strip()
+    return bool(re.search(
+        r"\b(?:zip\s*codes?|postal\s*codes?|post\s*codes?|pin\s*codes?|pincodes?)\b",
+        normalized,
+    ))
+
+
+def _innovatemr_postal_targeting_values(question):
+    """Return InnovateMR OptionText postal values, never sequence OptionIds."""
+
+    values = []
+    seen = set()
+    for option in question.options or []:
+        if isinstance(option, dict):
+            value = option.get("OptionText")
+            if value in (None, ""):
+                value = (
+                    option.get("OptionCode")
+                    or option.get("OptionValue")
+                    or option.get("Value")
+                )
+        else:
+            value = option
+        value = clean_rfg_display_text(str(value or "")).strip()
+        normalized = value.casefold()
+        if value and normalized not in seen:
+            seen.add(normalized)
+            values.append(value)
+    return values
+
+
+def _normalized_postal_targeting_value(value):
+    return re.sub(r"[\s-]+", "", str(value or "")).casefold()
+
+
+def _innovatemr_postal_targeting_note(values):
+    if not values:
+        return ""
+    visible_limit = 12
+    shown = ", ".join(values[:visible_limit])
+    if len(values) <= visible_limit:
+        return f"Required ZIP/postal codes: {shown}"
+    return (
+        f"Required ZIP/postal codes: {len(values):,} provider-approved codes "
+        f"(examples: {shown})"
+    )
+
+
 def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_only=True):
     prepared = []
-    is_rfg = bool(
-        survey.integration_id and survey.integration.provider_code == "rfg"
-    )
+    provider_code = str(
+        survey.integration.provider_code
+        if survey.integration_id else "innovatemr"
+    ).lower()
+    is_rfg = provider_code == "rfg"
+    is_toluna = provider_code == "toluna"
     for question in survey.targeting_questions.all():
         display_text = clean_rfg_display_text(question.text or question.key)
         lowered_type = question.question_type.lower()
@@ -1139,26 +1239,38 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             normalized_key == "AGE"
             or ("your age" in normalized_text and not is_dob_question)
         )
-        is_postal_question = (
-            normalized_key in {"ZIP", "ZIP_CODE", "ZIPCODES", "POSTAL_CODE"}
-            or "zipcode" in normalized_text
-            or "zip code" in normalized_text
-            or "postal code" in normalized_text
+        is_postal_question = _is_postal_targeting_question(
+            normalized_key,
+            normalized_text,
         )
         options = []
         age_ranges = []
-        allowed_values = _rfg_qualifying_option_values(question) if is_rfg else None
-        for option in question.options:
+        allowed_values = (
+            _rfg_qualifying_option_values(question)
+            if is_rfg
+            else _toluna_required_option_values(question) if is_toluna else None
+        )
+        postal_targeting_values = (
+            _innovatemr_postal_targeting_values(question)
+            if provider_code == "innovatemr" and is_postal_question else []
+        )
+        rendered_option_rows = (
+            [] if postal_targeting_values else question.options or []
+        )
+        for option in rendered_option_rows:
             if not isinstance(option, dict):
                 option = {"OptionId": option, "OptionText": str(option)}
             option_id = option.get("OptionId")
-            if option.get("ageStart") is not None:
-                label = (
-                    f"{option.get('ageStart')}+"
-                    if option.get("ageEnd") is None
-                    else f"{option.get('ageStart')}–{option.get('ageEnd')}"
-                )
-                age_ranges.append(option)
+            parsed_age_range = (
+                normalize_age_range(option)
+                if is_age_question or is_dob_question else None
+            )
+            if parsed_age_range is not None:
+                label = f"{parsed_age_range[0]}–{parsed_age_range[1]}"
+                age_ranges.append({
+                    "ageStart": parsed_age_range[0],
+                    "ageEnd": parsed_age_range[1],
+                })
             else:
                 label = clean_rfg_display_text(
                     option.get("OptionText") or str(option_id or "Option")
@@ -1169,16 +1281,14 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             options.append({"value": value, "label": label})
         if is_dob_question or is_age_question:
             for item in (question.raw_data or {}).get("targeting_age_ranges") or []:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    maximum = item.get("max")
+                parsed_age_range = normalize_age_range(item)
+                if parsed_age_range is not None:
                     age_ranges.append({
-                        "ageStart": int(item["min"]),
-                        "ageEnd": None if maximum is None else int(maximum),
+                        "ageStart": parsed_age_range[0],
+                        "ageEnd": parsed_age_range[1],
                     })
-                except (KeyError, TypeError, ValueError):
-                    continue
+            if not age_ranges:
+                age_ranges.append({"ageStart": 1, "ageEnd": OPEN_ENDED_AGE_MAX})
         if is_dob_question:
             input_kind = "date_mask"
             display_text = "What is your date of birth?"
@@ -1186,6 +1296,10 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             input_kind = "number"
             display_text = "What is your age?"
         elif is_postal_question:
+            input_kind = "text"
+        elif is_toluna and "open" in str(
+            (question.raw_data or {}).get("reference_answer_type") or ""
+        ).lower():
             input_kind = "text"
         elif "date" in lowered_type:
             input_kind = "date_mask"
@@ -1212,20 +1326,20 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                 pass
         for option in options:
             option["selected"] = option["value"] in selected_values
-        min_value = min((int(item["ageStart"]) for item in age_ranges), default=None)
-        max_value = (
-            TOLUNA_MAX_RESPONDENT_AGE
-            if any(item.get("ageEnd") is None for item in age_ranges)
-            else max((int(item["ageEnd"]) for item in age_ranges), default=None)
-        )
+        age_ranges = list(dict.fromkeys(
+            (int(item["ageStart"]), int(item["ageEnd"])) for item in age_ranges
+        ))
+        min_value = min((item[0] for item in age_ranges), default=None)
+        max_value = max((item[1] for item in age_ranges), default=None)
         age_range_labels = [
-            (
-                f"{int(item['ageStart'])}+"
-                if item.get("ageEnd") is None
-                else f"{int(item['ageStart'])}\u2013{int(item['ageEnd'])}"
-            )
-            for item in age_ranges
+            f"{minimum}\u2013{maximum}"
+            for minimum, maximum in age_ranges
         ]
+        required_value_note = (
+            _toluna_required_value_note(question, is_postal=is_postal_question)
+            if is_toluna and input_kind not in {"radio", "checkbox"}
+            else ""
+        )
         prepared.append({
             "model": question,
             "display_text": display_text,
@@ -1234,6 +1348,7 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             "type_label": (
                 "Date of birth" if is_dob_question
                 else "Age" if is_age_question
+                else "Postal code" if is_postal_question
                 else "Date" if input_kind == "date_mask"
                 else (question.question_type or "Question")
             ),
@@ -1241,17 +1356,35 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             "current_value": current_value,
             "min_value": min_value,
             "max_value": max_value,
-            "input_label": "Age" if is_age_question else "Your answer",
-            "placeholder": "Enter your age" if is_age_question else "Enter a number",
+            "input_label": (
+                "Age" if is_age_question
+                else "ZIP / postal code" if is_postal_question
+                else "Your answer"
+            ),
+            "placeholder": (
+                "Enter your age" if is_age_question
+                else "Enter your ZIP / postal code" if is_postal_question
+                else "Type your answer"
+            ),
             "is_dob_question": is_dob_question,
+            "is_age_question": is_age_question,
+            "is_postal_question": is_postal_question,
+            "postal_allowed_values": postal_targeting_values,
+            "age_ranges": age_ranges,
             "qualifying_options_only": bool(
                 qualifying_options_only and allowed_values
             ),
             "targeting_note": (
                 f"Qualifying age: {', '.join(age_range_labels)}"
                 if (is_age_question or is_dob_question) and age_range_labels
+                else required_value_note
+                if required_value_note
+                else _innovatemr_postal_targeting_note(postal_targeting_values)
+                if postal_targeting_values
                 else "Only answers accepted by this survey are shown."
-                if qualifying_options_only and allowed_values else ""
+                if qualifying_options_only and (
+                    allowed_values or (is_toluna and (question.raw_data or {}).get("required_by_provider") and options)
+                ) else ""
             ),
         })
     return prepared
@@ -1264,6 +1397,7 @@ def _collect_prescreener_answers(request, survey):
         survey, qualifying_options_only=False
     ):
         question = prepared["model"]
+        respondent_age = None
         if prepared["input_kind"] == "date_mask":
             raw_date = request.POST.get(prepared["field_name"], "").strip()
             try:
@@ -1274,7 +1408,13 @@ def _collect_prescreener_answers(request, survey):
                     year, month, day = parts
                 else:
                     day, month, year = parts
-                normalized_date = date(int(year), int(month), int(day)).isoformat()
+                born = date(int(year), int(month), int(day))
+                normalized_date = born.isoformat()
+                if prepared["is_dob_question"]:
+                    today = date.today()
+                    respondent_age = today.year - born.year - (
+                        (today.month, today.day) < (born.month, born.day)
+                    )
             except (TypeError, ValueError):
                 errors.append(
                     f"Enter a valid date in DD-MM-YYYY format for: {prepared['display_text']}"
@@ -1304,6 +1444,35 @@ def _collect_prescreener_answers(request, survey):
             # respondent's actual answer. Targeting OptionIds identify the
             # provider's accepted range, not the respondent's age.
             upstream_values = [str(numeric_value)]
+            if prepared["is_age_question"]:
+                respondent_age = numeric_value
+        elif prepared.get("is_postal_question") and prepared.get("postal_allowed_values"):
+            accepted = {}
+            for value in prepared["postal_allowed_values"]:
+                accepted.setdefault(
+                    _normalized_postal_targeting_value(value),
+                    str(value),
+                )
+            canonical_value = accepted.get(
+                _normalized_postal_targeting_value(values[0])
+            )
+            if canonical_value is None:
+                errors.append(
+                    f"Enter a ZIP/postal code accepted by this survey for: {prepared['display_text']}"
+                )
+                continue
+            values = [canonical_value]
+            upstream_values = [canonical_value]
+
+        if respondent_age is not None and (
+            not 1 <= respondent_age <= OPEN_ENDED_AGE_MAX
+            or not any(
+                minimum <= respondent_age <= maximum
+                for minimum, maximum in prepared["age_ranges"]
+            )
+        ):
+            errors.append(f"Enter an age within the accepted range for: {prepared['display_text']}")
+            continue
 
         answers[str(question.pk)] = {
             "question_id": question.question_id,
@@ -1589,7 +1758,10 @@ def survey_start(request):
                 raw_data__adapter_version__in=[1, 2, 3, TOLUNA_ADAPTER_VERSION]
             ).exists()
             if is_rfg:
-                stale = stale or not survey.entry_link
+                stale = stale or not survey.entry_link or not survey.targeting_questions.filter(
+                    key="RFG_BIRTHDAY",
+                    raw_data__adapter_version=RFG_TARGETING_ADAPTER_VERSION,
+                ).exists()
             elif survey.integration.provider_code == "toluna":
                 stale = stale or not survey.targeting_questions.filter(
                     raw_data__adapter_version=TOLUNA_ADAPTER_VERSION
@@ -2464,6 +2636,15 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         ):
             stale = stale or not survey.targeting_questions.filter(
                 raw_data__adapter_version=TOLUNA_ADAPTER_VERSION
+            ).exists()
+        if (
+            detail_type == "targeting"
+            and survey.integration_id
+            and survey.integration.provider_code == "rfg"
+        ):
+            stale = stale or not survey.targeting_questions.filter(
+                key="RFG_BIRTHDAY",
+                raw_data__adapter_version=RFG_TARGETING_ADAPTER_VERSION,
             ).exists()
         if stale:
             if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:

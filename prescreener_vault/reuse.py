@@ -8,6 +8,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Q
 from django.utils import timezone
 
+from surveys.age_rules import OPEN_ENDED_AGE_MAX
+
 from surveys.models import (
     ProfileReuseEvent,
     ProfileReuseMonthlyCounter,
@@ -230,7 +232,7 @@ def _candidate_dimensions(candidate, reference=None):
             break
     if current_age is None:
         current_age = candidate.respondent_age
-    if current_age is not None:
+    if current_age is not None and 1 <= current_age <= OPEN_ENDED_AGE_MAX:
         dimensions["age"] = [str(current_age)]
         dimensions["age_group"] = [_age_group(current_age)]
     if candidate.respondent_ethnicity:

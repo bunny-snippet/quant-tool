@@ -738,7 +738,10 @@ class SurveyFlowTests(TestCase):
             text="What is your zipcode?",
             question_type="Numeric Open Ended",
             category="Demographic",
-            options=[{"OptionId": 77, "OptionText": "90012"}],
+            options=[
+                {"OptionId": 77, "OptionText": "90012"},
+                {"OptionId": 78, "OptionText": "02108"},
+            ],
         )
         start = self.client.get(reverse("survey-start"), {
             "surveyId": self.survey.source_id,
@@ -747,6 +750,11 @@ class SurveyFlowTests(TestCase):
             "code": self.survey.local_id,
         })
         rid = parse_qs(urlsplit(start["Location"]).query)["rid"][0]
+        form = self.client.get(reverse("survey-start"), {"rid": rid})
+        self.assertContains(form, "What is your zipcode?")
+        self.assertContains(form, "Required ZIP/postal codes: 90012, 02108")
+        self.assertContains(form, "Enter your ZIP / postal code")
+        self.assertContains(form, 'autocomplete="postal-code"')
         submit = self.client.post(reverse("survey-start"), {
             "rid": rid,
             f"question_{self.question.pk}": "1",
@@ -762,6 +770,92 @@ class SurveyFlowTests(TestCase):
         params = parse_qs(urlsplit(submit["Location"]).query)
         self.assertEqual(params["AGE"], ["24"])
         self.assertEqual(params["ZIPCODES"], ["90012"])
+
+    def test_innovate_zip_targeting_rejects_values_outside_provider_options(self):
+        zipcode = TargetingQuestion.objects.create(
+            survey=self.survey,
+            question_id=11,
+            key="ZIPCODES",
+            text="What is your zipcode?",
+            question_type="Numeric Open Ended",
+            category="Geographic",
+            options=[
+                {"OptionId": 1, "OptionText": "A1A 1A1"},
+                {"OptionId": 2, "OptionText": "B2B 2B2"},
+            ],
+        )
+        start = self.client.get(reverse("survey-start"), {
+            "surveyId": self.survey.source_id,
+            "supplierCode": "1000",
+            "userId": self.platform_user.pk,
+            "code": self.survey.local_id,
+        })
+        rid = parse_qs(urlsplit(start["Location"]).query)["rid"][0]
+
+        rejected = self.client.post(reverse("survey-start"), {
+            "rid": rid,
+            f"question_{self.question.pk}": "1",
+            f"question_{zipcode.pk}": "C3C 3C3",
+        })
+        self.assertEqual(rejected.status_code, 200)
+        self.assertContains(rejected, "Enter a ZIP/postal code accepted by this survey")
+        self.assertEqual(
+            SurveyAttempt.objects.get(rid=rid).status,
+            SurveyAttempt.Status.INITIATED,
+        )
+
+        accepted = self.client.post(reverse("survey-start"), {
+            "rid": rid,
+            f"question_{self.question.pk}": "1",
+            f"question_{zipcode.pk}": "a1a1a1",
+        })
+        self.assertEqual(accepted.status_code, 302)
+        self.assertEqual(
+            parse_qs(urlsplit(accepted["Location"]).query)["ZIPCODES"],
+            ["A1A 1A1"],
+        )
+
+    @override_settings(ENFORCE_PROJECT_UNIQUE_ENTRY_IP=False)
+    def test_open_ended_age_is_capped_at_99_for_generic_provider(self):
+        age = TargetingQuestion.objects.create(
+            survey=self.survey,
+            question_id=101,
+            key="AGE",
+            text="What is your age?",
+            question_type="Numeric Open Ended",
+            category="Demographic",
+            options=[{"OptionId": 25, "OptionText": "25+", "ageStart": 25}],
+        )
+
+        def start_attempt():
+            response = self.client.get(reverse("survey-start"), {
+                "surveyId": self.survey.source_id,
+                "supplierCode": "1000",
+                "userId": self.platform_user.pk,
+                "code": self.survey.local_id,
+            })
+            return parse_qs(urlsplit(response["Location"]).query)["rid"][0]
+
+        accepted_rid = start_attempt()
+        form = self.client.get(reverse("survey-start"), {"rid": accepted_rid})
+        self.assertContains(form, 'min="25"')
+        self.assertContains(form, 'max="99"')
+        accepted = self.client.post(reverse("survey-start"), {
+            "rid": accepted_rid,
+            f"question_{self.question.pk}": "1",
+            f"question_{age.pk}": "26",
+        })
+        self.assertEqual(accepted.status_code, 302)
+        self.assertEqual(parse_qs(urlsplit(accepted["Location"]).query)["AGE"], ["26"])
+
+        rejected_rid = start_attempt()
+        rejected = self.client.post(reverse("survey-start"), {
+            "rid": rejected_rid,
+            f"question_{self.question.pk}": "1",
+            f"question_{age.pk}": "100",
+        })
+        self.assertEqual(rejected.status_code, 200)
+        self.assertContains(rejected, "Enter an age within the accepted range")
 
     def test_status_requires_known_rid(self):
         response = self.client.get(reverse("survey-status"), {"status": "3", "rid": "Aa1Bb2Cc3D"})

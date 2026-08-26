@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -8,7 +11,11 @@ from vendors.models import Client, ClientIntegration
 from .models import Survey, SurveyAttempt, SurveyQuota, TolunaNotification
 
 
-@override_settings(TOLUNA_NOTIFICATION_TOKEN="notification-test-token")
+@override_settings(
+    TOLUNA_NOTIFICATION_IP_ALLOWLIST=("203.0.113.10/32",),
+    TOLUNA_NOTIFICATION_TRUSTED_PROXY_IPS=("127.0.0.1/32", "::1/128"),
+    TOLUNA_NOTIFICATION_HMAC_KEY="notification-hmac-key",
+)
 class TolunaNotificationTests(TestCase):
     def setUp(self):
         self.owner = get_user_model().objects.create_superuser(
@@ -48,9 +55,28 @@ class TolunaNotificationTests(TestCase):
             status=SurveyAttempt.Status.REDIRECTED,
             redirected_at=timezone.now(),
         )
-        self.headers = {"HTTP_X_TOLUNA_TOKEN": "notification-test-token"}
+        self.headers = {"REMOTE_ADDR": "203.0.113.10"}
 
-    def _post(self, route_name, payload, **headers):
+    @staticmethod
+    def _member_status_hmac(payload):
+        signed_value = (
+            f"{payload.get('SurveyId', payload.get('SurveyID'))}"
+            f"{payload.get('WaveId', payload.get('WaveID'))}"
+            f"{payload.get('UniqueCode')}"
+        )
+        return hmac.new(
+            b"notification-hmac-key",
+            signed_value.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def _post(self, route_name, payload, *, sign=True, **headers):
+        payload = dict(payload)
+        if sign and route_name in {
+            "toluna-notification-member-complete",
+            "toluna-notification-member-terminate",
+        }:
+            payload.setdefault("EncryptedValue", self._member_status_hmac(payload))
         return self.client.post(
             reverse(route_name),
             payload,
@@ -104,14 +130,75 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(self.attempt.status, SurveyAttempt.Status.COMPLETED)
         self.assertEqual(self.attempt.callback_count, 1)
 
-    def test_invalid_token_is_rejected_without_audit_row(self):
+    def test_unapproved_direct_source_cannot_spoof_forwarding_headers(self):
         response = self._post(
             "toluna-notification-survey-closed",
             {"SurveyID": 123, "SurveyRef": "Survey", "Status": "Closed", "WaveId": 100},
-            HTTP_X_TOLUNA_TOKEN="wrong-token",
+            REMOTE_ADDR="198.51.100.40",
+            HTTP_X_FORWARDED_FOR="203.0.113.10",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(TolunaNotification.objects.count(), 0)
+
+    def test_trusted_proxy_uses_rightmost_untrusted_forwarded_hop(self):
+        payload = {
+            "SurveyID": 123,
+            "SurveyRef": "Survey",
+            "Status": "Closed",
+            "WaveId": 100,
+        }
+        accepted = self._post(
+            "toluna-notification-survey-closed",
+            payload,
+            REMOTE_ADDR="127.0.0.1",
+            HTTP_X_FORWARDED_FOR="198.51.100.40, 203.0.113.10",
+        )
+        rejected = self._post(
+            "toluna-notification-survey-closed",
+            payload,
+            REMOTE_ADDR="127.0.0.1",
+            HTTP_X_FORWARDED_FOR="203.0.113.10, 198.51.100.40",
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(TolunaNotification.objects.count(), 1)
+
+    def test_member_status_requires_valid_encrypted_value(self):
+        payload = {
+            "UniqueCode": self.attempt.prescreener_uid,
+            "SurveyId": 123,
+            "SurveyRef": "123560-US",
+            "Revenue": 100,
+            "DateTime": "2026-08-21 10:20:00",
+            "WaveId": 100,
+            "QuotaID": 900,
+            "AdditionalData": f"rid={self.attempt.rid}",
+        }
+        missing = self._post(
+            "toluna-notification-member-complete",
+            payload,
+            sign=False,
+        )
+        invalid = self._post(
+            "toluna-notification-member-complete",
+            {**payload, "EncryptedValue": "0" * 64},
+            sign=False,
+        )
+
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(invalid.status_code, 401)
+        self.assertEqual(TolunaNotification.objects.count(), 0)
+
+    @override_settings(TOLUNA_NOTIFICATION_IP_ALLOWLIST=())
+    def test_empty_source_allowlist_fails_closed(self):
+        response = self._post(
+            "toluna-notification-survey-closed",
+            {"SurveyID": 123, "SurveyRef": "Survey", "Status": "Closed", "WaveId": 100},
+        )
+
+        self.assertEqual(response.status_code, 503)
         self.assertEqual(TolunaNotification.objects.count(), 0)
 
     def test_quota_and_survey_notifications_update_operational_records(self):

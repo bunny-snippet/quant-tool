@@ -41,7 +41,7 @@
         {% elif question.input_kind == "date_mask" %}
           <label class="open-answer date-mask-answer"><span>{% if question.is_dob_question %}Date of birth{% else %}Date{% endif %}</span><input type="text" inputmode="numeric" {% if question.is_dob_question %}autocomplete="bday"{% endif %} name="{{ question.field_name }}" value="{{ question.current_value }}" maxlength="10" placeholder="DD-MM-YYYY" aria-label="{{ question.display_text }}" data-date-mask required></label>
         {% else %}
-          <label class="open-answer"><span>Your answer</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="Type your answer" required></label>
+          <label class="open-answer"><span>{{ question.input_label }}</span><input type="text" name="{{ question.field_name }}" value="{{ question.current_value }}" placeholder="{{ question.placeholder }}" {% if question.is_postal_question %}autocomplete="postal-code"{% endif %} required></label>
         {% endif %}
       </section>
     {% empty %}

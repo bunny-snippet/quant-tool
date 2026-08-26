@@ -7,6 +7,8 @@ from django.conf import settings
 from django.db import OperationalError, close_old_connections, transaction
 from django.utils import timezone
 
+from surveys.age_rules import OPEN_ENDED_AGE_MAX
+
 from surveys.survey_flow import ensure_attempt_prescreener_uid
 
 from .constants import DATABASE_ALIAS
@@ -107,7 +109,7 @@ def _age_from_value(value, submitted_at) -> int | None:
     text = str(value or "").strip()
     try:
         age = int(text)
-        return age if 0 <= age <= 125 else None
+        return age if 1 <= age <= OPEN_ENDED_AGE_MAX else None
     except (TypeError, ValueError):
         pass
     born = None
@@ -121,7 +123,7 @@ def _age_from_value(value, submitted_at) -> int | None:
         return None
     reference = timezone.localtime(submitted_at).date() if submitted_at else date.today()
     age = reference.year - born.year - ((reference.month, reference.day) < (born.month, born.day))
-    return age if 0 <= age <= 125 else None
+    return age if 1 <= age <= OPEN_ENDED_AGE_MAX else None
 
 
 def _question_snapshots(attempt, answers):

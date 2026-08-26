@@ -21,7 +21,7 @@ from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaInviteRejected, TolunaProvider
 from .serializers import SurveyListSerializer, SurveyQuotaSerializer
-from .views import SurveyViewSet, _prescreener_questions
+from .views import SurveyViewSet, _collect_prescreener_answers, _prescreener_questions
 
 
 class FakeResponse:
@@ -391,7 +391,7 @@ class TolunaProviderTests(TestCase):
         )
         provider.refresh_details(survey)
 
-        self.assertFalse(survey.targeting_questions.filter(question_id=1001107).exists())
+        self.assertTrue(survey.targeting_questions.filter(question_id=1001107).exists())
         data = SurveyQuotaSerializer(survey.quotas.get()).data
         self.assertEqual(len(data["toluna_layers"]), 2)
         first_layer = data["toluna_layers"][0]
@@ -408,7 +408,7 @@ class TolunaProviderTests(TestCase):
             "is_routable": True,
         }])
         self.assertEqual(age_segment["status"], "Full")
-        self.assertEqual(age_segment["targeting_details"][0]["values"], ["65+"])
+        self.assertEqual(age_segment["targeting_details"][0]["values"], ["65\u201399"])
         no_capacity = data["toluna_layers"][1]["subquotas"][0]
         self.assertFalse(no_capacity["target_known"])
         self.assertFalse(no_capacity["completed_known"])
@@ -449,7 +449,7 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(detail["name"], "Toluna qualification")
         self.assertEqual(detail["values"], ["Provider-defined answer"])
 
-    def test_routable_quota_attribute_is_left_for_toluna_prescreener(self):
+    def test_routable_quota_attribute_is_required_locally_but_not_registered(self):
         reference = copy.deepcopy(REFERENCE)
         reference.append({
             "IsRoutable": True,
@@ -490,12 +490,23 @@ class TolunaProviderTests(TestCase):
         )
         provider.refresh_details(survey)
 
-        self.assertFalse(survey.targeting_questions.filter(question_id=2910077).exists())
+        self.assertTrue(survey.targeting_questions.filter(question_id=2910077).exists())
         self.assertTrue(
-            survey.targeting_questions.filter(raw_data__adapter_version=4).exists()
+            survey.targeting_questions.filter(raw_data__adapter_version=5).exists()
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        routable = questions[2910077]
+        self.assertTrue(routable.raw_data["required_by_provider"])
+        self.assertTrue(routable.raw_data["toluna_is_routable"])
+        prepared = {
+            item["model"].question_id: item for item in _prescreener_questions(survey)
+        }
+        self.assertEqual(prepared[2910077]["input_kind"], "radio")
+        self.assertEqual(
+            [(item["value"], item["label"]) for item in prepared[2910077]["options"]],
+            [("5312785", "Yes")],
+        )
         answers = {
             str(questions[1001538].pk): {
                 "question_id": 1001538, "values": ["27"], "upstream_values": ["2006353"],
@@ -503,9 +514,198 @@ class TolunaProviderTests(TestCase):
             str(questions[1001007].pk): {
                 "question_id": 1001007, "values": ["2000247"], "upstream_values": ["2000247"],
             },
+            str(routable.pk): {
+                "question_id": 2910077, "values": ["5312785"], "upstream_values": ["5312785"],
+            },
         }
         matched = provider._matching_quota(survey, answers)
         self.assertEqual(matched.quota_id, 900)
+
+        attempt = SurveyAttempt.objects.create(
+            rid="Rou123Tab9",
+            prescreener_uid="Ro1u-Ta2b-Le3q-Ue4s",
+            survey=survey,
+            user_id="routable-user",
+        )
+        member = provider._member_payload(survey, attempt, answers)
+        registered_question_ids = {
+            item["QuestionID"] for item in member["RegistrationAnswers"]
+        }
+        self.assertIn(1001007, registered_question_ids)
+        self.assertNotIn(2910077, registered_question_ids)
+
+    def test_non_routable_quota_questions_are_required_and_show_only_provider_values(self):
+        reference = copy.deepcopy(REFERENCE)
+        reference.extend([
+            {
+                "IsRoutable": False,
+                "InternalName": "Annual Household Income",
+                "TranslatedQuestion": {
+                    "QuestionID": 1001107,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "What is your household income?",
+                },
+                "TranslatedAnswers": [
+                    {
+                        "AnswerID": 2002333,
+                        "Translation": "$100,000-$199,999",
+                        "AnswerInternalName": "income-mid",
+                    },
+                    {
+                        "AnswerID": 2002334,
+                        "Translation": "$200,000+",
+                        "AnswerInternalName": "income-high",
+                    },
+                ],
+                "AnswerType": "SingleSelect",
+            },
+            {
+                "IsRoutable": False,
+                "InternalName": "Postal Code",
+                "TranslatedQuestion": {
+                    "QuestionID": 1001042,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "What is your postal code?",
+                },
+                "TranslatedAnswers": [{
+                    "AnswerID": 2224508,
+                    "Translation": "Postal code",
+                    "AnswerInternalName": "postal",
+                }],
+                "AnswerType": "OpenEnd",
+            },
+        ])
+        quotas = copy.deepcopy(QUOTAS)
+        quotas["Surveys"][0]["Quotas"][0]["Layers"].extend([
+            {
+                "LayerID": 3,
+                "SubQuotas": [{
+                    "SubQuotaID": 30,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1001107,
+                        "AnswerIDs": [2002334],
+                        "AnswerValues": [],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+            {
+                "LayerID": 4,
+                "SubQuotas": [{
+                    "SubQuotaID": 40,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1001042,
+                        "AnswerIDs": [2224508],
+                        "AnswerValues": ["100, 90210"],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+        ])
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(reference), FakeResponse(quotas)
+            ),
+        )
+        normalized = provider.normalize_inventory_item(provider.inventory()[0], timezone.now())
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+
+        provider.refresh_details(survey)
+
+        questions = {row.question_id: row for row in survey.targeting_questions.all()}
+        income = questions[1001107]
+        postal = questions[1001042]
+        self.assertTrue(income.raw_data["required_by_provider"])
+        self.assertTrue(postal.raw_data["required_by_provider"])
+        self.assertEqual(
+            [(option["OptionId"], option["OptionText"]) for option in income.options],
+            [(2002334, "$200,000+")],
+        )
+
+        prepared = {
+            item["model"].question_id: item for item in _prescreener_questions(survey)
+        }
+        self.assertEqual(prepared[1001107]["input_kind"], "radio")
+        self.assertEqual(
+            [item["value"] for item in prepared[1001107]["options"]],
+            ["2002334"],
+        )
+        self.assertEqual(
+            prepared[1001107]["targeting_note"],
+            "Only answers accepted by this survey are shown.",
+        )
+        self.assertEqual(prepared[1001042]["input_kind"], "text")
+        self.assertEqual(
+            prepared[1001042]["targeting_note"],
+            "Required postal codes or prefixes: 100, 90210",
+        )
+
+        age = questions[1001538]
+        gender = questions[1001007]
+        incomplete_request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{age.pk}": "27",
+            f"question_{gender.pk}": "2000247",
+        })
+        _, errors = _collect_prescreener_answers(incomplete_request, survey)
+        self.assertIn("Please answer: What is your household income?", errors)
+        self.assertIn("Please answer: What is your postal code?", errors)
+
+        attempt = SurveyAttempt.objects.create(
+            rid="Req123AbC9",
+            prescreener_uid="Rq1a-Bc2d-Ef3g-Hi4j",
+            survey=survey,
+            user_id="required-user",
+        )
+        answers = {
+            str(age.pk): {
+                "question_id": age.question_id,
+                "values": ["27"],
+                "upstream_values": ["27"],
+            },
+            str(gender.pk): {
+                "question_id": gender.question_id,
+                "values": ["2000247"],
+                "upstream_values": ["2000247"],
+            },
+            str(income.pk): {
+                "question_id": income.question_id,
+                "values": ["2002334"],
+                "upstream_values": ["2002334"],
+            },
+            str(postal.pk): {
+                "question_id": postal.question_id,
+                "values": ["10023"],
+                "upstream_values": ["10023"],
+            },
+        }
+        payload = provider._member_payload(survey, attempt, answers)
+        registration = {
+            item["QuestionID"]: item["Answers"]
+            for item in payload["RegistrationAnswers"]
+        }
+        self.assertEqual(registration[1001007], [{"AnswerID": 2000247}])
+        self.assertEqual(registration[1001107], [{"AnswerID": 2002334}])
+        self.assertEqual(payload["PostalCode"], "10023")
+        postal_requirement = quotas["Surveys"][0]["Quotas"][0]["Layers"][3][
+            "SubQuotas"
+        ][0]["QuestionsAndAnswers"][0]
+        self.assertTrue(provider._answer_matches(
+            postal_requirement, answers[str(postal.pk)], postal
+        ))
+        rejected_postal = {
+            **answers[str(postal.pk)],
+            "values": ["77777"],
+            "upstream_values": ["77777"],
+        }
+        self.assertFalse(provider._answer_matches(
+            postal_requirement, rejected_postal, postal
+        ))
 
     def test_multiple_ranges_for_same_question_are_or_conditions(self):
         quotas = copy.deepcopy(QUOTAS)
@@ -653,21 +853,21 @@ class TolunaProviderTests(TestCase):
 
         age_question = survey.targeting_questions.get(question_id=1001538)
         self.assertEqual(age_question.options, [])
-        self.assertEqual(age_question.raw_data["adapter_version"], 4)
+        self.assertEqual(age_question.raw_data["adapter_version"], 5)
         self.assertEqual(age_question.raw_data["targeting_age_ranges"], [
             {"min": 21, "max": 29},
             {"min": 30, "max": 45},
             {"min": 46, "max": 64},
-            {"min": 65, "max": None},
+            {"min": 65, "max": 99},
         ])
         prepared = _prescreener_questions(survey)
         age_field = next(item for item in prepared if item["model"].question_id == 1001538)
         self.assertEqual(age_field["input_kind"], "number")
         self.assertEqual(age_field["min_value"], 21)
-        self.assertEqual(age_field["max_value"], 120)
+        self.assertEqual(age_field["max_value"], 99)
         self.assertEqual(
             age_field["targeting_note"],
-            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65+",
+            "Qualifying age: 21\u201329, 30\u201345, 46\u201364, 65\u201399",
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
@@ -684,11 +884,20 @@ class TolunaProviderTests(TestCase):
             },
         }
         self.assertEqual(provider._matching_quota(survey, answers).quota_id, 900)
+        answers[str(questions[1001538].pk)] = {
+            "question_id": 1001538,
+            "values": ["100"],
+            "upstream_values": ["100"],
+        }
+        with self.assertRaisesRegex(ProviderError, "does not match an open Toluna quota"):
+            provider._matching_quota(survey, answers)
 
     def test_toluna_age_ranges_normalize_unsupported_upper_bounds(self):
-        self.assertEqual(TolunaProvider._age_range("65-130"), (65, 120))
-        self.assertEqual(TolunaProvider._age_range("18-125"), (18, 120))
-        self.assertEqual(TolunaProvider._age_range("65 and older"), (65, None))
+        self.assertEqual(TolunaProvider._age_range("65-130"), (65, 99))
+        self.assertEqual(TolunaProvider._age_range("18-125"), (18, 99))
+        self.assertEqual(TolunaProvider._age_range("100-120"), None)
+        self.assertEqual(TolunaProvider._age_range("25+"), (25, 99))
+        self.assertEqual(TolunaProvider._age_range("65 and older"), (65, 99))
 
     @patch("surveys.views.get_provider")
     def test_targeting_details_refresh_fresh_adapter_v2_rows(self, get_provider_mock):

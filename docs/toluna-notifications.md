@@ -13,22 +13,49 @@ same Django application.
 | Enhanced termination | `/api/toluna/notifications/enhanced-termination` |
 | Reconciliation | `/api/toluna/notifications/reconciliation` |
 
-## Authentication
+## Request validation
 
-Configure a strong shared token in the deployment environment:
+Toluna's documented notification contract does not include a custom request
+header. Quant therefore authenticates the transport using the static source
+addresses supplied by the Toluna integration team:
 
 ```dotenv
-TOLUNA_NOTIFICATION_TOKEN=<secret agreed with Toluna>
+# Current Toluna production notification sources confirmed for this integration.
+TOLUNA_NOTIFICATION_IP_ALLOWLIST=54.211.6.36/32,34.199.200.42/32,3.228.103.61/32
+
+# Direct reverse-proxy peers only. The bundled same-host Nginx uses loopback.
+TOLUNA_NOTIFICATION_TRUSTED_PROXY_IPS=127.0.0.1/32,::1/128
 ```
 
-Every request must use `Content-Type: application/json` and include:
+Both settings accept comma-separated individual IPs or CIDR networks. The
+application fails closed when the Toluna allowlist is empty or invalid.
+Forwarding headers are ignored unless `REMOTE_ADDR` belongs to the explicit
+trusted-proxy list. Trusted proxy hops are stripped from the right of
+`X-Forwarded-For`; a caller-prepended leftmost value is never trusted.
 
-```http
-X-Toluna-Token: <same secret>
+Toluna member completion and member termination notifications receive a second
+validation layer. Ask Toluna to configure **Standard Encryption: HMAC SHA256**
+with the same secret configured on Quant:
+
+```dotenv
+TOLUNA_NOTIFICATION_HMAC_KEY=<strong secret configured with Toluna>
 ```
 
-An absent or incorrect token is rejected before the payload is stored. Keep
-this token outside source control and rotate it after accidental disclosure.
+When that setting is omitted, Quant falls back to the existing
+`TOLUNA_HMAC_KEY`. For member-status JSON, Quant verifies `EncryptedValue`
+against HMAC-SHA256 of the exact concatenation
+`SurveyID + WaveID + UniqueCode`, with no separators. Missing or invalid member
+signatures are rejected before storage. Operational notifications that do not
+carry `EncryptedValue` (quota status, survey closed, enhanced termination and
+reconciliation) remain protected by the source-IP allowlist.
+
+Every request must use `Content-Type: application/json`.
+
+These three production `/32` addresses and the bundled same-host proxy values
+are application defaults, while explicit environment values replace each list
+in full. The public Toluna documentation does not publish a notification IP
+list; obtain any sandbox addresses or future production changes from the Toluna
+representative and update the environment before Toluna changes its senders.
 
 ## Processing rules
 
@@ -44,6 +71,16 @@ this token outside source control and rotate it after accidental disclosure.
 - A valid but currently unmatched notification remains visible and auditable;
   it is never discarded.
 
+## Official Toluna references
+
+- [Notifications overview](https://docs.integratedpanel.toluna.com/notifications/)
+- [Member status notification bodies](https://docs.integratedpanel.toluna.com/notifications/memberstatus.html)
+- [Standard Encryption and `EncryptedValue`](https://docs.integratedpanel.toluna.com/memberrouting/encryption.html)
+- [Enhanced termination notifications](https://docs.integratedpanel.toluna.com/notifications/etns.html)
+- [Quota status notifications](https://docs.integratedpanel.toluna.com/notifications/quotastatus.html)
+- [Survey closed notifications](https://docs.integratedpanel.toluna.com/notifications/surveyclosed.html)
+- [General FAQ, including IP allowlisting guidance](https://docs.integratedpanel.toluna.com/faq/general/)
+
 ## Term Reports
 
 Open **Term Reports**, select **Toluna** in the Provider filter, and apply the
@@ -52,4 +89,3 @@ enhanced termination, quota status, survey closed and reconciliation events.
 Details expose normalized fields only; raw JSON remains backend audit data.
 The existing Export action adds a `Toluna Notifications` worksheet for the
 selected Toluna event tab.
-

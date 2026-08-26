@@ -14,6 +14,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
+from surveys.age_rules import normalize_age_range
 from surveys.models import (
     Survey,
     SurveyQuota,
@@ -56,15 +57,15 @@ COMMON_AGE_OPTIONS = (
     (2006358, "50-54", 50, 54),
     (2006359, "55-59", 55, 59),
     (2006360, "60-64", 60, 64),
-    (2006361, "65 and older", 65, 120),
+    (2006361, "65 and older", 65, None),
 )
-TOLUNA_MAX_RESPONDENT_AGE = 120
+TOLUNA_MAX_RESPONDENT_AGE = 99
 COMMON_GENDER_QUESTION_ID = 1001007
 COMMON_GENDER_OPTIONS = (
     (2000246, "Female"),
     (2000247, "Male"),
 )
-TOLUNA_ADAPTER_VERSION = 4
+TOLUNA_ADAPTER_VERSION = 5
 
 
 def _pick(payload, *names, default=None):
@@ -78,6 +79,23 @@ def _pick(payload, *names, default=None):
         if str(name).lower() in lowered:
             return lowered[str(name).lower()]
     return default
+
+
+def _answer_values(payload):
+    """Normalize Toluna's scalar/list and documented comma-separated values."""
+
+    values = _pick(payload, "AnswerValues", default=[])
+    if values is None:
+        return []
+    if isinstance(values, (str, int, float)):
+        values = [values]
+    normalized = []
+    for value in values:
+        for part in str(value).split(","):
+            item = part.strip()
+            if item and item not in normalized:
+                normalized.append(item)
+    return normalized
 
 
 def _integer(value, default=0):
@@ -539,12 +557,8 @@ class TolunaProvider(SurveyProvider):
                             _integer(value, -1) for value in (_pick(item, "AnswerIDs", default=[]) or [])
                         )
                         current["answer_ids"].discard(-1)
-                        values = _pick(item, "AnswerValues", default=[])
-                        if isinstance(values, str):
-                            values = [part.strip() for part in values.split(",") if part.strip()]
-                        for value in values or []:
-                            normalized = str(value).strip()
-                            if normalized and normalized not in current["answer_values"]:
+                        for normalized in _answer_values(item):
+                            if normalized not in current["answer_values"]:
                                 current["answer_values"].append(normalized)
                         current["raw"].append(item)
                         current["all_routable"] = current["all_routable"] and bool(
@@ -565,39 +579,11 @@ class TolunaProvider(SurveyProvider):
 
     @staticmethod
     def _age_range(value):
-        raw = str(value or "").strip()
-        match = re.fullmatch(r"(\d{1,3})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,3})", raw, re.I)
-        if match:
-            minimum, maximum = int(match.group(1)), int(match.group(2))
-            if not 1 <= minimum <= maximum:
-                return None
-            if minimum > TOLUNA_MAX_RESPONDENT_AGE:
-                return None
-            return minimum, min(maximum, TOLUNA_MAX_RESPONDENT_AGE)
-        match = re.fullmatch(r"(\d{1,3})\s*(?:\+|and\s+older|or\s+older)", raw, re.I)
-        if match:
-            minimum = int(match.group(1))
-            return (
-                (minimum, None)
-                if 1 <= minimum <= TOLUNA_MAX_RESPONDENT_AGE
-                else None
-            )
-        return None
+        return normalize_age_range(value)
 
     @classmethod
     def _age_option_range(cls, option):
-        label = option.get("OptionText") if isinstance(option, dict) else ""
-        open_ended = cls._age_range(label)
-        if open_ended is not None and open_ended[1] is None:
-            return open_ended
-        try:
-            minimum = int(option["ageStart"])
-            maximum = int(option["ageEnd"])
-        except (KeyError, TypeError, ValueError):
-            return cls._age_range(label)
-        if not 1 <= minimum <= maximum or minimum > TOLUNA_MAX_RESPONDENT_AGE:
-            return None
-        return minimum, min(maximum, TOLUNA_MAX_RESPONDENT_AGE)
+        return normalize_age_range(option)
 
     @classmethod
     def _targeting_age_ranges(cls, requirement, reference):
@@ -640,14 +626,11 @@ class TolunaProvider(SurveyProvider):
             kind = self._question_kind(row)
             if kind in {"birth_date", "gender"} and kind not in mandatory:
                 mandatory[kind] = row
-        # Routable quota attributes are intentionally left unanswered. Toluna
-        # documents that its own preliminary screener asks these before the
-        # final survey; forcing them into Member Registration can return 400.
-        question_ids = {
-            question_id
-            for question_id, requirement in requirements.items()
-            if not requirement.get("all_routable")
-        }
+        # Ask every quota attribute locally, including attributes Toluna marks
+        # routable. Routable answers remain excluded from Member Registration
+        # below because Toluna can reject them there; they are still collected
+        # and used for local quota matching before Generate Invite.
+        question_ids = set(requirements)
         question_ids.update(row.question_id for row in mandatory.values())
         questions = []
         for question_id in sorted(question_ids):
@@ -657,21 +640,49 @@ class TolunaProvider(SurveyProvider):
             kind = self._question_kind(reference)
             requirement = requirements.get(question_id, {})
             allowed_ids = sorted(requirement.get("answer_ids") or [])
+            allowed_values = list(requirement.get("answer_values") or [])
+            required_by_provider = bool(requirement)
             reference_options = list(reference.options or [])
+            answer_type = reference.answer_type.lower()
             # Age is collected as the respondent's exact numeric value. Keep
             # Toluna's answer-ID mapping in raw data for quota evaluation, while
             # exposing the exact union of textual and ID-backed quota ranges to
             # the pre-screener. Choice options would incorrectly widen partial
             # ranges such as 21-29 to Toluna's common 18-24 bucket.
-            options = [] if kind == "birth_date" else [
-                option for option in reference_options
-                if not allowed_ids or _integer(option.get("OptionId"), -1) in allowed_ids
-            ]
+            normalized_allowed_values = {
+                str(value).strip().casefold()
+                for value in allowed_values
+                if str(value).strip()
+            }
+
+            def option_is_required(option):
+                if not required_by_provider or (not allowed_ids and not normalized_allowed_values):
+                    return True
+                option_labels = {
+                    str(option.get("OptionText") or "").strip().casefold(),
+                    str(option.get("AnswerInternalName") or "").strip().casefold(),
+                }
+                return (
+                    _integer(option.get("OptionId"), -1) in allowed_ids
+                    or bool(normalized_allowed_values.intersection(option_labels - {""}))
+                )
+
+            if kind == "birth_date":
+                options = []
+            elif kind == "postal" or "open" in answer_type:
+                # Open-ended questions can carry a synthetic AnswerID that is
+                # required alongside AnswerValue during member registration.
+                # Keep that mapping internally; the prescreener still renders
+                # a text input and shows the quota values as guidance.
+                options = reference_options
+            else:
+                options = [
+                    option for option in reference_options if option_is_required(option)
+                ]
             targeting_age_ranges = (
                 self._targeting_age_ranges(requirement, reference)
                 if kind == "birth_date" else []
             )
-            answer_type = reference.answer_type.lower()
             question_type = (
                 "numeric" if kind == "birth_date"
                 else "text" if kind == "postal" or "open" in answer_type
@@ -687,17 +698,27 @@ class TolunaProvider(SurveyProvider):
                 key=f"TOLUNA_{question_id}",
                 text=text,
                 question_type=question_type,
-                category="Required profile" if kind in {"birth_date", "gender"} else "Toluna targeting",
+                category=(
+                    "Required profile"
+                    if kind in {"birth_date", "gender"} or required_by_provider
+                    else "Toluna targeting"
+                ),
                 options=options,
                 raw_data={
                     "adapter_version": TOLUNA_ADAPTER_VERSION,
                     "toluna_kind": kind,
                     "toluna_is_routable": bool(
-                        requirement.get("all_routable") or reference.is_routable
+                        requirement.get("all_routable")
+                        if requirement
+                        else reference.is_routable
                     ),
                     "allowed_answer_ids": allowed_ids,
-                    "allowed_answer_values": requirement.get("answer_values") or [],
-                    "required_for_member": kind in {"birth_date", "gender"},
+                    "allowed_answer_values": allowed_values,
+                    "required_by_provider": required_by_provider,
+                    "required_for_member": (
+                        kind in {"birth_date", "gender"}
+                        or (required_by_provider and not requirement.get("all_routable"))
+                    ),
                     "reference_answer_type": reference.answer_type,
                     **({
                         "targeting_age_ranges": targeting_age_ranges,
@@ -779,16 +800,16 @@ class TolunaProvider(SurveyProvider):
                 born = date.fromisoformat(raw)
             except ValueError as exc:
                 raise ProviderError("Enter a valid age before Toluna member registration.") from exc
+            age = TolunaProvider._age(born.isoformat())
+            if not 1 <= age <= TOLUNA_MAX_RESPONDENT_AGE:
+                raise ProviderError("Enter a valid age before Toluna member registration.")
         return born.strftime("%m/%d/%Y")
 
     @classmethod
     def _answer_matches(cls, requirement, answer, question):
         values = {str(value) for value in (answer.get("upstream_values") or answer.get("values") or [])}
         allowed_ids = {str(value) for value in (_pick(requirement, "AnswerIDs", default=[]) or [])}
-        answer_values = _pick(requirement, "AnswerValues", default=[])
-        if isinstance(answer_values, str):
-            answer_values = [part.strip() for part in answer_values.split(",") if part.strip()]
-        allowed_values = [str(value).strip() for value in (answer_values or []) if str(value).strip()]
+        allowed_values = _answer_values(requirement)
         kind = str((question.raw_data or {}).get("toluna_kind") or "profile")
         if kind == "birth_date":
             try:
@@ -822,15 +843,15 @@ class TolunaProvider(SurveyProvider):
                 return False
         if allowed_ids and values.intersection(allowed_ids):
             return True
-        if allowed_ids and "text" in question.question_type.lower():
-            option_ids = {str(option.get("OptionId")) for option in question.options}
-            if allowed_ids.intersection(option_ids):
-                return bool(next(iter(answer.get("values") or []), "").strip())
         if allowed_values:
             raw_value = str(next(iter(answer.get("values") or []), "")).strip().lower()
             if kind == "postal":
                 return any(raw_value.startswith(candidate.lower()) for candidate in allowed_values)
             return raw_value in {candidate.lower() for candidate in allowed_values}
+        if allowed_ids and "text" in question.question_type.lower():
+            option_ids = {str(option.get("OptionId")) for option in question.options}
+            if allowed_ids.intersection(option_ids):
+                return bool(next(iter(answer.get("values") or []), "").strip())
         return not allowed_ids
 
     def _matching_quota(self, survey, answers):
@@ -853,10 +874,12 @@ class TolunaProvider(SurveyProvider):
 
                     def condition_matches(condition):
                         question_id = _integer(_pick(condition, "QuestionID"), -1)
-                        # Unknown routable attributes are explicitly allowed by
-                        # Toluna and are resolved in its own pre-survey router.
+                        # A legacy row without local Reference Data can still
+                        # fall back to Toluna's router. Once we have rendered a
+                        # routable question locally, its answer is mandatory
+                        # and must qualify just like every non-routable answer.
                         if bool(_pick(condition, "IsRoutable", default=False)) and (
-                            question_id not in answers_by_question or question_id not in questions
+                            question_id not in questions
                         ):
                             return True
                         return (
@@ -925,12 +948,11 @@ class TolunaProvider(SurveyProvider):
             if kind == "postal":
                 postal_code = str(values[0]).strip()
                 continue
-            # The member endpoint requires DOB plus gender; arbitrary quota
-            # questions are not member-registration attributes. They remain
-            # available for local quota matching and Toluna's preliminary
-            # router, but sending them here can make Toluna reject the entire
-            # member with HTTP 400 (for example routable question 2910077).
-            if kind != "gender":
+            # Routable attributes belong to Toluna's preliminary screener and
+            # can make member registration fail when sent here. Non-routable
+            # quota attributes, however, must be registered so Generate Invite
+            # can verify the same profile that we matched locally.
+            if kind != "gender" and not (question.raw_data or {}).get("required_by_provider"):
                 continue
             reference = reference_questions.get(question_id)
             reference_type = str(
@@ -938,9 +960,11 @@ class TolunaProvider(SurveyProvider):
                 or (question.raw_data or {}).get("reference_answer_type")
                 or ""
             ).lower()
+            question_raw = question.raw_data or {}
             is_routable = bool(
-                (reference.is_routable if reference else False)
-                or (question.raw_data or {}).get("toluna_is_routable")
+                question_raw.get("toluna_is_routable")
+                if "toluna_is_routable" in question_raw
+                else (reference.is_routable if reference else False)
             )
             if is_routable or "computed" in reference_type:
                 continue

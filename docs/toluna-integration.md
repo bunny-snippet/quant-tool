@@ -3,8 +3,8 @@
 This integration is available in **Quant Tool only**. It implements the Toluna External Sample flow in four stages:
 
 1. **Inventory:** for every configured culture, `Get Quotas` imports live Survey/Wave rows, CPI, LOI, IR, remaining capacity, quota layers and routable targeting.
-2. **Prescreener:** Toluna Reference Data is converted into local questions and accepted option IDs. Age and gender are always collected because Toluna member creation requires a date of birth and gender. The respondent enters an age; the adapter derives an exact current-age DOB dynamically instead of hard-coding a calendar year.
-3. **Member:** after a valid prescreener submission, the vault UID is used as the stable Toluna `MemberCode`. A new profile is sent with `POST`; a changed profile is sent with `PUT`; an unchanged profile is not sent again.
+2. **Prescreener:** Toluna Reference Data is converted into local questions and accepted option IDs. Age and gender are always collected because Toluna member creation requires a date of birth and gender. Every question present in a quota is mandatory locally, including questions Toluna marks `IsRoutable=true`: closed-choice questions expose only quota-qualified options, while open age/postal/value requirements are shown as answer guidance. The respondent enters an age; the adapter derives an exact current-age DOB dynamically instead of hard-coding a calendar year.
+3. **Member:** after a valid prescreener submission, the vault UID is used as the stable Toluna `MemberCode`. Required non-routable profile answers are registered with the member; routable/computed attributes remain local-only because Toluna can reject those attributes in member registration. A new profile is sent with `POST`; a changed profile is sent with `PUT`; an unchanged profile is not sent again.
 4. **Invite:** the matching open quota is selected across every layer, then `Generate Invite` returns the respondent-specific live survey URL. The RID is retained as the platform callback identity.
 
 No Toluna secret or GUID value is stored in the application database. A `ClientIntegration` stores environment-variable **names** only.
@@ -79,6 +79,8 @@ Swagger injects credentials server-side and redacts secret fields. Member creati
 ## Official references
 
 - Get Quotas: <https://docs.integratedpanel.toluna.com/externalsample/api/getquotas.html>
+- Sampling rules: <https://docs.integratedpanel.toluna.com/externalsample/samplingrules.html>
+- Quotas FAQ (`IsRoutable`): <https://docs.integratedpanel.toluna.com/faq/externalsample/quotas.html>
 - Generate Invite: <https://docs.integratedpanel.toluna.com/externalsample/api/generateinvite.html>
 - Add Member: <https://docs.integratedpanel.toluna.com/membermanagement/v2/add.html>
 - Questions and Answers: <https://docs.integratedpanel.toluna.com/mapping/referencedataapi/questionsandanswers.html>

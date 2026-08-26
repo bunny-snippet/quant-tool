@@ -398,6 +398,38 @@ class ResearchForGoodIntegrationTests(TestCase):
         get_provider_mock.assert_called_once_with(self.integration)
         get_provider_mock.return_value.refresh_details.assert_called_once_with(survey)
 
+    @patch("surveys.views.get_provider")
+    def test_legacy_rfg_age_adapter_is_refreshed(self, get_provider_mock):
+        survey = Survey.objects.create(
+            client=self.client_record,
+            integration=self.integration,
+            source_key="RFG605150-legacy-age",
+            targeting_synced_at=timezone.now(),
+        )
+        TargetingQuestion.objects.create(
+            survey=survey,
+            question_id=-101,
+            key="RFG_BIRTHDAY",
+            text="What is your date of birth?",
+            question_type="date",
+            raw_data={"adapter_version": 3, "targeting_age_ranges": []},
+        )
+
+        SurveyViewSet._refresh_if_stale(survey, "targeting")
+
+        get_provider_mock.assert_called_once_with(self.integration)
+        get_provider_mock.return_value.refresh_details.assert_called_once_with(survey)
+
+    def test_rfg_age_conversion_rejects_age_over_99(self):
+        self.assertEqual(
+            ResearchForGoodProvider._age_from_age_or_date("99"),
+            99,
+        )
+        with self.assertRaises(ValueError):
+            ResearchForGoodProvider._age_from_age_or_date("100")
+        with self.assertRaises(ValueError):
+            ResearchForGoodProvider._birthday_from_age_or_date("1900-01-01")
+
     @patch.dict("os.environ", {"RFG_APID": "publisher", "RFG_SECRET": "00112233445566778899aabbccddeeff"}, clear=False)
     def test_duplicate_check_uses_official_fingerprint_when_available(self):
         survey = Survey.objects.create(
