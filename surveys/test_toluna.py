@@ -109,6 +109,230 @@ class TolunaProviderTests(TestCase):
             config={"environment": "production", "callback_hash_required": True},
         )
 
+    def _complete_member_contract_case(self):
+        reference = copy.deepcopy(REFERENCE)
+        reference.extend([
+            {
+                "IsRoutable": False,
+                "InternalName": "Annual Household Income",
+                "TranslatedQuestion": {
+                    "QuestionID": 1001107,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "What is your household income?",
+                },
+                "TranslatedAnswers": [
+                    {
+                        "AnswerID": 2002333,
+                        "Translation": "$100,000-$199,999",
+                        "AnswerInternalName": "income-mid",
+                    },
+                    {
+                        "AnswerID": 2002334,
+                        "Translation": "$200,000+",
+                        "AnswerInternalName": "income-high",
+                    },
+                ],
+                "AnswerType": "SingleSelect",
+            },
+            {
+                "IsRoutable": False,
+                "InternalName": "Owned Devices",
+                "TranslatedQuestion": {
+                    "QuestionID": 1002001,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "Which devices do you own?",
+                },
+                "TranslatedAnswers": [
+                    {
+                        "AnswerID": 3002001,
+                        "Translation": "Phone",
+                        "AnswerInternalName": "phone",
+                    },
+                    {
+                        "AnswerID": 3002002,
+                        "Translation": "Tablet",
+                        "AnswerInternalName": "tablet",
+                    },
+                ],
+                "AnswerType": "MultiSelect",
+            },
+            {
+                "IsRoutable": False,
+                "InternalName": "Favorite Color",
+                "TranslatedQuestion": {
+                    "QuestionID": 1003001,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "What is your favorite color?",
+                },
+                "TranslatedAnswers": [{
+                    "AnswerID": 3003001,
+                    "Translation": "Open answer",
+                    "AnswerInternalName": "open-answer",
+                }],
+                "AnswerType": "OpenEnd",
+            },
+            {
+                "IsRoutable": False,
+                "InternalName": "Postal Code",
+                "TranslatedQuestion": {
+                    "QuestionID": 1001042,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "What is your postal code?",
+                },
+                "TranslatedAnswers": [{
+                    "AnswerID": 2224508,
+                    "Translation": "Postal code",
+                    "AnswerInternalName": "postal",
+                }],
+                "AnswerType": "OpenEnd",
+            },
+            {
+                "IsRoutable": True,
+                "InternalName": "Toluna preliminary attribute",
+                "TranslatedQuestion": {
+                    "QuestionID": 2910077,
+                    "CultureID": 1,
+                    "DisplayNameTranslation": "Toluna preliminary attribute",
+                },
+                "TranslatedAnswers": [{
+                    "AnswerID": 5312785,
+                    "Translation": "Yes",
+                    "AnswerInternalName": "Yes",
+                }],
+                "AnswerType": "SingleSelect",
+            },
+        ])
+        quotas = copy.deepcopy(QUOTAS)
+        quotas["Surveys"][0]["Quotas"][0]["Layers"].extend([
+            {
+                "LayerID": 3,
+                "SubQuotas": [{
+                    "SubQuotaID": 30,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1001107,
+                        "AnswerIDs": [2002334],
+                        "AnswerValues": [],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+            {
+                "LayerID": 4,
+                "SubQuotas": [{
+                    "SubQuotaID": 40,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1002001,
+                        "AnswerIDs": [3002001, 3002002],
+                        "AnswerValues": [],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+            {
+                "LayerID": 5,
+                "SubQuotas": [{
+                    "SubQuotaID": 50,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1003001,
+                        "AnswerIDs": [3003001],
+                        "AnswerValues": ["blue"],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+            {
+                "LayerID": 6,
+                "SubQuotas": [{
+                    "SubQuotaID": 60,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 1001042,
+                        "AnswerIDs": [2224508],
+                        "AnswerValues": ["100"],
+                        "IsRoutable": False,
+                    }],
+                }],
+            },
+            {
+                "LayerID": 7,
+                "SubQuotas": [{
+                    "SubQuotaID": 70,
+                    "QuestionsAndAnswers": [{
+                        "QuestionID": 2910077,
+                        "AnswerIDs": [5312785],
+                        "AnswerValues": [],
+                        "IsRoutable": True,
+                    }],
+                }],
+            },
+        ])
+        bootstrap = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(reference), FakeResponse(quotas)
+            ),
+        )
+        normalized = bootstrap.normalize_inventory_item(
+            bootstrap.inventory()[0], timezone.now()
+        )
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        bootstrap.refresh_details(survey)
+        questions = {
+            row.question_id: row for row in survey.targeting_questions.all()
+        }
+        request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{questions[1001538].pk}": "27",
+            f"question_{questions[1001007].pk}": "2000247",
+            f"question_{questions[1001107].pk}": "2002334",
+            f"question_{questions[1002001].pk}": ["3002001", "3002002"],
+            f"question_{questions[1003001].pk}": "blue",
+            f"question_{questions[1001042].pk}": "10023",
+            f"question_{questions[2910077].pk}": "5312785",
+        })
+        answers, errors = _collect_prescreener_answers(request, survey)
+        self.assertEqual(errors, [])
+        self.assertEqual(bootstrap._matching_quota(survey, answers).quota_id, 900)
+        return survey, questions, answers
+
+    def _assert_complete_member_contract_payload(
+        self, survey, questions, payload, member_code
+    ):
+        self.assertEqual(payload["PartnerGUID"], "panel-guid")
+        self.assertEqual(payload["MemberCode"], member_code)
+        self.assertEqual(
+            payload["BirthDate"], TolunaProvider._birth_date(27, member_code)
+        )
+        self.assertEqual(payload["PostalCode"], "10023")
+        registration = {
+            item["QuestionID"]: item["Answers"]
+            for item in payload["RegistrationAnswers"]
+        }
+        self.assertEqual(registration[1001007], [{"AnswerID": 2000247}])
+        self.assertEqual(registration[1001107], [{"AnswerID": 2002334}])
+        self.assertCountEqual(
+            registration[1002001],
+            [{"AnswerID": 3002001}, {"AnswerID": 3002002}],
+        )
+        self.assertEqual(registration[1003001], [{
+            "AnswerID": 3003001,
+            "AnswerValue": "blue",
+        }])
+        self.assertNotIn(2910077, registration)
+
+        required_for_member = {
+            question.question_id
+            for question in questions.values()
+            if (question.raw_data or {}).get("required_for_member")
+        }
+        represented_in_payload = set(registration) | {1001538, 1001042}
+        self.assertEqual(represented_in_payload, required_for_member)
+        self.assertTrue(questions[2910077].raw_data["required_by_provider"])
+        self.assertFalse(questions[2910077].raw_data["required_for_member"])
+
     def test_inventory_uses_reference_and_quota_apis_without_persisting_panel_guid(self):
         session = RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS))
         provider = TolunaProvider(self.integration, session=session)
@@ -292,6 +516,193 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_member_create_posts_complete_required_profile_before_invite(self):
+        survey, questions, answers = self._complete_member_contract_case()
+        attempt = SurveyAttempt.objects.create(
+            rid="Crt123AbC9",
+            prescreener_uid="Cr1e-At2e-Uid3-Test",
+            survey=survey,
+            user_id="complete-create-user",
+        )
+        invite = {
+            "SurveyId": 71,
+            "WaveID": 72,
+            "QuotaID": 900,
+            "MemberAmount": 0,
+            "PartnerAmount": 3.25,
+            "URL": "https://router.toluna.test/invite?token=complete-create",
+            "LOI": 7,
+            "IR": 40,
+        }
+        session = RecordingSession(FakeResponse(None, 201), FakeResponse(invite))
+        provider = TolunaProvider(self.integration, session=session)
+
+        outbound = provider.build_outbound_url(survey, attempt, answers)
+
+        self.assertEqual([call[0] for call in session.calls], ["POST", "GET"])
+        member_url = (
+            "https://ip.surveyrouter.com/IntegratedPanelService/api/Respondent"
+        )
+        self.assertEqual(session.calls[0][1], member_url)
+        member_body = session.calls[0][2]["json"]
+        self._assert_complete_member_contract_payload(
+            survey, questions, member_body, attempt.prescreener_uid
+        )
+        invite_url = (
+            "https://tws.toluna.com/IPExternalSamplingService/ExternalSample/"
+            f"panel-guid/{member_body['MemberCode']}/Invite/900"
+        )
+        self.assertEqual(session.calls[1][1], invite_url)
+        self.assertEqual(
+            provider.last_member_summary["member_id"], member_body["MemberCode"]
+        )
+        self.assertEqual(parse_qs(urlsplit(outbound).query)["rid"], [attempt.rid])
+
+    def test_reused_member_update_puts_complete_profile_before_same_member_invite(self):
+        survey, questions, answers = self._complete_member_contract_case()
+        reused_member_code = "Old1-Mem2-Ber3-Code"
+        attempt = SurveyAttempt.objects.create(
+            rid="Upd123AbC9",
+            prescreener_uid="Ne1w-Jou2-Rne3-Yuid",
+            provider_profile_uid=reused_member_code,
+            survey=survey,
+            user_id="complete-update-user",
+        )
+        member = TolunaMember.objects.create(
+            integration=self.integration,
+            member_code=reused_member_code,
+            culture_code="en-us",
+            profile_hash="stale-profile-hash",
+            is_registered=True,
+        )
+        invite = {
+            "SurveyId": 71,
+            "WaveID": 72,
+            "QuotaID": 900,
+            "MemberAmount": 0,
+            "PartnerAmount": 3.25,
+            "URL": "https://router.toluna.test/invite?token=complete-update",
+            "LOI": 7,
+            "IR": 40,
+        }
+        session = RecordingSession(
+            FakeResponse(None, status_code=200), FakeResponse(invite)
+        )
+        provider = TolunaProvider(self.integration, session=session)
+
+        outbound = provider.build_outbound_url(survey, attempt, answers)
+
+        self.assertEqual([call[0] for call in session.calls], ["PUT", "GET"])
+        member_url = (
+            "https://ip.surveyrouter.com/IntegratedPanelService/api/Respondent"
+        )
+        self.assertEqual(session.calls[0][1], member_url)
+        member_body = session.calls[0][2]["json"]
+        self._assert_complete_member_contract_payload(
+            survey, questions, member_body, reused_member_code
+        )
+        self.assertNotEqual(member_body["MemberCode"], attempt.prescreener_uid)
+        invite_url = (
+            "https://tws.toluna.com/IPExternalSamplingService/ExternalSample/"
+            f"panel-guid/{reused_member_code}/Invite/900"
+        )
+        self.assertEqual(session.calls[1][1], invite_url)
+        self.assertNotIn(attempt.prescreener_uid, session.calls[1][1])
+        self.assertEqual(
+            provider.last_member_summary["member_id"], reused_member_code
+        )
+        member.refresh_from_db()
+        self.assertNotEqual(member.profile_hash, "stale-profile-hash")
+        self.assertIsNotNone(member.last_synced_at)
+        self.assertEqual(parse_qs(urlsplit(outbound).query)["rid"], [attempt.rid])
+
+    def test_required_member_answers_fail_closed_before_member_http(self):
+        survey, questions, answers = self._complete_member_contract_case()
+        attempt = SurveyAttempt.objects.create(
+            rid="Req123Fail",
+            prescreener_uid="Re1q-Fa2i-Lu3r-Test",
+            survey=survey,
+            user_id="required-member-answer-user",
+        )
+        session = RecordingSession()
+        provider = TolunaProvider(self.integration, session=session)
+
+        missing_postal = copy.deepcopy(answers)
+        missing_postal.pop(str(questions[1001042].pk))
+        with self.assertRaisesRegex(ProviderError, "required question 1001042"):
+            provider._register_member(survey, attempt, missing_postal)
+
+        open_question = questions[1003001]
+        open_question.options = []
+        open_question.raw_data = {
+            **open_question.raw_data,
+            "allowed_answer_ids": [],
+        }
+        open_question.save(update_fields=["options", "raw_data"])
+        with self.assertRaisesRegex(ProviderError, "no unambiguous open-answer mapping"):
+            provider._register_member(survey, attempt, answers)
+
+        self.assertEqual(session.calls, [])
+        self.assertFalse(TolunaMember.objects.filter(
+            integration=self.integration,
+            member_code=attempt.prescreener_uid,
+        ).exists())
+
+    def test_numeric_open_text_is_sent_as_answer_value_not_answer_id(self):
+        survey, questions, answers = self._complete_member_contract_case()
+        open_answer = answers[str(questions[1003001].pk)]
+        open_answer["values"] = ["12345"]
+        open_answer["upstream_values"] = ["12345"]
+        attempt = SurveyAttempt.objects.create(
+            rid="Txt123Open",
+            prescreener_uid="Te1x-Va2l-Ue3s-Test",
+            survey=survey,
+            user_id="numeric-open-answer-user",
+        )
+
+        payload = TolunaProvider(self.integration)._member_payload(
+            survey, attempt, answers
+        )
+        registration = {
+            item["QuestionID"]: item["Answers"]
+            for item in payload["RegistrationAnswers"]
+        }
+        self.assertEqual(registration[1003001], [{
+            "AnswerID": 3003001,
+            "AnswerValue": "12345",
+        }])
+
+    def test_routable_postal_is_still_sent_as_core_member_property(self):
+        survey, questions, answers = self._complete_member_contract_case()
+        postal = questions[1001042]
+        postal.raw_data = {
+            **postal.raw_data,
+            "toluna_is_routable": True,
+            "required_for_member": False,
+        }
+        postal.save(update_fields=["raw_data"])
+        TolunaReferenceQuestion.objects.filter(
+            integration=self.integration,
+            culture_code="en-us",
+            question_id=1001042,
+        ).update(is_routable=True)
+        attempt = SurveyAttempt.objects.create(
+            rid="Zip123Core",
+            prescreener_uid="Zi1p-Co2r-Ep3r-Test",
+            survey=survey,
+            user_id="routable-postal-user",
+        )
+
+        payload = TolunaProvider(self.integration)._member_payload(
+            survey, attempt, answers
+        )
+
+        self.assertEqual(payload["PostalCode"], "10023")
+        self.assertNotIn(
+            1001042,
+            {item["QuestionID"] for item in payload["RegistrationAnswers"]},
+        )
 
     def test_quota_serializer_uses_readable_scope_and_targeting_instead_of_id(self):
         provider = TolunaProvider(
@@ -492,13 +903,14 @@ class TolunaProviderTests(TestCase):
 
         self.assertTrue(survey.targeting_questions.filter(question_id=2910077).exists())
         self.assertTrue(
-            survey.targeting_questions.filter(raw_data__adapter_version=5).exists()
+            survey.targeting_questions.filter(raw_data__adapter_version=6).exists()
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
         routable = questions[2910077]
         self.assertTrue(routable.raw_data["required_by_provider"])
         self.assertTrue(routable.raw_data["toluna_is_routable"])
+        self.assertFalse(routable.raw_data["required_for_member"])
         prepared = {
             item["model"].question_id: item for item in _prescreener_questions(survey)
         }
@@ -941,7 +1353,7 @@ class TolunaProviderTests(TestCase):
 
         age_question = survey.targeting_questions.get(question_id=1001538)
         self.assertEqual(age_question.options, [])
-        self.assertEqual(age_question.raw_data["adapter_version"], 5)
+        self.assertEqual(age_question.raw_data["adapter_version"], 6)
         self.assertEqual(age_question.raw_data["targeting_age_ranges"], [
             {"min": 21, "max": 29},
             {"min": 30, "max": 45},
@@ -988,7 +1400,7 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(TolunaProvider._age_range("65 and older"), (65, 99))
 
     @patch("surveys.views.get_provider")
-    def test_targeting_details_refresh_fresh_adapter_v2_rows(self, get_provider_mock):
+    def test_targeting_details_refreshes_previous_adapter_rows(self, get_provider_mock):
         survey = Survey.objects.create(
             client=self.integration.client,
             integration=self.integration,
@@ -1001,7 +1413,7 @@ class TolunaProviderTests(TestCase):
             key="TOLUNA_1001538",
             text="What is your age?",
             question_type="numeric",
-            raw_data={"adapter_version": 2, "toluna_kind": "birth_date"},
+            raw_data={"adapter_version": 5, "toluna_kind": "birth_date"},
         )
 
         SurveyViewSet._refresh_if_stale(survey, "targeting")

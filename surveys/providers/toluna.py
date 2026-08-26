@@ -65,7 +65,7 @@ COMMON_GENDER_OPTIONS = (
     (2000246, "Female"),
     (2000247, "Male"),
 )
-TOLUNA_ADAPTER_VERSION = 5
+TOLUNA_ADAPTER_VERSION = 6
 
 
 def _pick(payload, *names, default=None):
@@ -717,7 +717,11 @@ class TolunaProvider(SurveyProvider):
                     "required_by_provider": required_by_provider,
                     "required_for_member": (
                         kind in {"birth_date", "gender"}
-                        or (required_by_provider and not requirement.get("all_routable"))
+                        or (
+                            required_by_provider
+                            and not requirement.get("all_routable")
+                            and "computed" not in answer_type
+                        )
                     ),
                     "reference_answer_type": reference.answer_type,
                     **({
@@ -946,24 +950,56 @@ class TolunaProvider(SurveyProvider):
         }
         registration_answers = []
         birth_date = postal_code = ""
-        for question_id, answer in self._answers_by_question(answers).items():
-            question = questions.get(question_id)
-            if question is None:
-                continue
-            values = answer.get("values") or []
-            upstream_values = answer.get("upstream_values") or values
+        answers_by_question = self._answers_by_question(answers)
+        for question_id, question in questions.items():
+            answer = answers_by_question.get(question_id) or {}
+            values = [
+                str(value).strip()
+                for value in answer.get("values") or []
+                if str(value).strip()
+            ]
+            upstream_values = [
+                str(value).strip()
+                for value in answer.get("upstream_values") or values
+                if str(value).strip()
+            ]
             kind = str((question.raw_data or {}).get("toluna_kind") or "profile")
             if kind == "birth_date":
-                birth_date = self._birth_date(values[0], member_code)
+                if values:
+                    birth_date = self._birth_date(values[0], member_code)
                 continue
             if kind == "postal":
-                postal_code = str(values[0]).strip()
-                continue
-            # Routable attributes belong to Toluna's preliminary screener and
-            # can make member registration fail when sent here. Non-routable
-            # quota attributes, however, must be registered so Generate Invite
-            # can verify the same profile that we matched locally.
-            if kind != "gender" and not (question.raw_data or {}).get("required_by_provider"):
+                question_raw = question.raw_data or {}
+                reference = reference_questions.get(question_id)
+                reference_type = str(
+                    (reference.answer_type if reference else "")
+                    or question_raw.get("reference_answer_type")
+                    or ""
+                ).lower()
+                is_routable = bool(
+                    question_raw.get("toluna_is_routable")
+                    if "toluna_is_routable" in question_raw
+                    else (reference.is_routable if reference else False)
+                )
+                required_for_member = bool(
+                    question_raw.get("required_for_member")
+                    if "required_for_member" in question_raw
+                    else (
+                        question_raw.get("required_by_provider")
+                        and not is_routable
+                        and "computed" not in reference_type
+                    )
+                )
+                if required_for_member and not values:
+                    raise ProviderError(
+                        f"Toluna member profile is missing required question {question_id}."
+                    )
+                # PostalCode is a first-class Toluna member property rather
+                # than a RegistrationAnswer. Send an entered value even when
+                # the corresponding quota attribute is routable/computed;
+                # Toluna uses this core field to derive geographic profiles.
+                if values:
+                    postal_code = values[0]
                 continue
             reference = reference_questions.get(question_id)
             reference_type = str(
@@ -979,15 +1015,82 @@ class TolunaProvider(SurveyProvider):
             )
             if is_routable or "computed" in reference_type:
                 continue
+            # Adapter-v6 questions carry an explicit member contract. Preserve
+            # the old required_by_provider fallback for already-synced rows
+            # that predate that flag.
+            required_for_member = bool(
+                question_raw.get("required_for_member")
+                if "required_for_member" in question_raw
+                else (
+                    kind == "gender"
+                    or bool(question_raw.get("required_by_provider"))
+                )
+            )
+            if kind != "gender" and not required_for_member:
+                continue
+            if not values or not upstream_values:
+                raise ProviderError(
+                    f"Toluna member profile is missing required question {question_id}."
+                )
+
+            option_rows = [
+                option for option in question.options or []
+                if isinstance(option, dict) and option.get("OptionId") not in (None, "")
+            ]
+            option_ids = {
+                _integer(option.get("OptionId"), -1)
+                for option in option_rows
+            } - {-1}
+            allowed_ids = {
+                _integer(value, -1)
+                for value in question_raw.get("allowed_answer_ids") or []
+            } - {-1}
             mapped = []
-            for value in upstream_values:
-                try:
-                    mapped.append({"AnswerID": int(value)})
-                except (TypeError, ValueError):
-                    if question.options:
-                        mapped.append({"AnswerID": int(question.options[0]["OptionId"]), "AnswerValue": str(value)})
-            if mapped:
-                registration_answers.append({"QuestionID": question_id, "Answers": mapped})
+            if "open" in reference_type or "text" in question.question_type.lower():
+                # Toluna requires every open AnswerValue to be paired with its
+                # synthetic/envelope AnswerID. Numeric-looking respondent text
+                # is still an AnswerValue, never an AnswerID.
+                envelope_ids = (
+                    allowed_ids.intersection(option_ids)
+                    if allowed_ids and option_ids
+                    else allowed_ids or option_ids
+                )
+                if len(envelope_ids) != 1:
+                    raise ProviderError(
+                        f"Toluna member question {question_id} has no unambiguous open-answer mapping."
+                    )
+                envelope_id = next(iter(envelope_ids))
+                mapped = [
+                    {"AnswerID": envelope_id, "AnswerValue": value}
+                    for value in values
+                ]
+            else:
+                valid_ids = allowed_ids or option_ids
+                label_ids = {}
+                for option in option_rows:
+                    option_id = _integer(option.get("OptionId"), -1)
+                    for label in (
+                        option.get("OptionText"),
+                        option.get("AnswerInternalName"),
+                    ):
+                        normalized = str(label or "").strip().casefold()
+                        if normalized:
+                            label_ids.setdefault(normalized, set()).add(option_id)
+                for value in upstream_values:
+                    answer_id = _integer(value, -1)
+                    if answer_id < 0:
+                        matches = label_ids.get(value.casefold(), set())
+                        answer_id = next(iter(matches)) if len(matches) == 1 else -1
+                    if answer_id < 0 or (valid_ids and answer_id not in valid_ids):
+                        raise ProviderError(
+                            f"Toluna member question {question_id} has an invalid answer mapping."
+                        )
+                    mapped.append({"AnswerID": answer_id})
+            if len(mapped) != len(values):
+                raise ProviderError(
+                    f"Toluna member question {question_id} could not serialize every required answer."
+                )
+            registration_answers.append({"QuestionID": question_id, "Answers": mapped})
         if not birth_date:
             raise ProviderError("Date of birth is required before Toluna member registration.")
         if not any(
