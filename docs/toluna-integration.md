@@ -4,8 +4,8 @@ This integration is available in **Quant Tool only**. It implements the Toluna E
 
 1. **Inventory:** for every configured culture, `Get Quotas` imports live Survey/Wave rows, CPI, LOI, IR, remaining capacity, quota layers and routable targeting.
 2. **Prescreener:** Toluna Reference Data is converted into local questions and accepted option IDs. Age and gender are always collected because Toluna member creation requires a date of birth and gender. Every question present in a quota is mandatory locally, including questions Toluna marks `IsRoutable=true`: closed-choice questions expose only quota-qualified options, while open age/postal/value requirements are shown as answer guidance. The respondent enters an age; the adapter derives an exact current-age DOB dynamically instead of hard-coding a calendar year.
-3. **Member:** after a valid prescreener submission, the vault UID is used as the stable Toluna `MemberCode`. Age is sent as `BirthDate`, an entered postal code is sent as the core `PostalCode` property, and every member-eligible required single-, multi-, or open-answer profile is sent in `RegistrationAnswers`. Open answers are paired with their Toluna envelope `AnswerID`. Payload construction fails before any upstream request when a required member field is missing or cannot be mapped, so a partial profile is never silently registered. Non-core routable/computed `RegistrationAnswers` remain local-only because Toluna can reject those attributes in member registration. A new profile is sent with `POST`; a changed reused profile is sent with `PUT`; an unchanged profile is not sent again.
-4. **Invite:** the matching open quota is selected across every layer, then `Generate Invite` returns the respondent-specific live survey URL. The RID is retained as the platform callback identity.
+3. **Member:** after a valid prescreener submission, the vault UID is used as the stable Toluna `MemberCode`. Age is sent as `BirthDate`, an entered postal code is sent as the core `PostalCode` property, and every member-eligible required single-, multi-, or open-answer profile is sent in `RegistrationAnswers`. A locally answered routable profile is also forwarded when its Toluna `AnswerID` mapping is exact, preventing Toluna from asking the same known qualification again. An optional routable value with missing or ambiguous mapping is omitted so Toluna can collect it in its own preliminary screener; required fields still fail closed. Computed attributes remain local-only. Open answers are paired with their Toluna envelope `AnswerID`. A new profile is sent with `POST`; a changed reused profile is sent with `PUT`; an unchanged profile is not sent again.
+4. **Invite:** the matching open quota is selected across every layer, then `Generate Invite` returns the respondent-specific live survey URL. SurveyID, WaveID and QuotaID must all match the locally selected quota. The provider query string is preserved byte-for-byte, the platform RID is appended as callback identity, and the backend redirects directly to Toluna without exposing MemberCode or birth date on an intermediate page.
 
 No Toluna secret or GUID value is stored in the application database. A `ClientIntegration` stores environment-variable **names** only.
 
@@ -40,7 +40,7 @@ is still accepted as a fallback for old deployments.
 4. Keep **Require callback HMAC** enabled for production.
 5. Save, use **Test connection**, then **Sync now**.
 
-Successful testing enables scheduled synchronization. The project inventory becomes visible after the first successful sync. Quota/targeting details are hydrated in bounded background batches and immediately on first project use if still stale.
+Successful testing enables scheduled synchronization. The project inventory becomes visible after the first successful sync. Quota/targeting details are hydrated in bounded background batches and immediately on first project use if still stale. Because Toluna does not provide a reliable survey-level modified timestamp, the adapter compares the quota/layer/subquota/question/answer targeting contract directly. Only a targeting-contract change invalidates the derived local questions; capacity-counter changes update existing quota rows without bouncing an open prescreener. If targeting changes while a respondent has the prescreener open, submission is stopped once, the current contract is rebuilt, and the respondent must review the updated questions before an invite is requested.
 
 ## Provider requests
 
@@ -52,7 +52,7 @@ Successful testing enables scheduled synchronization. The project inventory beco
 | Member create/update | `POST` or `PUT /IntegratedPanelService/api/Respondent` | Toluna member contract |
 | Invite | `GET /IPExternalSamplingService/ExternalSample/{PanelGUID}/{MemberCode}/Invite/{QuotaID}` | `API_AUTH_KEY` |
 
-The returned invite's SurveyID and WaveID must match the local project before redirect. `PartnerAmount`, LOI and IR are snapshotted on the attempt so later upstream changes cannot rewrite historical commercial data.
+The returned invite's SurveyID, WaveID and QuotaID must match the local selection before redirect. `PartnerAmount`, LOI and IR are snapshotted on the attempt so later upstream changes cannot rewrite historical commercial data.
 
 Member synchronization uses a shared-cache single-flight lock per integration + `MemberCode`. This prevents concurrent web workers from duplicating registration and enforces Toluna's minimum delay between two calls for the same member without serializing different respondents.
 

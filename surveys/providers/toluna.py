@@ -6,7 +6,7 @@ import secrets
 import time
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
-from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 import requests
 from prescreener_vault.reuse import effective_profile_uid
@@ -611,6 +611,26 @@ class TolunaProvider(SurveyProvider):
         ]
 
     def refresh_details(self, survey):
+        # Inventory sync and on-demand prescreener hydration can run at the
+        # same time. Re-read the row under a lock before deriving questions so
+        # a newer raw quota contract can never be overwritten by rows built
+        # from an older in-memory Survey instance.
+        with transaction.atomic():
+            locked = Survey.objects.select_for_update().get(pk=survey.pk)
+            result = self._refresh_details_locked(locked)
+        # Notification reconciliation acquires its own row locks. Run it only
+        # after releasing the Survey lock to keep a consistent lock order with
+        # the webhook path and avoid Survey/Notification deadlocks.
+        from ..toluna_notifications import reconcile_toluna_operational_notifications
+
+        reconcile_toluna_operational_notifications(
+            locked,
+            replay_applied=True,
+            applied_since=locked.last_seen_at,
+        )
+        return result
+
+    def _refresh_details_locked(self, survey):
         raw = survey.raw_data or {}
         quotas = _pick(raw, "Quotas", default=[]) or []
         culture = str((raw.get("_toluna") or {}).get("culture_code") or "").lower()
@@ -627,9 +647,10 @@ class TolunaProvider(SurveyProvider):
             if kind in {"birth_date", "gender"} and kind not in mandatory:
                 mandatory[kind] = row
         # Ask every quota attribute locally, including attributes Toluna marks
-        # routable. Routable answers remain excluded from Member Registration
-        # below because Toluna can reject them there; they are still collected
-        # and used for local quota matching before Generate Invite.
+        # routable. When the respondent supplies a mapped routable answer we
+        # also register it with Toluna; leaving a known answer out forces a
+        # second provider prescreener and can make the member fail the exact
+        # quota that was already matched here.
         question_ids = set(requirements)
         question_ids.update(row.question_id for row in mandatory.values())
         questions = []
@@ -763,7 +784,6 @@ class TolunaProvider(SurveyProvider):
             survey.save(update_fields=[
                 "has_quota", "targeting_synced_at", "quota_synced_at", "detail_synced_at", "updated_at"
             ])
-
     @staticmethod
     def _answers_by_question(answers):
         return {
@@ -1013,7 +1033,7 @@ class TolunaProvider(SurveyProvider):
                 if "toluna_is_routable" in question_raw
                 else (reference.is_routable if reference else False)
             )
-            if is_routable or "computed" in reference_type:
+            if "computed" in reference_type:
                 continue
             # Adapter-v6 questions carry an explicit member contract. Preserve
             # the old required_by_provider fallback for already-synced rows
@@ -1026,12 +1046,19 @@ class TolunaProvider(SurveyProvider):
                     or bool(question_raw.get("required_by_provider"))
                 )
             )
-            if kind != "gender" and not required_for_member:
-                continue
             if not values or not upstream_values:
-                raise ProviderError(
-                    f"Toluna member profile is missing required question {question_id}."
-                )
+                if required_for_member:
+                    raise ProviderError(
+                        f"Toluna member profile is missing required question {question_id}."
+                    )
+                continue
+            # Preserve the explicit member-registration contract for ordinary
+            # optional questions. Routable answers are the only optional
+            # quota answers we forward: when the respondent already supplied
+            # one, Toluna does not need to ask it again in its preliminary
+            # screener.
+            if not required_for_member and not is_routable:
+                continue
 
             option_rows = [
                 option for option in question.options or []
@@ -1056,6 +1083,8 @@ class TolunaProvider(SurveyProvider):
                     else allowed_ids or option_ids
                 )
                 if len(envelope_ids) != 1:
+                    if is_routable and not required_for_member:
+                        continue
                     raise ProviderError(
                         f"Toluna member question {question_id} has no unambiguous open-answer mapping."
                     )
@@ -1066,6 +1095,12 @@ class TolunaProvider(SurveyProvider):
                 ]
             else:
                 valid_ids = allowed_ids or option_ids
+                if not valid_ids:
+                    if is_routable and not required_for_member:
+                        continue
+                    raise ProviderError(
+                        f"Toluna member question {question_id} has no trusted answer mapping."
+                    )
                 label_ids = {}
                 for option in option_rows:
                     option_id = _integer(option.get("OptionId"), -1)
@@ -1082,11 +1117,16 @@ class TolunaProvider(SurveyProvider):
                         matches = label_ids.get(value.casefold(), set())
                         answer_id = next(iter(matches)) if len(matches) == 1 else -1
                     if answer_id < 0 or (valid_ids and answer_id not in valid_ids):
+                        if is_routable and not required_for_member:
+                            mapped = []
+                            break
                         raise ProviderError(
                             f"Toluna member question {question_id} has an invalid answer mapping."
                         )
                     mapped.append({"AnswerID": answer_id})
             if len(mapped) != len(values):
+                if is_routable and not required_for_member:
+                    continue
                 raise ProviderError(
                     f"Toluna member question {question_id} could not serialize every required answer."
                 )
@@ -1207,8 +1247,9 @@ class TolunaProvider(SurveyProvider):
         if not member_code:
             raise ProviderError("The Toluna member identity is missing.")
         quota = self._matching_quota(survey, answers)
-        # The public flow uses this non-sensitive summary on its confirmation
-        # screen. The provider URL is still kept server-side until Continue.
+        # Register/update the member before requesting an invite. Keep this
+        # summary process-local for diagnostics; it is never rendered in the
+        # public redirect flow.
         self.last_member_summary = self._register_member(survey, attempt, answers)
         culture = str((survey.raw_data.get("_toluna") or {}).get("culture_code") or "").replace("-", "_")
         panel_guid = environment_value(
@@ -1238,12 +1279,37 @@ class TolunaProvider(SurveyProvider):
             raise ProviderError("Toluna did not return a survey invite URL.")
         expected_survey = _integer(_pick(survey.raw_data, "SurveyID"), -1)
         expected_wave = _integer(_pick(survey.raw_data, "WaveID"), -1)
-        if _integer(_pick(invite, "SurveyID", "SurveyId"), -2) != expected_survey or _integer(_pick(invite, "WaveID"), -2) != expected_wave:
-            raise ProviderError("Toluna invite did not match the selected survey wave.")
-        parts = urlsplit(str(_pick(invite, "URL")))
-        query = parse_qsl(parts.query, keep_blank_values=True)
-        if not any(key.lower() == "rid" for key, _ in query):
-            query.append(("rid", attempt.rid))
+        expected_quota = _integer(quota.quota_id, -1)
+        if (
+            _integer(_pick(invite, "SurveyID", "SurveyId"), -2) != expected_survey
+            or _integer(_pick(invite, "WaveID"), -2) != expected_wave
+            or _integer(_pick(invite, "QuotaID", "QuotaId"), -2) != expected_quota
+        ):
+            raise ProviderError("Toluna invite did not match the selected survey, wave, and quota.")
+        invite_url = str(_pick(invite, "URL")).strip()
+        parts = urlsplit(invite_url)
+        if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+            raise ProviderError("Toluna returned an invalid survey invite URL.")
+        existing_rid = ""
+        for segment in parts.query.split("&"):
+            raw_key, separator, raw_value = segment.partition("=")
+            if separator and unquote_plus(raw_key).casefold() == "rid":
+                existing_rid = raw_value
+                break
+        if existing_rid and unquote_plus(existing_rid) != attempt.rid:
+            raise ProviderError("Toluna invite contained an unexpected respondent RID.")
+        if existing_rid:
+            outbound_url = invite_url
+        else:
+            # The provider query is opaque and may be signed. Preserve its
+            # exact byte representation and append only our alphanumeric RID;
+            # parsing/re-encoding can silently change spaces, ordering or
+            # duplicate parameters and invalidate an otherwise valid invite.
+            base_url, fragment_marker, fragment = invite_url.partition("#")
+            separator = "&" if "?" in base_url else "?"
+            outbound_url = f"{base_url}{separator}rid={attempt.rid}"
+            if fragment_marker:
+                outbound_url = f"{outbound_url}#{fragment}"
         attempt.source_cpi_snapshot = _decimal(_pick(invite, "PartnerAmount")) or attempt.source_cpi_snapshot
         attempt.payable_cpi_snapshot = attempt.source_cpi_snapshot
         attempt.cpi_snapshot_source = "toluna_invite"
@@ -1259,7 +1325,7 @@ class TolunaProvider(SurveyProvider):
                 "ir": _pick(invite, "IR"),
             },
         }
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+        return outbound_url
 
     def verify_callback(self, request):
         config = self.integration.config or {}

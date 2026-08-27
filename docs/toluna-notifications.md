@@ -50,6 +50,8 @@ carry `EncryptedValue` (quota status, survey closed, enhanced termination and
 reconciliation) remain protected by the source-IP allowlist.
 
 Every request must use `Content-Type: application/json`.
+Every event must include both `SurveyID` and `WaveID`; the pair is Toluna's
+unique survey-interaction identity and Quant never falls back to another wave.
 
 These three production `/32` addresses and the bundled same-host proxy values
 are application defaults, while explicit environment values replace each list
@@ -66,10 +68,18 @@ representative and update the environment before Toluna changes its senders.
 - `AdditionalData` is inspected for the platform `rid`; the Toluna
   `UniqueCode` is used as a safe fallback for matching a respondent journey.
 - Member outcomes update the matching Traffic Report journey.
-- Quota status notifications update the matching local Toluna quota.
-- Survey closed notifications close the matching local Toluna survey.
+- Quota status notifications update only the exact local Toluna
+  `SurveyID + WaveID + QuotaID`; a quota ID is never matched globally.
+- Survey closed notifications close only the exact local Toluna
+  `SurveyID + WaveID`.
 - A valid but currently unmatched notification remains visible and auditable;
-  it is never discarded.
+  it is never discarded. Pending rows are retried after inventory/detail sync
+  and on duplicate delivery.
+- Provider timestamps prevent an older quota delivery from overwriting a newer
+  notification. Pending rows are drained in bounded batches. After inventory
+  or detail replacement, only applied events received at or after that
+  inventory boundary are replayed, so an old notification cannot permanently
+  override a fresher quota snapshot.
 
 ## Official Toluna references
 

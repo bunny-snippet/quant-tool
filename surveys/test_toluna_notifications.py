@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -9,6 +11,7 @@ from django.utils import timezone
 from vendors.models import Client, ClientIntegration
 
 from .models import Survey, SurveyAttempt, SurveyQuota, TolunaNotification
+from .toluna_notifications import reconcile_toluna_operational_notifications
 
 
 @override_settings(
@@ -232,6 +235,367 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(quota.remaining, 0)
         self.assertEqual(self.survey.status, Survey.Status.CLOSED)
         self.assertEqual(self.survey.remaining, 0)
+
+    def test_operational_notifications_without_wave_are_rejected_without_mutation(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="900",
+            quota_id=900,
+            remaining=12,
+            status="Open",
+        )
+
+        quota_response = self._post("toluna-notification-quota-status", {
+            "QuotaID": 900,
+            "SurveyID": 123,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+        close_response = self._post("toluna-notification-survey-closed", {
+            "SurveyID": 123,
+            "SurveyRef": "123560-US",
+            "Status": "Closed",
+            "DateTime": "2026-08-21 10:30:00",
+        })
+
+        self.assertEqual(quota_response.status_code, 400)
+        self.assertEqual(close_response.status_code, 400)
+        self.assertEqual(TolunaNotification.objects.count(), 0)
+        quota.refresh_from_db()
+        self.survey.refresh_from_db()
+        self.assertEqual(quota.status, "Open")
+        self.assertEqual(quota.remaining, 12)
+        self.assertEqual(self.survey.status, Survey.Status.LIVE)
+
+    def test_wave_id_never_falls_back_to_another_wave(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="900",
+            quota_id=900,
+            remaining=12,
+            status="Open",
+        )
+
+        quota_response = self._post("toluna-notification-quota-status", {
+            "QuotaID": 900,
+            "SurveyID": 123,
+            "WaveID": 101,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+        close_response = self._post("toluna-notification-survey-closed", {
+            "SurveyID": 123,
+            "SurveyRef": "123560-US",
+            "Status": "Closed",
+            "DateTime": "2026-08-21 10:30:00",
+            "WaveId": 101,
+        })
+
+        self.assertFalse(quota_response.json()["applied"])
+        self.assertFalse(close_response.json()["applied"])
+        quota.refresh_from_db()
+        self.survey.refresh_from_db()
+        self.assertEqual(quota.status, "Open")
+        self.assertEqual(quota.remaining, 12)
+        self.assertEqual(self.survey.status, Survey.Status.LIVE)
+        self.assertFalse(TolunaNotification.objects.filter(survey=self.survey).exists())
+        self.assertTrue(all(
+            row.processing_message.startswith("Pending reconciliation; exact Toluna survey 123 / wave 101")
+            for row in TolunaNotification.objects.all()
+        ))
+
+    def test_quota_id_is_never_matched_outside_the_exact_survey(self):
+        other_survey = Survey.objects.create(
+            client=self.client_record,
+            integration=self.integration,
+            source_id=456,
+            source_key="456:200",
+            name="Other Toluna survey",
+            company_name="Toluna",
+            country="United States",
+            country_code="US",
+            buyer_id="toluna-buyer",
+            status=Survey.Status.LIVE,
+        )
+        other_quota = SurveyQuota.objects.create(
+            survey=other_survey,
+            source_key="901",
+            quota_id=901,
+            remaining=8,
+            status="Open",
+        )
+
+        response = self._post("toluna-notification-quota-status", {
+            "QuotaID": 901,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+
+        self.assertFalse(response.json()["applied"])
+        other_quota.refresh_from_db()
+        self.assertEqual(other_quota.status, "Open")
+        notification = TolunaNotification.objects.get()
+        self.assertEqual(notification.survey, self.survey)
+        self.assertIn("quota 901 is not available on exact Toluna survey 123 / wave 100", notification.processing_message)
+
+    def test_duplicate_pending_delivery_relinks_and_applies_after_inventory_arrives(self):
+        payload = {
+            "QuotaID": 902,
+            "SurveyID": 123,
+            "WaveID": 101,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        }
+        first = self._post("toluna-notification-quota-status", payload)
+        self.assertFalse(first.json()["applied"])
+
+        exact_survey = Survey.objects.create(
+            client=self.client_record,
+            integration=self.integration,
+            source_key="123:101",
+            name="Exact later Toluna wave",
+            company_name="Toluna",
+            country="United States",
+            country_code="US",
+            buyer_id="toluna-buyer",
+            status=Survey.Status.LIVE,
+        )
+        exact_quota = SurveyQuota.objects.create(
+            survey=exact_survey,
+            source_key="902",
+            quota_id=902,
+            remaining=7,
+            status="Open",
+        )
+
+        second = self._post("toluna-notification-quota-status", payload)
+
+        self.assertTrue(second.json()["duplicate"])
+        self.assertTrue(second.json()["applied"])
+        self.assertEqual(TolunaNotification.objects.count(), 1)
+        notification = TolunaNotification.objects.get()
+        self.assertEqual(notification.duplicate_count, 1)
+        self.assertEqual(notification.survey, exact_survey)
+        exact_quota.refresh_from_db()
+        self.assertEqual(exact_quota.status, "Full")
+        self.assertEqual(exact_quota.remaining, 0)
+
+    def test_pending_operational_notification_reconciles_after_rows_exist(self):
+        response = self._post("toluna-notification-quota-status", {
+            "QuotaID": 903,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+        self.assertFalse(response.json()["applied"])
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="903",
+            quota_id=903,
+            remaining=9,
+            status="Open",
+        )
+
+        reconciled = reconcile_toluna_operational_notifications(self.survey)
+
+        self.assertEqual(reconciled, 1)
+        quota.refresh_from_db()
+        notification = TolunaNotification.objects.get()
+        self.assertTrue(notification.applied)
+        self.assertEqual(quota.status, "Full")
+        self.assertEqual(quota.remaining, 0)
+
+    def test_stale_quota_event_cannot_overwrite_newer_provider_state(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="904",
+            quota_id=904,
+            remaining=12,
+            status="Open",
+        )
+        newer = self._post("toluna-notification-quota-status", {
+            "QuotaID": 904,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:30:00 +00:00",
+        })
+        older = self._post("toluna-notification-quota-status", {
+            "QuotaID": 904,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": True,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+
+        self.assertTrue(newer.json()["applied"])
+        self.assertTrue(older.json()["applied"])
+        quota.refresh_from_db()
+        self.assertEqual(quota.status, "Full")
+        self.assertEqual(quota.remaining, 0)
+        stale = TolunaNotification.objects.get(is_live=True)
+        self.assertIn("newer provider update already controls quota 904", stale.processing_message)
+
+        # A detail refresh can replace the row from an older inventory cache.
+        # Replaying applied events must restore the latest provider state only.
+        quota.status = "Open"
+        quota.remaining = 12
+        quota.save(update_fields=["status", "remaining", "updated_at"])
+        reconcile_toluna_operational_notifications(self.survey, replay_applied=True)
+        quota.refresh_from_db()
+        self.assertEqual(quota.status, "Full")
+        self.assertEqual(quota.remaining, 0)
+
+    def test_newer_open_quota_event_restores_minimum_routable_capacity(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="905",
+            quota_id=905,
+            remaining=12,
+            status="Open",
+        )
+        self._post("toluna-notification-quota-status", {
+            "QuotaID": 905,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:25:00 +00:00",
+        })
+        reopened = self._post("toluna-notification-quota-status", {
+            "QuotaID": 905,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": True,
+            "UpdateDateTimeUTC": "2026-08-21 10:30:00 +00:00",
+        })
+
+        self.assertTrue(reopened.json()["applied"])
+        quota.refresh_from_db()
+        self.assertEqual(quota.status, "Open")
+        self.assertEqual(quota.remaining, 1)
+
+    def test_applied_notification_received_after_inventory_boundary_is_replayed(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="906",
+            quota_id=906,
+            remaining=12,
+            status="Open",
+        )
+        self._post("toluna-notification-quota-status", {
+            "QuotaID": 906,
+            "SurveyID": 123,
+            "WaveID": 100,
+            "IsLive": False,
+            "UpdateDateTimeUTC": "2026-08-21 10:35:00 +00:00",
+        })
+        notification = TolunaNotification.objects.get(quota_id=906)
+        quota.status = "Open"
+        quota.remaining = 12
+        quota.save(update_fields=["status", "remaining", "updated_at"])
+
+        reconcile_toluna_operational_notifications(
+            self.survey,
+            replay_applied=True,
+            applied_since=notification.received_at - timedelta(microseconds=1),
+        )
+
+        quota.refresh_from_db()
+        self.assertEqual(quota.status, "Full")
+        self.assertEqual(quota.remaining, 0)
+
+    @patch("surveys.toluna_notifications.OPERATIONAL_RECONCILE_BATCH_SIZE", 3)
+    def test_pending_operational_reconciliation_is_bounded(self):
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="907",
+            quota_id=907,
+            remaining=12,
+            status="Open",
+        )
+        for index in range(4):
+            TolunaNotification.objects.create(
+                event_type=TolunaNotification.EventType.QUOTA_STATUS,
+                payload_hash=f"bounded-pending-{index}",
+                integration=self.integration,
+                survey=self.survey,
+                provider_survey_id=123,
+                wave_id=100,
+                quota_id=907,
+                provider_status="Unavailable",
+                is_live=False,
+                applied=False,
+                raw_payload={
+                    "SurveyID": 123,
+                    "WaveID": 100,
+                    "QuotaID": 907,
+                    "IsLive": False,
+                    "UpdateDateTimeUTC": f"2026-08-21 10:4{index}:00 +00:00",
+                },
+            )
+
+        reconciled = reconcile_toluna_operational_notifications(self.survey)
+
+        self.assertEqual(reconciled, 3)
+        self.assertEqual(TolunaNotification.objects.filter(applied=True).count(), 3)
+        self.assertEqual(TolunaNotification.objects.filter(applied=False).count(), 1)
+        quota.refresh_from_db()
+        self.assertEqual(quota.status, "Full")
+
+    @patch("surveys.toluna_notifications.OPERATIONAL_RECONCILE_BATCH_SIZE", 1)
+    def test_recent_applied_survey_close_has_priority_over_pending_backlog(self):
+        pending = TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.QUOTA_STATUS,
+            payload_hash="old-pending-before-close",
+            integration=self.integration,
+            survey=self.survey,
+            provider_survey_id=123,
+            wave_id=100,
+            quota_id=999,
+            provider_status="Unavailable",
+            is_live=False,
+            applied=False,
+            raw_payload={
+                "SurveyID": 123,
+                "WaveID": 100,
+                "QuotaID": 999,
+                "IsLive": False,
+            },
+        )
+        close = TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.SURVEY_CLOSED,
+            payload_hash="recent-applied-close",
+            integration=self.integration,
+            survey=self.survey,
+            provider_survey_id=123,
+            wave_id=100,
+            provider_status="Closed",
+            applied=True,
+            raw_payload={
+                "SurveyID": 123,
+                "WaveID": 100,
+                "Status": "Closed",
+            },
+        )
+        self.survey.status = Survey.Status.LIVE
+        self.survey.remaining = 10
+        self.survey.save(update_fields=["status", "remaining", "updated_at"])
+
+        reconciled = reconcile_toluna_operational_notifications(
+            self.survey,
+            replay_applied=True,
+            applied_since=close.received_at - timedelta(microseconds=1),
+        )
+
+        self.assertEqual(reconciled, 1)
+        self.survey.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(self.survey.status, Survey.Status.CLOSED)
+        self.assertEqual(self.survey.remaining, 0)
+        self.assertFalse(pending.applied)
 
     def test_provider_filter_opens_toluna_notification_tabs_and_clean_details(self):
         self._post("toluna-notification-enhanced-termination", {

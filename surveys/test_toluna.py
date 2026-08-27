@@ -1,7 +1,7 @@
 import copy
 import hashlib
 import hmac
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -16,7 +16,15 @@ from vendors.serializers import ClientIntegrationSerializer
 from prescreener_vault.constants import DATABASE_ALIAS
 from prescreener_vault.models import PrescreenerSubmission
 
-from .models import Survey, SurveyAttempt, SurveyQuota, TargetingQuestion, TolunaMember, TolunaReferenceQuestion
+from .models import (
+    Survey,
+    SurveyAttempt,
+    SurveyQuota,
+    TargetingQuestion,
+    TolunaMember,
+    TolunaNotification,
+    TolunaReferenceQuestion,
+)
 from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaInviteRejected, TolunaProvider
@@ -321,7 +329,7 @@ class TolunaProviderTests(TestCase):
             "AnswerID": 3003001,
             "AnswerValue": "blue",
         }])
-        self.assertNotIn(2910077, registration)
+        self.assertEqual(registration[2910077], [{"AnswerID": 5312785}])
 
         required_for_member = {
             question.question_id
@@ -329,7 +337,7 @@ class TolunaProviderTests(TestCase):
             if (question.raw_data or {}).get("required_for_member")
         }
         represented_in_payload = set(registration) | {1001538, 1001042}
-        self.assertEqual(represented_in_payload, required_for_member)
+        self.assertEqual(represented_in_payload, required_for_member | {2910077})
         self.assertTrue(questions[2910077].raw_data["required_by_provider"])
         self.assertFalse(questions[2910077].raw_data["required_for_member"])
 
@@ -402,6 +410,106 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(second.unchanged, 1)
         self.assertEqual(survey.source_created_at, created_at)
         self.assertEqual(survey.source_modified_at, modified_at)
+
+    @patch("surveys.provider_services.get_provider")
+    def test_inventory_sync_marks_toluna_details_stale_when_quota_targeting_changes(
+        self, get_provider_mock
+    ):
+        get_provider_mock.return_value = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)
+            ),
+        )
+        sync_client_integration(self.integration)
+        survey = Survey.objects.get(
+            integration=self.integration, source_key="71:72"
+        )
+        previous_detail_sync = timezone.now()
+        survey.detail_synced_at = previous_detail_sync
+        survey.save(update_fields=["detail_synced_at", "updated_at"])
+
+        changed_quotas = copy.deepcopy(QUOTAS)
+        targeting = changed_quotas["Surveys"][0]["Quotas"][0]["Layers"][0][
+            "SubQuotas"
+        ][0]["QuestionsAndAnswers"][0]
+        targeting["AnswerIDs"] = [2006354]
+        targeting["AnswerValues"] = ["30-34"]
+        get_provider_mock.return_value = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(changed_quotas)
+            ),
+        )
+
+        result = sync_client_integration(self.integration)
+        survey.refresh_from_db()
+
+        self.assertEqual(result.updated, 1)
+        self.assertIsNone(survey.detail_synced_at)
+
+    @patch("surveys.provider_services.get_provider")
+    def test_inventory_capacity_change_updates_quota_without_invalidating_questions(
+        self, get_provider_mock
+    ):
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)
+            ),
+        )
+        get_provider_mock.return_value = provider
+        sync_client_integration(self.integration)
+        survey = Survey.objects.get(
+            integration=self.integration, source_key="71:72"
+        )
+        provider.refresh_details(survey)
+        survey.refresh_from_db()
+        previous_detail_sync = survey.detail_synced_at
+        quota = survey.quotas.get(quota_id=900)
+        quota.status = "Full"
+        quota.remaining = 0
+        quota.save(update_fields=["status", "remaining", "updated_at"])
+        old_notification = TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.QUOTA_STATUS,
+            payload_hash="old-capacity-notification",
+            integration=self.integration,
+            survey=survey,
+            provider_survey_id=71,
+            wave_id=72,
+            quota_id=900,
+            provider_status="Unavailable",
+            is_live=False,
+            applied=True,
+            raw_payload={
+                "SurveyID": 71,
+                "WaveID": 72,
+                "QuotaID": 900,
+                "IsLive": False,
+            },
+        )
+        TolunaNotification.objects.filter(pk=old_notification.pk).update(
+            received_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        changed_quotas = copy.deepcopy(QUOTAS)
+        changed_quota = changed_quotas["Surveys"][0]["Quotas"][0]
+        changed_quota["EstimatedCompletesRemaining"] = 7
+        changed_quota["Layers"][0]["SubQuotas"][0]["CurrentCompletes"] = 3
+        get_provider_mock.return_value = TolunaProvider(
+            self.integration,
+            session=RecordingSession(FakeResponse(CULTURES), FakeResponse(changed_quotas)),
+        )
+
+        result = sync_client_integration(self.integration)
+
+        survey.refresh_from_db()
+        quota = survey.quotas.get(quota_id=900)
+        self.assertEqual(result.updated, 1)
+        self.assertEqual(survey.detail_synced_at, previous_detail_sync)
+        self.assertEqual(quota.status, "Open")
+        self.assertEqual(quota.remaining, 7)
+        self.assertEqual(quota.raw_data["EstimatedCompletesRemaining"], 7)
 
     @patch("surveys.serializers.has_function_access", return_value=True)
     def test_blank_upstream_link_still_returns_toluna_platform_copy_link(self, _access):
@@ -516,6 +624,72 @@ class TolunaProviderTests(TestCase):
         ).build_outbound_url(survey, attempt, answers)
         self.assertEqual([call[0] for call in repeat_session.calls], ["GET"])
         self.assertEqual(parse_qs(urlsplit(repeat_outbound).query)["rid"], [attempt.rid])
+
+    def test_invite_quota_must_exactly_match_selected_local_quota(self):
+        survey, _questions, answers = self._complete_member_contract_case()
+        attempt = SurveyAttempt.objects.create(
+            rid="Qta123AbC9",
+            prescreener_uid="Qt1a-Mi2s-Ma3t-Ch4x",
+            survey=survey,
+            user_id="invite-quota-mismatch-user",
+        )
+        mismatched_invite = {
+            "SurveyId": 71,
+            "WaveID": 72,
+            "QuotaID": 901,
+            "MemberAmount": 0,
+            "PartnerAmount": 3.25,
+            "URL": "https://router.toluna.test/invite?token=wrong-quota",
+            "LOI": 7,
+            "IR": 40,
+        }
+        session = RecordingSession(
+            FakeResponse(None, 201), FakeResponse(mismatched_invite)
+        )
+        provider = TolunaProvider(self.integration, session=session)
+
+        with self.assertRaises(ProviderError):
+            provider.build_outbound_url(survey, attempt, answers)
+
+        self.assertEqual([call[0] for call in session.calls], ["POST", "GET"])
+        self.assertEqual(attempt.outbound_url, "")
+        self.assertIsNone(attempt.source_cpi_snapshot)
+        self.assertEqual(attempt.upstream_transaction_data, {})
+
+    def test_invite_url_query_is_preserved_byte_for_byte_when_rid_is_appended(self):
+        survey, _questions, answers = self._complete_member_contract_case()
+        attempt = SurveyAttempt.objects.create(
+            rid="Url123AbC9",
+            prescreener_uid="Ur1l-By2t-Es3a-Fe4x",
+            survey=survey,
+            user_id="opaque-invite-url-user",
+        )
+        provider_url = (
+            "https://router.toluna.test/invite?"
+            "token=a%2Fb%20c&sig=AbC%2B123%3D%3D&blank=&dup=one&dup=two"
+            "#provider-fragment&rid=FragmentOnly"
+        )
+        invite = {
+            "SurveyId": 71,
+            "WaveID": 72,
+            "QuotaID": 900,
+            "MemberAmount": 0,
+            "PartnerAmount": 3.25,
+            "URL": provider_url,
+            "LOI": 7,
+            "IR": 40,
+        }
+        session = RecordingSession(FakeResponse(None, 201), FakeResponse(invite))
+        provider = TolunaProvider(self.integration, session=session)
+
+        outbound = provider.build_outbound_url(survey, attempt, answers)
+
+        self.assertEqual(
+            outbound,
+            "https://router.toluna.test/invite?"
+            "token=a%2Fb%20c&sig=AbC%2B123%3D%3D&blank=&dup=one&dup=two"
+            f"&rid={attempt.rid}#provider-fragment&rid=FragmentOnly",
+        )
 
     def test_member_create_posts_complete_required_profile_before_invite(self):
         survey, questions, answers = self._complete_member_contract_case()
@@ -860,7 +1034,7 @@ class TolunaProviderTests(TestCase):
         self.assertEqual(detail["name"], "Toluna qualification")
         self.assertEqual(detail["values"], ["Provider-defined answer"])
 
-    def test_routable_quota_attribute_is_required_locally_but_not_registered(self):
+    def test_routable_quota_attribute_is_required_locally_and_registered(self):
         reference = copy.deepcopy(REFERENCE)
         reference.append({
             "IsRoutable": True,
@@ -944,7 +1118,27 @@ class TolunaProviderTests(TestCase):
             item["QuestionID"] for item in member["RegistrationAnswers"]
         }
         self.assertIn(1001007, registered_question_ids)
-        self.assertNotIn(2910077, registered_question_ids)
+        self.assertIn(2910077, registered_question_ids)
+        routable_answer = next(
+            item for item in member["RegistrationAnswers"]
+            if item["QuestionID"] == 2910077
+        )
+        self.assertEqual(routable_answer["Answers"], [{"AnswerID": 5312785}])
+
+        routable.options = []
+        routable.raw_data = {
+            **routable.raw_data,
+            "allowed_answer_ids": [],
+        }
+        routable.save(update_fields=["options", "raw_data"])
+        unmapped_member = provider._member_payload(survey, attempt, answers)
+        self.assertNotIn(
+            2910077,
+            {
+                item["QuestionID"]
+                for item in unmapped_member["RegistrationAnswers"]
+            },
+        )
 
     def test_non_routable_quota_questions_are_required_and_show_only_provider_values(self):
         reference = copy.deepcopy(REFERENCE)
@@ -1421,7 +1615,7 @@ class TolunaProviderTests(TestCase):
         get_provider_mock.assert_called_once_with(self.integration)
         get_provider_mock.return_value.refresh_details.assert_called_once_with(survey)
 
-    def test_member_ready_page_shows_identity_then_redirects_once(self):
+    def test_legacy_member_ready_releases_invite_without_rendering_identity(self):
         survey = Survey.objects.create(
             client=self.integration.client,
             integration=self.integration,
@@ -1447,11 +1641,6 @@ class TolunaProviderTests(TestCase):
         url = reverse("toluna-member-ready")
 
         response = self.client.get(url, {"rid": attempt.rid})
-        self.assertContains(response, attempt.prescreener_uid)
-        self.assertContains(response, "08/12/1999")
-        self.assertContains(response, "Continue to survey")
-
-        response = self.client.post(url, {"rid": attempt.rid})
         self.assertRedirects(
             response,
             attempt.outbound_url,
@@ -1466,7 +1655,7 @@ class TolunaProviderTests(TestCase):
 
     @override_settings(PRESCREENER_VAULT_ENABLED=True)
     @patch("surveys.views.get_provider")
-    def test_complete_prescreener_vault_member_confirmation_and_redirect_flow(self, get_provider_mock):
+    def test_complete_prescreener_vault_redirects_directly_to_toluna(self, get_provider_mock):
         bootstrap = TolunaProvider(
             self.integration,
             session=RecordingSession(FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)),
@@ -1509,13 +1698,13 @@ class TolunaProviderTests(TestCase):
 
         self.assertRedirects(
             response,
-            f"{reverse('toluna-member-ready')}?rid={attempt.rid}",
+            f"{invite['URL']}&rid={attempt.rid}",
             fetch_redirect_response=False,
         )
         attempt.refresh_from_db()
-        self.assertEqual(attempt.status, SurveyAttempt.Status.INITIATED)
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
         self.assertIsNotNone(attempt.submitted_at)
-        self.assertIsNone(attempt.redirected_at)
+        self.assertIsNotNone(attempt.redirected_at)
         self.assertTrue(attempt.outbound_url)
         self.assertTrue(
             PrescreenerSubmission.objects.using(DATABASE_ALIAS).filter(
@@ -1526,19 +1715,72 @@ class TolunaProviderTests(TestCase):
             ).exists()
         )
 
-        ready = self.client.get(reverse("toluna-member-ready"), {"rid": attempt.rid})
-        self.assertContains(ready, attempt.prescreener_uid)
-        self.assertContains(ready, provider.last_member_summary["birth_date"])
+        replay = self.client.get(reverse("toluna-member-ready"), {"rid": attempt.rid})
+        self.assertEqual(replay.status_code, 409)
 
-        continued = self.client.post(reverse("toluna-member-ready"), {"rid": attempt.rid})
-        self.assertRedirects(
-            continued,
-            attempt.outbound_url,
-            fetch_redirect_response=False,
+    @override_settings(PRESCREENER_VAULT_ENABLED=True)
+    @patch("surveys.views.get_provider")
+    def test_stale_toluna_detail_post_refreshes_and_requires_updated_targeting_review(
+        self, get_provider_mock
+    ):
+        bootstrap = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(CULTURES), FakeResponse(REFERENCE), FakeResponse(QUOTAS)
+            ),
         )
+        normalized = bootstrap.normalize_inventory_item(
+            bootstrap.inventory()[0], timezone.now()
+        )
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key=normalized.source_key,
+            **normalized.values,
+        )
+        bootstrap.refresh_details(survey)
+        survey.detail_synced_at = None
+        survey.save(update_fields=["detail_synced_at", "updated_at"])
+        user = get_user_model().objects.create_user(
+            username="toluna-stale-post",
+            email="toluna-stale-post@example.test",
+            password="test-password",
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Stl123AbC9",
+            prescreener_uid="St1a-Le2d-Et3a-Il4s",
+            survey=survey,
+            platform_user=user,
+            user_id=str(user.pk),
+        )
+        questions = {
+            row.question_id: row for row in survey.targeting_questions.all()
+        }
+        provider = get_provider_mock.return_value
+
+        response = self.client.post(reverse("survey-start"), {
+            "rid": attempt.rid,
+            f"question_{questions[1001538].pk}": "27",
+            f"question_{questions[1001007].pk}": "2000247",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Toluna targeting changed while this page was open. "
+            "Please review the updated questions and submit again.",
+        )
+        get_provider_mock.assert_called_once_with(self.integration)
+        provider.refresh_details.assert_called_once()
+        refreshed_survey = provider.refresh_details.call_args.args[0]
+        self.assertEqual(refreshed_survey.pk, survey.pk)
+        provider.build_outbound_url.assert_not_called()
         attempt.refresh_from_db()
-        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
-        self.assertIsNotNone(attempt.redirected_at)
+        self.assertEqual(attempt.status, SurveyAttempt.Status.INITIATED)
+        self.assertIsNone(attempt.submitted_at)
+        self.assertIsNone(attempt.redirected_at)
+        self.assertEqual(attempt.outbound_url, "")
+        self.assertEqual(attempt.answers, {})
 
     @override_settings(PRESCREENER_VAULT_ENABLED=False)
     @patch("surveys.views.get_provider")
@@ -1747,7 +1989,8 @@ class TolunaProviderTests(TestCase):
                 ).hexdigest()
 
                 response = self.client.get(
-                    f"/survey?status={code}&rid={rid}&hash={signature}"
+                    f"/survey?status={code}&rid={rid}&hash={signature}",
+                    follow=True,
                 )
 
                 self.assertEqual(response.status_code, 200)
@@ -1783,7 +2026,8 @@ class TolunaProviderTests(TestCase):
         ).hexdigest()
 
         response = self.client.get(
-            f"/survey?status=1&rid={echoed_uid}&hash={signature}"
+            f"/survey?status=1&rid={echoed_uid}&hash={signature}",
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -1792,6 +2036,76 @@ class TolunaProviderTests(TestCase):
         attempt.refresh_from_db()
         self.assertEqual(attempt.status, SurveyAttempt.Status.COMPLETED)
         self.assertEqual(attempt.status_source, "toluna_callback")
+
+    def test_signed_toluna_callback_uses_read_only_post_redirect_get(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-callback-prg",
+            name="Toluna callback PRG test",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Prg123AbC9",
+            survey=survey,
+            user_id="1",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+        unsigned = f"http://testserver/survey?status=1&rid={attempt.rid}&"
+        signature = hmac.new(
+            b"hmac-secret", unsigned.encode(), hashlib.sha256
+        ).hexdigest()
+        signed_url = f"/survey?status=1&rid={attempt.rid}&hash={signature}"
+
+        first = self.client.get(signed_url)
+        self.assertRedirects(
+            first,
+            f"/survey?status=1&rid={attempt.rid}",
+            fetch_redirect_response=False,
+        )
+        attempt.refresh_from_db()
+        first_count = attempt.callback_count
+        first_callback_at = attempt.last_callback_at
+
+        replay = self.client.get(signed_url)
+        self.assertRedirects(
+            replay,
+            f"/survey?status=1&rid={attempt.rid}",
+            fetch_redirect_response=False,
+        )
+        clean = self.client.get(f"/survey?status=1&rid={attempt.rid}")
+        self.assertEqual(clean.status_code, 200)
+        attempt.refresh_from_db()
+        self.assertEqual(first_count, 1)
+        self.assertEqual(attempt.callback_count, first_count)
+        self.assertEqual(attempt.last_callback_at, first_callback_at)
+
+    def test_toluna_callback_fails_closed_when_hmac_is_disabled(self):
+        self.integration.config = {
+            **(self.integration.config or {}),
+            "callback_hash_required": False,
+        }
+        self.integration.save(update_fields=["config", "updated_at"])
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-disabled-hmac",
+            name="Toluna disabled HMAC test",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="Hmc123AbC9",
+            survey=survey,
+            user_id="1",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+
+        response = self.client.get(f"/survey?status=1&rid={attempt.rid}")
+
+        self.assertEqual(response.status_code, 403)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertEqual(attempt.callback_count, 0)
 
     def test_serializer_rejects_non_numeric_interval_and_resets_verification_after_edit(self):
         invalid = ClientIntegrationSerializer(
