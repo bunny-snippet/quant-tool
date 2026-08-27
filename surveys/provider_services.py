@@ -34,7 +34,8 @@ def provider_preview(integration: ClientIntegration, limit: int = 10) -> dict:
 def test_provider_connection(integration: ClientIntegration) -> dict:
     now = timezone.now()
     try:
-        result = get_provider(integration).test_connection()
+        provider = get_provider(integration)
+        result = provider.test_connection()
     except Exception as exc:
         ClientIntegration.objects.filter(pk=integration.pk).update(
             last_tested_at=now,
@@ -48,7 +49,10 @@ def test_provider_connection(integration: ClientIntegration) -> dict:
         last_test_status="success",
         last_test_error="",
         scheduled_sync_enabled=True,
-        sync_interval_seconds=60,
+        sync_interval_seconds=max(
+            int(integration.sync_interval_seconds or 60),
+            int(provider.minimum_sync_interval_seconds or 60),
+        ),
     )
     return result
 
@@ -181,6 +185,9 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
     touched = []
     try:
         inventory = provider.inventory()
+        run.provider_cache_expires_at = getattr(
+            provider, "inventory_cache_expires_at", None
+        )
         run.fetched_full = len(inventory)
         normalized_rows = {}
         for payload in inventory:
@@ -189,11 +196,16 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
         run.unique_surveys = len(normalized_rows)
 
         with transaction.atomic():
-            for source_key, normalized in normalized_rows.items():
-                survey = Survey.objects.select_for_update().filter(
+            existing_surveys = {
+                survey.source_key: survey
+                for survey in Survey.objects.select_for_update().filter(
                     integration=integration,
-                    source_key=source_key,
-                ).first()
+                    source_key__in=normalized_rows,
+                )
+            }
+            unchanged_ids = []
+            for source_key, normalized in normalized_rows.items():
+                survey = existing_surveys.get(source_key)
                 # Some provider inventory APIs (including Toluna Get Quotas)
                 # do not return created/updated timestamps. Persist stable local
                 # fallbacks once so project sorting, date filters and the table
@@ -252,10 +264,14 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                     run.updated += 1
                     touched.append(survey)
                 else:
-                    survey.last_seen_at = now
-                    survey.integration = integration
-                    survey.save(update_fields=["last_seen_at", "integration", "updated_at"])
+                    unchanged_ids.append(survey.pk)
                     run.unchanged += 1
+
+            # One set-based heartbeat replaces an UPDATE per unchanged survey.
+            # Do not touch updated_at: an identical provider row was observed,
+            # but the survey itself was not modified.
+            if unchanged_ids:
+                Survey.objects.filter(pk__in=unchanged_ids).update(last_seen_at=now)
 
             run.closed = Survey.objects.filter(
                 integration=integration,

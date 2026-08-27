@@ -204,6 +204,7 @@ class TolunaProvider(SurveyProvider):
         self.api_auth_key = environment_value(refs.get("api_auth_key"), "Toluna API_AUTH_KEY")
         self.partner_auth_key = environment_value(refs.get("partner_auth_key"), "Toluna PARTNER_AUTH_KEY")
         self._credential_refs = refs
+        self.inventory_cache_expires_at = None
 
     @property
     def api_headers(self):
@@ -463,6 +464,7 @@ class TolunaProvider(SurveyProvider):
             raise ProviderConfigurationError(f"Toluna cultures not available: {', '.join(missing)}.")
         self._sync_reference_data({culture: cultures[culture] for culture, _ in panels})
         inventory = []
+        cache_expiries = []
         for culture, panel_guid in panels:
             payload, _ = self._request(
                 "GET",
@@ -478,9 +480,13 @@ class TolunaProvider(SurveyProvider):
                 "country_id": _integer(_pick(payload, "CountryID")),
                 "cache_expires": _pick(payload, "CacheExpires"),
             }
+            cache_expires_at = _datetime(metadata["cache_expires"])
+            if cache_expires_at is not None:
+                cache_expiries.append(cache_expires_at)
             for survey in _pick(payload, "Surveys", default=[]):
                 if isinstance(survey, dict) and _pick(survey, "SurveyID") is not None and _pick(survey, "WaveID") is not None:
                     inventory.append({"survey": survey, "toluna": metadata})
+        self.inventory_cache_expires_at = min(cache_expiries, default=None)
         return inventory
 
     def normalize_inventory_item(self, payload, seen_at):

@@ -144,10 +144,10 @@ class SurveySyncTests(TestCase):
 
     @override_settings(
         CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS=150,
-        CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS=60,
+        CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS=600,
     )
     @patch("surveys.tasks.sync_client_integration_task.delay")
-    def test_dispatcher_automates_innovatemr_and_verified_rfg_at_fixed_intervals(self, delay):
+    def test_dispatcher_respects_integration_and_provider_minimum_intervals(self, delay):
         from .tasks import dispatch_due_integrations_task
 
         ClientIntegration.objects.all().delete()
@@ -157,14 +157,14 @@ class SurveySyncTests(TestCase):
         custom_client = Client.objects.create(code="manual-custom", name="Manual Custom", provider_code="custom")
         innovate = ClientIntegration.objects.create(
             client=innovate_client, name="Innovate automatic", provider_code="innovatemr",
-            base_url="https://supplier.innovatemr.net/api/v2", sync_interval_seconds=999,
+            base_url="https://supplier.innovatemr.net/api/v2", sync_interval_seconds=150,
             scheduled_sync_enabled=False, last_sync_started_at=now - timedelta(seconds=151),
         )
         rfg = ClientIntegration.objects.create(
             client=rfg_client, name="RFG automatic", provider_code="rfg",
-            base_url="https://api.researchforgood.com/API", sync_interval_seconds=999,
+            base_url="https://api.researchforgood.com/API", sync_interval_seconds=600,
             scheduled_sync_enabled=False, last_test_status="success",
-            last_sync_started_at=now - timedelta(seconds=61),
+            last_sync_started_at=now - timedelta(seconds=601),
         )
         ClientIntegration.objects.create(
             client=custom_client, name="Custom manual", provider_code="custom",
@@ -173,7 +173,7 @@ class SurveySyncTests(TestCase):
         )
         ClientIntegration.objects.create(
             client=rfg_client, name="RFG unverified", provider_code="rfg",
-            base_url="https://api.researchforgood.com/API", sync_interval_seconds=60,
+            base_url="https://api.researchforgood.com/API", sync_interval_seconds=600,
             scheduled_sync_enabled=False, last_test_status="",
             last_sync_started_at=now - timedelta(days=1),
         )
@@ -186,6 +186,42 @@ class SurveySyncTests(TestCase):
             set(ClientIntegration.objects.filter(last_sync_status="queued").values_list("pk", flat=True)),
             {innovate.pk, rfg.pk},
         )
+
+    @override_settings(CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS=60)
+    @patch("surveys.tasks.sync_client_integration_task.delay")
+    def test_dispatcher_waits_for_toluna_provider_cache_expiry(self, delay):
+        from .tasks import dispatch_due_integrations_task
+
+        ClientIntegration.objects.all().delete()
+        now = timezone.now()
+        client = Client.objects.create(
+            code="toluna-cache", name="Toluna cache", provider_code="toluna"
+        )
+        integration = ClientIntegration.objects.create(
+            client=client,
+            name="Toluna cache",
+            provider_code="toluna",
+            base_url="https://tws.toluna.com",
+            last_test_status="success",
+            sync_interval_seconds=60,
+            last_sync_started_at=now - timedelta(seconds=61),
+            last_sync_summary={
+                "provider_cache_expires_at": (now + timedelta(minutes=4)).isoformat()
+            },
+        )
+
+        self.assertEqual(
+            dispatch_due_integrations_task(), {"queued": [], "count": 0}
+        )
+        delay.assert_not_called()
+
+        ClientIntegration.objects.filter(pk=integration.pk).update(
+            last_sync_summary={
+                "provider_cache_expires_at": (now - timedelta(seconds=1)).isoformat()
+            }
+        )
+        self.assertEqual(dispatch_due_integrations_task()["queued"], [integration.pk])
+        delay.assert_called_once_with(integration.pk)
 
     @override_settings(CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS=60)
     @patch("surveys.tasks.sync_client_integration_task.delay")

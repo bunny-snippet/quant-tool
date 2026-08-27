@@ -82,7 +82,7 @@ class ResearchForGoodIntegrationTests(TestCase):
             provider_code="rfg",
             base_url="https://api.researchforgood.com/API/",
             credential_env_keys={"apid": "RFG_APID", "secret": "RFG_SECRET"},
-            sync_interval_seconds=60,
+            sync_interval_seconds=600,
         )
 
     @patch.dict("os.environ", {"RFG_APID": "publisher", "RFG_SECRET": "00112233445566778899aabbccddeeff"}, clear=False)
@@ -143,13 +143,13 @@ class ResearchForGoodIntegrationTests(TestCase):
                 "callback_security_mode": "ip",
             },
             "supplier_code": "1000",
-            "sync_interval_seconds": 60,
+            "sync_interval_seconds": 600,
             "detail_refresh_batch": 3,
             "scheduled_sync_enabled": False,
             "is_active": True,
         }, format="json")
         self.assertEqual(response.status_code, 201, response.json())
-        self.assertEqual(response.json()["sync_interval_seconds"], 60)
+        self.assertEqual(response.json()["sync_interval_seconds"], 600)
         created_integration_id = response.json()["id"]
         response = api.patch(f"/api/v1/vendors/integrations/{created_integration_id}/", {
             "config": {

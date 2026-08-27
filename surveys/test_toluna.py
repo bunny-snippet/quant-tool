@@ -353,6 +353,10 @@ class TolunaProviderTests(TestCase):
         self.assertIsNone(normalized.numeric_source_id)
         self.assertEqual(normalized.values["cpi"], Decimal("2.75"))
         self.assertEqual(normalized.values["country_code"], "US")
+        self.assertEqual(
+            provider.inventory_cache_expires_at.isoformat(),
+            "2026-08-18T10:00:00+00:00",
+        )
         self.assertEqual(TolunaReferenceQuestion.objects.filter(integration=self.integration).count(), 2)
         self.assertNotIn("panel-guid", str(rows))
         self.assertEqual(session.calls[2][2]["headers"]["API_AUTH_KEY"], "api-key")

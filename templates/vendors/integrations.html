@@ -208,7 +208,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     el('scheduled').disabled=innovate||rfg||toluna;
     if(innovate){el('scheduled').checked=true;el('scheduleHelp').textContent='InnovateMR inventory runs automatically every 150 seconds.';el('scheduleHelp').className='schedule-help'}
     else if(rfg&&!verified){el('scheduled').checked=false;el('scheduleHelp').textContent='Test this RFG connection once; automatic 60-second sync starts after verification.';el('scheduleHelp').className='schedule-help warning'}
-    else if(rfg){el('scheduled').checked=true;el('scheduleHelp').textContent='RFG inventory runs automatically every 60 seconds.';el('scheduleHelp').className='schedule-help'}
+    else if(rfg){el('scheduled').checked=true;el('scheduleHelp').textContent='RFG inventory runs automatically every 600 seconds.';el('scheduleHelp').className='schedule-help'}
     else if(toluna&&!verified){el('scheduled').checked=false;el('scheduleHelp').textContent='Test Toluna credentials and culture panels once; automatic 60-second Get Quotas sync starts after verification.';el('scheduleHelp').className='schedule-help warning'}
     else if(toluna){el('scheduled').checked=true;el('scheduleHelp').textContent='Toluna Get Quotas inventory runs automatically every 60 seconds.';el('scheduleHelp').className='schedule-help'}
     else{el('scheduleHelp').textContent='Scheduled sync uses the interval configured above.';el('scheduleHelp').className='schedule-help'}
@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     el('providerNote').classList.toggle('hidden',!code);
     el('interval').min=String(meta.minimum_sync_interval_seconds||60);
     el('intervalLabel').textContent=`Sync interval (seconds, min ${meta.minimum_sync_interval_seconds||60})`;
-    el('intervalHelp').textContent=isRfg?'RFG Live Alert inventory refreshes automatically every 60 seconds.':isToluna?'Toluna Get Quotas refreshes automatically every 60 seconds after verification.':code==='innovatemr'?'InnovateMR inventory refreshes automatically every 150 seconds.':`Minimum ${meta.minimum_sync_interval_seconds||60} seconds.`;
+    el('intervalHelp').textContent=isRfg?'RFG Live Alert inventory refreshes automatically every 600 seconds.':isToluna?'Toluna Get Quotas uses a 60-second floor and waits for the provider cache to expire.':code==='innovatemr'?'InnovateMR inventory refreshes automatically every 150 seconds.':`Minimum ${meta.minimum_sync_interval_seconds||60} seconds.`;
     el('baseUrlHelp').textContent=isRfg?'Official RFG command endpoint. HMAC signing is handled by the backend adapter.':isToluna?'Toluna External Sample API root. Member and Reference Data roots are selected by environment.':'Provider API root. Endpoint fields below may be relative to this URL.';
     if(isRfg){el('providerNoteTitle').textContent='RFG uses a signed command API.';el('providerNoteText').textContent=' APID and secret values stay in .env. Generic inventory, header, response-key and Advanced REST fields do not apply, so they are hidden.'}
     else if(isToluna){el('providerNoteTitle').textContent='Toluna External Sample integration.';el('providerNoteText').textContent=' Inventory is pulled culture-by-culture with Get Quotas. Reference Data drives the prescreener; member registration, quota matching and Generate Invite happen only after submit.'}

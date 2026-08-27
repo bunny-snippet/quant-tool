@@ -1,9 +1,10 @@
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from celery import shared_task
 from django.conf import settings
 from django.db.models import F, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from vendors.models import ClientIntegration
 from vendors.credentials import resolve_integration_token
@@ -12,6 +13,49 @@ from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncLease
 from .services import reconcile_attempt_status, replace_survey_details, sync_surveys
 from .provider_services import refresh_client_integration_details, sync_client_integration
+
+
+PROVIDER_MINIMUM_SYNC_INTERVAL_SECONDS = {
+    "innovatemr": 150,
+    "rfg": 600,
+    "toluna": 60,
+}
+
+
+def effective_sync_interval_seconds(integration):
+    """Return the slowest configured/provider-approved inventory interval.
+
+    The integration value is operator-visible and must never be silently
+    ignored. Provider defaults are additional safety floors, not overrides.
+    """
+
+    configured_default = {
+        "innovatemr": settings.CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS,
+        "rfg": settings.CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS,
+        "toluna": settings.CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS,
+    }.get(integration.provider_code, 60)
+    return max(
+        60,
+        int(integration.sync_interval_seconds or 60),
+        int(configured_default or 60),
+        PROVIDER_MINIMUM_SYNC_INTERVAL_SECONDS.get(integration.provider_code, 60),
+    )
+
+
+def _provider_cache_due_at(integration):
+    """Return an upstream cache expiry stored by the last successful sync."""
+
+    if integration.provider_code != "toluna":
+        return None
+    raw_value = (integration.last_sync_summary or {}).get(
+        "provider_cache_expires_at"
+    )
+    cached_until = parse_datetime(str(raw_value or ""))
+    if cached_until is None:
+        return None
+    if timezone.is_naive(cached_until):
+        cached_until = timezone.make_aware(cached_until, dt_timezone.utc)
+    return cached_until
 
 
 def _stale_surveys(integration, limit):
@@ -36,17 +80,12 @@ def dispatch_due_integrations_task():
         | Q(provider_code="toluna", last_test_status="success")
     ).only(
         "id", "provider_code", "sync_interval_seconds", "last_sync_started_at", "last_sync_status",
-        "credential_env_key", "encrypted_api_token",
+        "last_sync_summary", "credential_env_key", "encrypted_api_token",
     )
     for integration in integrations:
         if integration.provider_code in {"biobrain", "voqall"} and not resolve_integration_token(integration):
             continue
-        interval_seconds = {
-            "innovatemr": settings.CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS,
-            "rfg": settings.CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS,
-            "toluna": settings.CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS,
-        }.get(integration.provider_code, integration.sync_interval_seconds)
-        interval_seconds = max(60, interval_seconds)
+        interval_seconds = effective_sync_interval_seconds(integration)
         # Do not keep adding duplicate jobs while a previous sync is queued or
         # running. A genuinely stale marker is allowed through after the lease
         # window so a worker restart can recover automatically.
@@ -62,6 +101,9 @@ def dispatch_due_integrations_task():
         due_at = (integration.last_sync_started_at or (now - timedelta(days=1))) + timedelta(
             seconds=interval_seconds
         )
+        provider_cache_due_at = _provider_cache_due_at(integration)
+        if provider_cache_due_at is not None:
+            due_at = max(due_at, provider_cache_due_at)
         if due_at <= now:
             ClientIntegration.objects.filter(pk=integration.pk).update(
                 last_sync_started_at=now, last_sync_status="queued", last_sync_error="",
@@ -75,7 +117,9 @@ def dispatch_due_integrations_task():
 def sync_client_integration_task(integration_id):
     integration = ClientIntegration.objects.select_related("client").get(pk=integration_id, is_active=True)
     lease_name = f"integration-{integration_id}-sync"
-    if not SyncLease.acquire(lease_name, seconds=max(300, integration.sync_interval_seconds)):
+    if not SyncLease.acquire(
+        lease_name, seconds=max(300, effective_sync_interval_seconds(integration))
+    ):
         return {"status": "skipped", "reason": "previous integration sync is still running"}
     integration.last_sync_started_at = timezone.now()
     integration.last_sync_status = "running"
@@ -97,6 +141,13 @@ def sync_client_integration_task(integration_id):
                 "details_refreshed": details["refreshed"],
                 "detail_failures": details["failures"],
             }
+            provider_cache_expires_at = getattr(
+                run, "provider_cache_expires_at", None
+            )
+            if provider_cache_expires_at is not None:
+                summary["provider_cache_expires_at"] = (
+                    provider_cache_expires_at.isoformat()
+                )
             integration.last_sync_status = (
                 "success" if run.status == "success" and not details["failures"] else "partial"
             )
