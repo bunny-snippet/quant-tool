@@ -7,7 +7,7 @@
     <h1>Term Reports</h1>
     <p>Review every terminated, quota-full and quality/security outcome across connected clients.</p>
   </div>
-  {% if can_export_reasons %}<button class="primary-button export-button" type="submit" form="reasonFilters" formaction="{% url 'termination-reasons-export' %}" formmethod="get"><span aria-hidden="true">↓</span> Export</button>{% endif %}
+  {% if can_export_reasons %}<a class="primary-button export-button" href="{% url 'termination-reasons-export' %}{% if export_query %}?{{ export_query }}{% endif %}"><span aria-hidden="true">↓</span> Export</a>{% endif %}
 </section>
 
 {% if reason_cards %}<section class="reason-overview" aria-label="Filtered outcome totals">
@@ -35,34 +35,6 @@
 </form>
 
 {% if lookup_error and not detail_attempt %}<div class="reason-alert"><strong>Outcome not found</strong><span>{{ lookup_error }}</span></div>{% endif %}
-
-{% if show_toluna_notifications %}<section class="toluna-notification-panel" data-toluna-async-panel aria-label="Toluna notification audit" aria-busy="false">
-  <header class="toluna-notification-head">
-    <div><span>Toluna notification centre</span><h2>Provider status feed</h2><p>Verified completion, termination and operational events received directly from Toluna.</p></div>
-    <strong>POST · JSON</strong>
-  </header>
-  <nav class="toluna-event-tabs" aria-label="Toluna notification types">
-    {% for tab in toluna_tabs %}<a class="{% if tab.active %}active{% endif %}" data-toluna-tab-link href="?{{ tab.query }}"><span>{{ tab.label }}</span><strong>{{ tab.count }}</strong><small>{{ tab.description }}</small></a>{% endfor %}
-  </nav>
-  <div class="table-wrap toluna-notification-table-wrap">
-    <table class="survey-table toluna-notification-table">
-      <thead><tr><th>Received</th><th>Notification</th><th>Project / Survey</th><th>Member</th><th>Provider outcome</th><th>Action</th></tr></thead>
-      <tbody>{% for row in toluna_page_obj %}<tr>
-        <td><time>{{ row.report_time|date:"d M Y" }}<span>{{ row.report_time|date:"h:i:s A T" }}</span></time></td>
-        <td><span class="toluna-event-badge event-{{ row.event_type }}">{{ row.get_event_type_display }}</span>{% if row.duplicate_count %}<small class="sub-id">{{ row.duplicate_count }} duplicate delivery{{ row.duplicate_count|pluralize:"ies" }}</small>{% endif %}</td>
-        <td><strong>{% if row.survey %}{{ row.survey.local_id }}{% else %}Not matched{% endif %}</strong><span class="sub-id">Survey {{ row.provider_survey_id|default:"Unavailable" }}{% if row.wave_id %} · Wave {{ row.wave_id }}{% endif %}</span></td>
-        <td><strong>{% if row.attempt %}{{ row.attempt.rid }}{% else %}Operational event{% endif %}</strong><span class="sub-id">{{ row.unique_code|default:"No member code" }}</span></td>
-        <td><div class="toluna-outcome"><strong>{{ row.provider_status|default:"Received" }}</strong><span>{{ row.rejection_name|default:row.reason|default:row.processing_message }}</span>{% if not row.applied %}<small>{{ row.processing_message }}</small>{% endif %}</div></td>
-        <td>{% if can_view_reason_details %}<a class="reason-detail-button" href="?{% if toluna_detail_query %}{{ toluna_detail_query }}&amp;{% endif %}toluna_detail={{ row.pk }}">Details <span>→</span></a>{% endif %}</td>
-      </tr>{% empty %}<tr><td colspan="6"><div class="empty-state"><span>T</span><strong>No notification received in this tab</strong><small>Toluna events will appear here after the first authenticated POST.</small></div></td></tr>{% endfor %}</tbody>
-    </table>
-  </div>
-  <div class="panel-foot"><span>Page {{ toluna_page_obj.number }} of {{ toluna_page_obj.paginator.num_pages }}</span>{% if can_paginate_reasons and toluna_page_obj.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Toluna notification pages">
-    {% if toluna_page_obj.has_previous %}<a href="?{% if toluna_page_query %}{{ toluna_page_query }}&amp;{% endif %}toluna_page={{ toluna_page_obj.previous_page_number }}" aria-label="Previous page">‹</a>{% endif %}
-    <span class="reason-page-number">{{ toluna_page_obj.number }}</span>
-    {% if toluna_page_obj.has_next %}<a href="?{% if toluna_page_query %}{{ toluna_page_query }}&amp;{% endif %}toluna_page={{ toluna_page_obj.next_page_number }}" aria-label="Next page">›</a>{% endif %}
-  </nav>{% endif %}</div>
-</section>{% endif %}
 
 <section class="survey-panel reason-list-panel">
   <div class="panel-head"><div><h2>Final unsuccessful outcomes</h2><p>Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} records</p></div></div>
@@ -128,24 +100,5 @@
   </section>
 </div>{% endif %}
 
-{% if toluna_detail %}<div class="reason-modal-shell">
-  <a class="reason-modal-dismiss" href="{% url 'termination-reasons' %}{% if toluna_detail_query %}?{{ toluna_detail_query }}{% endif %}" aria-label="Close Toluna notification details"></a>
-  <section class="reason-modal toluna-notification-modal" role="dialog" aria-modal="true" aria-labelledby="tolunaNotificationTitle">
-    <header class="reason-result-head toluna-result-head">
-      <div class="reason-status-icon" aria-hidden="true">T</div>
-      <div><p>Toluna provider notification</p><h2 id="tolunaNotificationTitle">{{ toluna_detail.get_event_type_display }}</h2><span>Received {{ toluna_detail.received_at|date:"d M Y, h:i:s A T" }}</span></div>
-      <a class="reason-modal-close" href="{% url 'termination-reasons' %}{% if toluna_detail_query %}?{{ toluna_detail_query }}{% endif %}" aria-label="Close">×</a>
-    </header>
-    <div class="reason-modal-body">
-      <article class="reason-highlight toluna-highlight"><span>Provider outcome</span><strong>{{ toluna_detail.provider_status|default:"Notification received" }}</strong><small>{{ toluna_detail.rejection_name|default:toluna_detail.reason|default:toluna_detail.processing_message }}</small></article>
-      <div class="reason-detail-grid">
-        <article><h3>Delivery audit</h3><dl><div><dt>Authenticated</dt><dd>Yes</dd></div><div><dt>Applied</dt><dd>{% if toluna_detail.applied %}Yes{% else %}No{% endif %}</dd></div><div><dt>Provider time</dt><dd>{{ toluna_detail.occurred_at|date:"d M Y, h:i:s A T"|default:"Not supplied" }}</dd></div><div><dt>Duplicate deliveries</dt><dd>{{ toluna_detail.duplicate_count }}</dd></div></dl></article>
-        <article><h3>Survey</h3><dl><div><dt>Project ID</dt><dd>{% if toluna_detail.survey %}{{ toluna_detail.survey.local_id }}{% else %}Not matched{% endif %}</dd></div><div><dt>Survey ID</dt><dd>{{ toluna_detail.provider_survey_id|default:"Not supplied" }}</dd></div><div><dt>Survey reference</dt><dd>{{ toluna_detail.survey_ref|default:"Not supplied" }}</dd></div><div><dt>Wave / Quota</dt><dd>{{ toluna_detail.wave_id|default:"—" }} / {{ toluna_detail.quota_id|default:"—" }}</dd></div></dl></article>
-        <article><h3>Member</h3><dl><div><dt>RID</dt><dd>{% if toluna_detail.attempt %}{{ toluna_detail.attempt.rid }}{% else %}Not matched{% endif %}</dd></div><div><dt>Unique code</dt><dd>{{ toluna_detail.unique_code|default:"Not supplied" }}</dd></div><div><dt>Respondent</dt><dd>{% if toluna_detail.attempt and toluna_detail.attempt.platform_user %}{{ toluna_detail.attempt.platform_user.get_full_name|default:toluna_detail.attempt.platform_user.username }}{% else %}Not available{% endif %}</dd></div><div><dt>Revenue</dt><dd>{% if toluna_detail.revenue_cents != None %}{{ toluna_detail.revenue_cents }} cents{% else %}Not supplied{% endif %}</dd></div></dl></article>
-        <article><h3>Outcome detail</h3><dl><div><dt>Reason</dt><dd>{{ toluna_detail.reason|default:"Not supplied" }}</dd></div><div><dt>Rejection</dt><dd>{{ toluna_detail.rejection_name|default:"Not supplied" }}</dd></div><div><dt>Rejection ID</dt><dd>{{ toluna_detail.rejection_id|default:"Not supplied" }}</dd></div><div><dt>Reconciliation ID</dt><dd>{{ toluna_detail.reconciliation_id|default:"Not supplied" }}</dd></div></dl></article>
-      </div>
-    </div>
-  </section>
-</div>{% endif %}
 {% endblock %}
 {% block scripts %}<script src="/static/surveys/term_reports.js?v=2"></script>{% endblock %}

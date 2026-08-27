@@ -91,11 +91,15 @@ representative and update the environment before Toluna changes its senders.
 - [Survey closed notifications](https://docs.integratedpanel.toluna.com/notifications/surveyclosed.html)
 - [General FAQ, including IP allowlisting guidance](https://docs.integratedpanel.toluna.com/faq/general/)
 
-## Term Reports
+## Toluna Notifications page
 
-Open **Term Reports**, select **Toluna** in the Provider filter, and apply the
-filter. The page displays separate tabs for completion, member termination,
-enhanced termination, quota status, survey closed and reconciliation events.
+Administrators with the dedicated `toluna_notifications.view` permission can
+open **Toluna Notifications** from the sidebar. The page keeps provider
+deliveries separate from respondent Term Reports and supports RID, UID,
+project, survey, wave, quota and user search plus organization, event,
+processing, country, client, buyer and date filters. Operational notifications
+that have not matched a local survey or respondent remain visible until a
+survey- or member-specific filter is applied.
+
 Details expose normalized fields only; raw JSON remains backend audit data.
-The existing Export action adds a `Toluna Notifications` worksheet for the
-selected Toluna event tab.
+The dedicated Export action downloads the exact filtered notification set.

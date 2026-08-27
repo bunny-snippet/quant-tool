@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=39">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=40">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="page-{{ active_page|default:'workspace' }}">
@@ -37,6 +37,9 @@
         {% if active_page == 'termination-reasons' %}<div class="nav-submenu" aria-label="Term reports by provider">
           {% if reason_filters.provider and term_providers %}<span class="nav-submenu-label">Providers</span>{% for provider in term_providers %}<a class="nav-child-link {% if provider.value in selected.provider %}active{% endif %}" href="{% url 'termination-reasons' %}?provider={{ provider.value|urlencode }}"><i></i>{{ provider.name }}</a>{% endfor %}{% endif %}
         </div>{% endif %}{% endif %}
+        {% if 'toluna_notifications.view' in access_codes %}<a class="nav-item {% if active_page == 'toluna-notifications' %}active{% endif %}" href="{% url 'toluna-notifications' %}">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3V8Z"/><path d="M10 19h4"/></svg></span><span>Notifications</span>
+        </a>{% endif %}
         {% if 'prescreener_data.view' in access_codes %}<a class="nav-item {% if active_page == 'prescreened-data' %}active{% endif %}" href="{% url 'prescreened-data' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Panelist Data</span>
         </a>{% endif %}

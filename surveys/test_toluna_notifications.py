@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import io
+import zipfile
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -8,7 +10,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.models import EmployeeProfile, Role
 from vendors.models import Client, ClientIntegration
+from vendors.models import OrganizationUnit
 
 from .models import Survey, SurveyAttempt, SurveyQuota, TolunaNotification
 from .toluna_notifications import reconcile_toluna_operational_notifications
@@ -597,7 +601,7 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(self.survey.remaining, 0)
         self.assertFalse(pending.applied)
 
-    def test_provider_filter_opens_toluna_notification_tabs_and_clean_details(self):
+    def test_dedicated_page_shows_clean_notification_details_and_term_report_does_not(self):
         self._post("toluna-notification-enhanced-termination", {
             "UniqueCode": self.attempt.prescreener_uid,
             "SurveyId": 123,
@@ -612,18 +616,150 @@ class TolunaNotificationTests(TestCase):
         notification = TolunaNotification.objects.get()
         self.client.force_login(self.owner)
 
-        response = self.client.get(reverse("termination-reasons"), {
-            "provider": "toluna",
-            "toluna_event": "enhanced_termination",
-            "toluna_detail": notification.pk,
+        response = self.client.get(reverse("toluna-notifications"), {
+            "event": "enhanced_termination",
+            "detail": notification.pk,
         })
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["show_toluna_notifications"])
-        self.assertContains(response, '?provider=toluna')
-        self.assertContains(response, 'data-toluna-async-panel')
-        self.assertContains(response, 'data-toluna-tab-link', count=6)
+        self.assertEqual(response.context["active_page"], "toluna-notifications")
         self.assertContains(response, "Toluna notification centre")
         self.assertContains(response, "Enhanced termination")
         self.assertContains(response, "NonQuotaDemographicRejection")
         self.assertNotContains(response, "raw_payload")
+
+        term_response = self.client.get(reverse("termination-reasons"), {
+            "provider": "toluna",
+        })
+        self.assertEqual(term_response.status_code, 200)
+        self.assertNotContains(term_response, "Toluna notification centre")
+
+    def test_notification_filters_cover_hierarchy_provider_and_survey_fields(self):
+        branch = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            unit_type=OrganizationUnit.UnitType.BRANCH,
+            name="Delhi",
+            code="toluna-notification-delhi",
+            created_by=self.owner,
+        )
+        sub_branch = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            parent=branch,
+            unit_type=OrganizationUnit.UnitType.SUB_BRANCH,
+            name="Operations",
+            code="toluna-notification-operations",
+            created_by=self.owner,
+        )
+        shift = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            parent=sub_branch,
+            unit_type=OrganizationUnit.UnitType.SHIFT,
+            name="Morning",
+            code="toluna-notification-morning",
+            created_by=self.owner,
+        )
+        EmployeeProfile.objects.filter(user=self.owner).update(organization_unit=shift)
+        self.attempt.platform_user = self.owner
+        self.attempt.save(update_fields=["platform_user", "updated_at"])
+        self._post("toluna-notification-enhanced-termination", {
+            "UniqueCode": self.attempt.prescreener_uid,
+            "SurveyId": 123,
+            "SurveyRef": "123560-US",
+            "Reason": "Terminated",
+            "DateTime": "2026-08-21 10:35:00",
+            "WaveId": 100,
+            "AdditionalData": f"rid={self.attempt.rid}",
+            "RejectionID": 103,
+            "RejectionName": "NonQuotaDemographicRejection",
+        })
+        notification = TolunaNotification.objects.get()
+        notification.provider_status = "Rejected"
+        notification.applied = True
+        notification.save(update_fields=["provider_status", "applied", "last_received_at"])
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("toluna-notifications"), {
+            "search": self.survey.local_id,
+            "branch": branch.pk,
+            "sub_branch": sub_branch.pk,
+            "shift": shift.pk,
+            "user": self.owner.pk,
+            "event": TolunaNotification.EventType.ENHANCED_TERMINATION,
+            "notification_status": "Rejected",
+            "applied": "applied",
+            "country": "US",
+            "client": self.client_record.pk,
+            "buyer_id": self.survey.buyer_id,
+            "date_field": "received",
+            "date_from": (timezone.now() - timedelta(minutes=5)).isoformat(timespec="minutes"),
+            "date_to": (timezone.now() + timedelta(minutes=5)).isoformat(timespec="minutes"),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["page_obj"].paginator.count, 1)
+        self.assertEqual(response.context["page_obj"].object_list[0].pk, notification.pk)
+
+    def test_unmatched_operational_notification_stays_visible_until_survey_filter(self):
+        matched = TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.QUOTA_STATUS,
+            payload_hash="matched-operational-notification",
+            integration=self.integration,
+            survey=self.survey,
+            provider_survey_id=123,
+            wave_id=100,
+            provider_status="Open",
+            applied=True,
+        )
+        unmatched = TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.SURVEY_CLOSED,
+            payload_hash="unmatched-operational-notification",
+            integration=self.integration,
+            provider_survey_id=987654,
+            wave_id=321,
+            provider_status="Closed",
+            applied=False,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("toluna-notifications"))
+        self.assertEqual(response.context["page_obj"].paginator.count, 2)
+        self.assertIn(unmatched, response.context["page_obj"].object_list)
+
+        filtered = self.client.get(reverse("toluna-notifications"), {"country": "US"})
+        self.assertEqual(filtered.context["page_obj"].paginator.count, 1)
+        self.assertEqual(filtered.context["page_obj"].object_list[0].pk, matched.pk)
+
+    def test_dedicated_permissions_export_and_term_search_submit_are_isolated(self):
+        admin = get_user_model().objects.create_user(username="toluna-notification-admin")
+        EmployeeProfile.objects.filter(user=admin).update(role=Role.objects.get(slug="admin"))
+        self.client.force_login(admin)
+
+        page = self.client.get(reverse("toluna-notifications"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "<h1>Notifications</h1>", html=True)
+
+        term_page = self.client.get(reverse("termination-reasons"))
+        self.assertEqual(term_page.status_code, 200)
+        self.assertNotContains(term_page, 'form="reasonFilters" formaction=')
+        self.assertContains(term_page, 'class="primary-button export-button" href=')
+
+        TolunaNotification.objects.create(
+            event_type=TolunaNotification.EventType.SURVEY_CLOSED,
+            payload_hash="notification-export-row",
+            integration=self.integration,
+            provider_survey_id=123,
+            provider_status="Closed",
+        )
+        notification_export = self.client.get(reverse("toluna-notifications-export"))
+        self.assertEqual(notification_export.status_code, 200)
+        notification_workbook = b"".join(notification_export.streaming_content)
+        with zipfile.ZipFile(io.BytesIO(notification_workbook)) as workbook:
+            workbook_xml = workbook.read("xl/workbook.xml").decode("utf-8")
+        self.assertIn("Toluna Notifications", workbook_xml)
+
+        term_export = self.client.get(reverse("termination-reasons-export"), {"provider": "toluna"})
+        self.assertEqual(term_export.status_code, 200)
+        term_workbook = b"".join(term_export.streaming_content)
+        with zipfile.ZipFile(io.BytesIO(term_workbook)) as workbook:
+            term_workbook_xml = workbook.read("xl/workbook.xml").decode("utf-8")
+        self.assertNotIn("Toluna Notifications", term_workbook_xml)

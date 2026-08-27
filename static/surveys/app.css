@@ -505,7 +505,7 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .page-studies .study-overview-compact>.revenue,
 .page-studies .study-overview-compact>.study-summary-card{min-width:0}
 .page-studies .ir-metric{min-height:42px}.page-studies .ir-metric strong{font-size:20px}
-.page-prescreened-data .content,.page-studies .content,.page-termination-reasons .content{width:100%;min-width:0}
+.page-prescreened-data .content,.page-studies .content,.page-termination-reasons .content,.page-toluna-notifications .content{width:100%;min-width:0}
 @media(min-width:901px){.page-studies .studies-table{min-width:100%!important}.page-studies .studies-table-wrap{overflow-x:hidden!important;scrollbar-gutter:auto}}
 
 .vault-answer-trigger{width:max-content;max-width:100%;min-height:38px;border:1px solid #cfe5ec;border-radius:10px;padding:0 11px;background:#f1fbfd;color:#087f99;display:inline-flex;align-items:center;justify-content:space-between;gap:13px;font-size:10px;font-weight:800;cursor:pointer;transition:border-color .2s,background .2s,transform .2s}
@@ -528,7 +528,7 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .reason-mobile-card>.reason-platform-status{margin-top:7px}
 @media(max-width:720px){.reason-list-filters .search-field{grid-column:1/-1}.reason-list-filters .datetime-field{grid-column:auto}}
 
-/* Toluna's authenticated operational feed inside Term Reports. */
+/* Toluna's authenticated operational notification centre. */
 .toluna-notification-panel{margin:0 0 18px;overflow:hidden;border:1px solid var(--line);border-radius:19px;background:#fff;box-shadow:0 8px 28px rgba(38,55,88,.05)}
 .toluna-notification-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;background:linear-gradient(135deg,#132344,#1d365f);color:#fff}
 .toluna-notification-head>div>span{color:#67d9ec;font-size:9px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase}
@@ -558,6 +558,17 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .toluna-highlight{background:#eefbfe;border-color:#ccecf3}
 @media(max-width:900px){.toluna-event-tabs{grid-template-columns:repeat(6,155px)}.toluna-notification-head{align-items:flex-start}.toluna-notification-head>strong{display:none}}
 @media(max-width:620px){.toluna-notification-head{padding:17px}.toluna-notification-head h2{font-size:18px}.toluna-notification-head p{line-height:1.5}.toluna-event-tabs{padding:9px}.toluna-notification-table-wrap{overflow-x:auto}.toluna-notification-table{min-width:860px}}
+
+.toluna-notification-filters{grid-template-columns:repeat(5,minmax(150px,1fr))}
+.toluna-notification-filters .search-field{grid-column:span 2}
+.reason-overview article.notification-applied>span{background:#e8f8f2;color:#18845f}
+.notification-apply-state{width:max-content;margin-top:4px;padding:3px 7px;border-radius:7px;font-weight:800;text-transform:uppercase;letter-spacing:.3px}
+.notification-apply-state.applied{background:#e8f8f2;color:#18845f}
+.notification-apply-state.pending{background:#fff7df;color:#956812}
+.toluna-notification-panel .pagination a{width:36px;height:36px;display:grid;place-items:center;border:1px solid #dfe4ed;border-radius:10px;background:#fff;color:#61708a;text-decoration:none;font-size:18px;font-weight:700}
+.toluna-notification-panel .pagination a:hover{border-color:var(--cyan);color:var(--cyan-dark)}
+@media(max-width:1200px){.toluna-notification-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.toluna-notification-filters{grid-template-columns:1fr}.toluna-notification-filters .search-field{grid-column:auto}}
 
 @media(max-width:1550px) and (min-width:901px){
   .page-studies .study-overview-compact{gap:7px}
