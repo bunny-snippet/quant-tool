@@ -3,6 +3,21 @@
 from .rfg_outcomes import describe_rfg_outcome
 
 
+# Toluna sends a signed browser callback status separately from its more
+# detailed notification stream.  Keep this deliberately small and explicit:
+# raw callback parameters remain in the attempt audit, while only reviewed
+# provider rejection identifiers are promoted into operator/respondent text.
+TOLUNA_CALLBACK_REJECTIONS = {
+    "73": {
+        "reason": (
+            "Toluna rejected this attempt because the same internet identity "
+            "has already attempted this survey."
+        ),
+        "category": "Duplicate survey attempt",
+    },
+}
+
+
 def _nested_value(payload, path):
     if not path:
         return ""
@@ -38,6 +53,39 @@ def _text(value):
     return ""
 
 
+def _casefold_value(payload, *keys):
+    if not isinstance(payload, dict):
+        return ""
+    folded = {str(key).casefold(): value for key, value in payload.items()}
+    for key in keys:
+        value = _text(folded.get(str(key).casefold()))
+        if value:
+            return value
+    return ""
+
+
+def describe_toluna_callback(parameters, *, code="", status="", title=""):
+    """Return whitelisted, human-readable fields from a Toluna callback."""
+
+    rejection_id = _casefold_value(
+        parameters,
+        "rejectionID",
+        "rejectionId",
+        "rejection_id",
+    )
+    rejection = TOLUNA_CALLBACK_REJECTIONS.get(rejection_id, {})
+    outcome = {
+        "code": _text(code or _casefold_value(parameters, "status")),
+        "status": _text(status),
+        "title": _text(title),
+    }
+    if rejection_id:
+        outcome["rejection_id"] = rejection_id[:40]
+    if rejection:
+        outcome.update(rejection)
+    return outcome
+
+
 def provider_outcome(attempt):
     """Return clean status/reason/category strings for any configured provider."""
 
@@ -67,12 +115,50 @@ def provider_outcome(attempt):
         }
 
     if provider_code == "toluna":
+        stored_outcome = data.get("toluna_outcome") or {}
+        callback = data.get("toluna_callback") or {}
+        has_callback_outcome = bool(
+            (isinstance(callback, dict) and callback)
+            or (isinstance(stored_outcome, dict) and stored_outcome)
+        )
+        stored_rejection_id = (
+            _text(stored_outcome.get("rejection_id"))
+            if isinstance(stored_outcome, dict)
+            else ""
+        )
+        callback_for_description = callback if isinstance(callback, dict) else {}
+        if not callback_for_description and stored_rejection_id:
+            callback_for_description = {"rejectionID": stored_rejection_id}
+        callback_outcome = describe_toluna_callback(
+            callback_for_description,
+            code=(stored_outcome.get("code") if isinstance(stored_outcome, dict) else ""),
+            status=(stored_outcome.get("status") if isinstance(stored_outcome, dict) else ""),
+            title=(stored_outcome.get("title") if isinstance(stored_outcome, dict) else ""),
+        )
         notification = data.get("toluna_notification") or {}
         if isinstance(notification, dict) and notification:
             return {
-                "status": _text(notification.get("status") or attempt.get_status_display()),
-                "reason": _text(notification.get("reason")),
-                "category": _text(notification.get("category") or notification.get("event_type")),
+                "status": _text(
+                    notification.get("status")
+                    or callback_outcome.get("status")
+                    or attempt.get_status_display()
+                ),
+                "reason": _text(notification.get("reason") or callback_outcome.get("reason")),
+                "category": _text(
+                    notification.get("category")
+                    or notification.get("event_type")
+                    or callback_outcome.get("category")
+                ),
+            }
+        if has_callback_outcome:
+            return {
+                "status": _text(
+                    callback_outcome.get("status")
+                    or callback_outcome.get("title")
+                    or attempt.get_status_display()
+                ),
+                "reason": _text(callback_outcome.get("reason")),
+                "category": _text(callback_outcome.get("category")),
             }
 
     config_mapping = ((integration.config or {}).get("outcome_mapping") or {}) if integration else {}

@@ -63,7 +63,7 @@ from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .innovatemr_callbacks import verify_callback_request
 from .models import Survey, SurveyAttempt, SyncRun, TolunaNotification
-from .outcomes import provider_outcome
+from .outcomes import describe_toluna_callback, provider_outcome
 from .report_pricing import (
     apply_percentage,
     can_view_report_commercials,
@@ -1164,16 +1164,32 @@ def _toluna_required_value_note(question, *, is_postal=False):
             values.append(normalized)
     if not values:
         return ""
-    visible_limit = 20
-    shown = ", ".join(values[:visible_limit])
-    remainder = len(values) - visible_limit
-    if remainder > 0:
-        shown = f"{shown} (+{remainder} more)"
     if is_postal:
         label = "Required postal code or prefix" if len(values) == 1 else "Required postal codes or prefixes"
     else:
         label = "Required value" if len(values) == 1 else "Required values"
-    return f"{label}: {shown}"
+    if is_postal and len(values) > 20:
+        return f"{label}: all {len(values):,} accepted values are listed below."
+    return f"{label}: {', '.join(values)}"
+
+
+def _toluna_required_value_groups(question, *, is_postal=False):
+    """Return the complete merged value list without exposing quota layers."""
+
+    raw = question.raw_data or {}
+    if not is_postal or not raw.get("required_by_provider"):
+        return []
+    values = []
+    seen = set()
+    for value in raw.get("allowed_answer_values") or []:
+        normalized = str(value).strip()
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            seen.add(key)
+            values.append(normalized)
+    if len(values) <= 20:
+        return []
+    return [values[index:index + 25] for index in range(0, len(values), 25)]
 
 
 def _is_postal_targeting_question(key, text):
@@ -1570,6 +1586,11 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
             if is_toluna and input_kind not in {"radio", "checkbox"}
             else ""
         )
+        required_value_groups = (
+            _toluna_required_value_groups(question, is_postal=is_postal_question)
+            if is_toluna and input_kind not in {"radio", "checkbox"}
+            else []
+        )
         provider_targeting_note = clean_rfg_display_text(
             (question.raw_data or {}).get("targeting_note") or ""
         )
@@ -1631,6 +1652,10 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
                         allowed_values or (is_toluna and (question.raw_data or {}).get("required_by_provider") and options)
                     ) else ""
                 )
+            ),
+            "targeting_value_groups": required_value_groups,
+            "targeting_value_count": sum(
+                len(group) for group in required_value_groups
             ),
         })
     return prepared
@@ -2446,6 +2471,28 @@ def _status_presentation_for_attempt(attempt, page, status_label):
             "message": "This IP address has already entered this project, so another entry from the same IP is not allowed.",
             "tone": "danger",
         }, "Duplicate IP blocked"
+    recorded_toluna_outcome = audit.get("toluna_outcome") or {}
+    if not isinstance(recorded_toluna_outcome, dict):
+        recorded_toluna_outcome = {}
+    callback_toluna_outcome = describe_toluna_callback(audit.get("toluna_callback") or {})
+    toluna_rejection_id = str(
+        recorded_toluna_outcome.get("rejection_id")
+        or callback_toluna_outcome.get("rejection_id")
+        or ""
+    )
+    if (
+        attempt.status_source == "toluna_callback"
+        and attempt.is_verified
+        and toluna_rejection_id == "73"
+    ):
+        return {
+            "title": "Survey already attempted",
+            "message": (
+                "Toluna rejected this attempt because the same internet identity "
+                "has already attempted this survey."
+            ),
+            "tone": "neutral",
+        }, status_label
     return page, status_label
 
 
@@ -2767,14 +2814,16 @@ def survey_status(request):
                             if callback_key.casefold() == "hash":
                                 callback_data[callback_key] = "[redacted]"
                         attempt.is_verified = callback_verified
+                        toluna_outcome = describe_toluna_callback(
+                            callback_data,
+                            code=status_code,
+                            status=page["status_label"],
+                            title=page["title"],
+                        )
                         attempt.upstream_transaction_data = {
                             **(attempt.upstream_transaction_data or {}),
                             "toluna_callback": callback_data,
-                            "toluna_outcome": {
-                                "code": status_code,
-                                "status": page["status_label"],
-                                "title": page["title"],
-                            },
+                            "toluna_outcome": toluna_outcome,
                         }
                 if callback_transition_applied and innovate_callback_verified:
                     callback_data = dict(request.GET.items())
@@ -2816,6 +2865,7 @@ def survey_status(request):
 
     page, status_label = _status_presentation_for_attempt(attempt, page, status_label)
 
+    outcome = provider_outcome(attempt) if attempt else {}
     return render(request, "surveys/status.html", {
         **page,
         "status_label": status_label,
@@ -2824,6 +2874,7 @@ def survey_status(request):
         "loi_seconds": attempt.loi_seconds if attempt else None,
         "attempt_found": bool(attempt),
         "toluna_notification": toluna_notification,
+        "provider_reason": outcome.get("reason", ""),
     }, status=200 if attempt else 404)
 
 

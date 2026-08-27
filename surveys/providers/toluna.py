@@ -65,7 +65,7 @@ COMMON_GENDER_OPTIONS = (
     (2000246, "Female"),
     (2000247, "Male"),
 )
-TOLUNA_ADAPTER_VERSION = 6
+TOLUNA_ADAPTER_VERSION = 7
 
 
 def _pick(payload, *names, default=None):
@@ -543,8 +543,38 @@ class TolunaProvider(SurveyProvider):
     def _quota_question_rows(quotas):
         rows = {}
         for quota in quotas:
-            for layer in _pick(quota, "Layers", default=[]) or []:
+            remaining_raw = _pick(
+                quota, "EstimatedCompletesRemaining", default=None
+            )
+            if remaining_raw is not None and _integer(remaining_raw, -1) <= 0:
+                continue
+            layers = _pick(quota, "Layers", default=[]) or []
+
+            def subquota_has_capacity(subquota):
+                current_raw = _pick(subquota, "CurrentCompletes", default=None)
+                maximum_raw = _pick(
+                    subquota, "MaxTargetCompletes", default=None
+                )
+                if current_raw is None or maximum_raw is None:
+                    return True
+                current = _integer(current_raw, -1)
+                maximum = _integer(maximum_raw, -1)
+                return maximum < 0 or current < maximum
+
+            # Layers are AND. If any layer has no open SubQuota, this entire
+            # top-level quota cannot route and none of its values should be
+            # advertised by the pre-screener.
+            if any(
+                not any(subquota_has_capacity(item) for item in (
+                    _pick(layer, "SubQuotas", default=[]) or []
+                ))
+                for layer in layers
+            ):
+                continue
+            for layer in layers:
                 for subquota in _pick(layer, "SubQuotas", default=[]) or []:
+                    if not subquota_has_capacity(subquota):
+                        continue
                     for item in _pick(subquota, "QuestionsAndAnswers", default=[]) or []:
                         question_id = _integer(_pick(item, "QuestionID"), -1)
                         if question_id < 0:

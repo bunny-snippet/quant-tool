@@ -7,6 +7,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -25,6 +26,7 @@ from .models import (
     TolunaNotification,
     TolunaReferenceQuestion,
 )
+from .outcomes import provider_outcome
 from .provider_services import sync_client_integration
 from .providers import ProviderError
 from .providers.toluna import TolunaInviteRejected, TolunaProvider
@@ -1077,7 +1079,7 @@ class TolunaProviderTests(TestCase):
 
         self.assertTrue(survey.targeting_questions.filter(question_id=2910077).exists())
         self.assertTrue(
-            survey.targeting_questions.filter(raw_data__adapter_version=6).exists()
+            survey.targeting_questions.filter(raw_data__adapter_version=7).exists()
         )
 
         questions = {row.question_id: row for row in survey.targeting_questions.all()}
@@ -1401,6 +1403,127 @@ class TolunaProviderTests(TestCase):
             postal,
         ))
 
+    def test_prescreener_lists_every_open_postal_value_without_layer_names(self):
+        first_values = [f"10{index:03d}" for index in range(15)]
+        second_values = [f"20{index:03d}" for index in range(15)]
+
+        def quota(quota_id, values, *, remaining=5, current=0, maximum=5):
+            return {
+                "QuotaID": quota_id,
+                "EstimatedCompletesRemaining": remaining,
+                "Layers": [{
+                    "LayerID": quota_id * 10,
+                    "SubQuotas": [{
+                        "SubQuotaID": quota_id * 100,
+                        "CurrentCompletes": current,
+                        "MaxTargetCompletes": maximum,
+                        "QuestionsAndAnswers": [{
+                            "QuestionID": 1001042,
+                            "AnswerIDs": [2224508],
+                            "AnswerValues": values,
+                            "IsRoutable": False,
+                        }],
+                    }],
+                }],
+            }
+
+        open_quotas = [
+            quota(1, first_values),
+            quota(2, second_values),
+        ]
+        blocked_by_full_layer = quota(5, ["77777"])
+        blocked_by_full_layer["Layers"].append({
+            "LayerID": 51,
+            "SubQuotas": [{
+                "SubQuotaID": 501,
+                "CurrentCompletes": 5,
+                "MaxTargetCompletes": 5,
+                "QuestionsAndAnswers": [{
+                    "QuestionID": 1001538,
+                    "AnswerValues": ["25-29"],
+                }],
+            }],
+        })
+        requirements = TolunaProvider._quota_question_rows([
+            *open_quotas,
+            quota(3, ["99999"], remaining=0),
+            quota(4, ["88888"], current=5, maximum=5),
+            blocked_by_full_layer,
+        ])
+        merged_values = requirements[1001042]["answer_values"]
+        self.assertEqual(merged_values, first_values + second_values)
+        self.assertNotIn("99999", merged_values)
+        self.assertNotIn("88888", merged_values)
+        self.assertNotIn("77777", merged_values)
+
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-all-postal-values",
+            name="Toluna all postal values",
+            status=Survey.Status.LIVE,
+            raw_data={"_toluna": {"culture_code": "en-us"}},
+        )
+        postal = TargetingQuestion.objects.create(
+            survey=survey,
+            question_id=1001042,
+            key="TOLUNA_1001042",
+            text="What is your postal code?",
+            question_type="text",
+            category="Required profile",
+            options=[],
+            raw_data={
+                "adapter_version": 7,
+                "toluna_kind": "postal",
+                "required_by_provider": True,
+                "required_for_member": True,
+                "reference_answer_type": "OpenEnd",
+                "allowed_answer_ids": [2224508],
+                "allowed_answer_values": merged_values,
+            },
+        )
+        for raw_quota in open_quotas:
+            SurveyQuota.objects.create(
+                survey=survey,
+                source_key=str(raw_quota["QuotaID"]),
+                quota_id=raw_quota["QuotaID"],
+                remaining=5,
+                raw_data=raw_quota,
+            )
+
+        prepared = _prescreener_questions(survey)
+        field = prepared[0]
+        displayed_values = [
+            value for group in field["targeting_value_groups"] for value in group
+        ]
+        self.assertEqual(field["targeting_value_count"], 30)
+        self.assertEqual(displayed_values, first_values + second_values)
+        self.assertEqual(
+            field["targeting_note"],
+            "Required postal codes or prefixes: all 30 accepted values are listed below.",
+        )
+        html = render_to_string("surveys/prescreener.html", {
+            "attempt": type("Attempt", (), {"rid": "ZipLayer01"})(),
+            "questions": prepared,
+            "is_rfg": False,
+        })
+        self.assertIn(first_values[0], html)
+        self.assertIn(second_values[-1], html)
+        self.assertIn("All 30 accepted ZIP / postal values", html)
+        self.assertNotIn("LayerID", html)
+        self.assertNotIn("(+10 more)", html)
+
+        request = RequestFactory().post("/survey/prescreener/", {
+            f"question_{postal.pk}": second_values[-1],
+        })
+        answers, errors = _collect_prescreener_answers(request, survey)
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            TolunaProvider(self.integration, session=RecordingSession())
+            ._matching_quota(survey, answers).quota_id,
+            2,
+        )
+
     def test_multiple_ranges_for_same_question_are_or_conditions(self):
         quotas = copy.deepcopy(QUOTAS)
         quotas["Surveys"][0]["Quotas"][0]["Layers"][0]["SubQuotas"][0][
@@ -1547,7 +1670,7 @@ class TolunaProviderTests(TestCase):
 
         age_question = survey.targeting_questions.get(question_id=1001538)
         self.assertEqual(age_question.options, [])
-        self.assertEqual(age_question.raw_data["adapter_version"], 6)
+        self.assertEqual(age_question.raw_data["adapter_version"], 7)
         self.assertEqual(age_question.raw_data["targeting_age_ranges"], [
             {"min": 21, "max": 29},
             {"min": 30, "max": 45},
@@ -2002,6 +2125,79 @@ class TolunaProviderTests(TestCase):
                 self.assertEqual(
                     attempt.upstream_transaction_data["toluna_outcome"]["code"], code
                 )
+
+    def test_signed_not_qualified_callback_reports_same_internet_identity_rejection(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-internet-identifier-attempted",
+            name="Toluna duplicate internet identity test",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="TolS1173A1",
+            survey=survey,
+            user_id="1",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+        unsigned = (
+            f"http://testserver/survey?status=11&rid={attempt.rid}"
+            "&rejectionID=73&"
+        )
+        signature = hmac.new(
+            b"hmac-secret", unsigned.encode(), hashlib.sha256
+        ).hexdigest()
+
+        response = self.client.get(
+            f"/survey?status=11&rid={attempt.rid}&rejectionID=73&hash={signature}",
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Survey already attempted")
+        self.assertContains(
+            response,
+            "same internet identity has already attempted this survey",
+        )
+        self.assertContains(response, "Provider reason")
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.NOT_QUALIFIED)
+        self.assertEqual(attempt.status_source, "toluna_callback")
+        self.assertTrue(attempt.is_verified)
+        callback = attempt.upstream_transaction_data["toluna_callback"]
+        self.assertEqual(callback["rejectionID"], "73")
+        self.assertEqual(callback["hash"], "[redacted]")
+        outcome = attempt.upstream_transaction_data["toluna_outcome"]
+        self.assertEqual(outcome["code"], "11")
+        self.assertEqual(outcome["rejection_id"], "73")
+        self.assertEqual(outcome["category"], "Duplicate survey attempt")
+        self.assertIn("same internet identity", outcome["reason"])
+        self.assertEqual(provider_outcome(attempt)["reason"], outcome["reason"])
+
+    def test_unsigned_rejection_id_cannot_change_toluna_attempt_or_audit(self):
+        survey = Survey.objects.create(
+            client=self.integration.client,
+            integration=self.integration,
+            source_key="toluna-unverified-rejection-id",
+            name="Toluna unverified rejection test",
+            status=Survey.Status.LIVE,
+        )
+        attempt = SurveyAttempt.objects.create(
+            rid="TolBad73A1",
+            survey=survey,
+            user_id="1",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+
+        response = self.client.get(
+            f"/survey?status=11&rid={attempt.rid}&rejectionID=73&hash=invalid"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertEqual(attempt.callback_count, 0)
+        self.assertEqual(attempt.upstream_transaction_data, {})
 
     def test_reused_member_code_callback_updates_and_displays_canonical_rid(self):
         survey = Survey.objects.create(

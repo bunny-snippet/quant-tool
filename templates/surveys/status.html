@@ -26,6 +26,7 @@
       <div><dt>Status</dt><dd>{{ status_label }}</dd></div>
       <div><dt>RID</dt><dd>{{ rid }}</dd></div>
       <div><dt>IP address</dt><dd>{{ ip_address|default:"Unavailable" }}</dd></div>
+      {% if provider_reason %}<div><dt>Provider reason</dt><dd>{{ provider_reason }}</dd></div>{% endif %}
       {% if toluna_notification %}
       <div><dt>Verified Toluna result</dt><dd>{{ toluna_notification.outcome }}<small>{{ toluna_notification.source }}{% if toluna_notification.reason %} · Reason: {{ toluna_notification.reason }}{% endif %}</small></dd></div>
       {% endif %}

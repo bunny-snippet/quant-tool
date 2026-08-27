@@ -26,6 +26,12 @@
       <section class="screen-question" aria-labelledby="question-title-{{ question.model.pk }}">
         <header class="screen-question-header"><span class="question-number">{{ forloop.counter|stringformat:"02d" }}</span><div><small>{{ question.model.category|default:"Profile" }} · {{ question.type_label }}</small><h2 id="question-title-{{ question.model.pk }}">{{ question.display_text }}</h2></div></header>
         {% if question.targeting_note %}<p class="answer-guidance"><span>✓</span>{{ question.targeting_note }}</p>{% endif %}
+        {% if question.targeting_value_groups %}
+          <details class="accepted-value-list" open>
+            <summary>All {{ question.targeting_value_count }} accepted ZIP / postal values</summary>
+            <div>{% for group in question.targeting_value_groups %}<p>{{ group|join:", " }}</p>{% endfor %}</div>
+          </details>
+        {% endif %}
 
         {% if question.input_kind == "radio" %}
           <div class="choice-grid" role="radiogroup" aria-labelledby="question-title-{{ question.model.pk }}">
