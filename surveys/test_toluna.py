@@ -538,6 +538,13 @@ class TolunaProviderTests(TestCase):
         self.assertIn("/survey/start?", data["start_link"])
         self.assertIn("surveyId=71%3A72", data["start_link"])
 
+        survey.status = Survey.Status.CLOSED
+        survey.save(update_fields=["status", "updated_at"])
+        closed_data = SurveyListSerializer(
+            survey, context={"request": request}
+        ).data
+        self.assertIsNone(closed_data["start_link"])
+
     def test_member_registration_quota_match_and_invite_build(self):
         bootstrap = TolunaProvider(
             self.integration,

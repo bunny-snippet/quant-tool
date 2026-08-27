@@ -125,7 +125,11 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+DEPLOYED_STATIC_ROOT = BASE_DIR.parent / "exchange.api-grid.com" / "static"
+STATIC_ROOT = Path(os.getenv(
+    "DJANGO_STATIC_ROOT",
+    DEPLOYED_STATIC_ROOT if DEPLOYED_STATIC_ROOT.parent.is_dir() else BASE_DIR / "staticfiles",
+))
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

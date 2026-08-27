@@ -564,6 +564,11 @@ class SurveyListSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated or not has_function_access(request.user, "survey_links.copy"):
             return None
+        # The start endpoint intentionally accepts only live inventory. Never
+        # offer a link in Projects that the same backend will reject because
+        # the provider closed the survey after its last inventory update.
+        if obj.status != Survey.Status.LIVE:
+            return None
         supports_lazy_entry_link = bool(
             obj.integration_id and obj.integration.provider_code in {"rfg", "toluna", "cint"}
         )
