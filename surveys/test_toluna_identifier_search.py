@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from accounts.models import AccessFunction, UserFunctionOverride
@@ -114,6 +116,30 @@ class TolunaIdentifierSearchTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 0)
+
+    def test_identifier_count_uses_materialized_index_candidates(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.api.get(
+                "/api/v1/surveys/", {"identifier": "5919062"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        count_sql = next(
+            query["sql"]
+            for query in captured.captured_queries
+            if "COUNT(" in query["sql"].upper()
+            and "identifier_candidates" in query["sql"]
+        )
+        normalized_sql = " ".join(count_sql.upper().split())
+        self.assertIn("UNION ALL", normalized_sql)
+        self.assertIn("AS IDENTIFIER_CANDIDATES", normalized_sql)
+        for descriptive_column in (
+            '"NAME"',
+            '"COMPANY_NAME"',
+            '"COUNTRY"',
+            '"JOB_CATEGORY"',
+        ):
+            self.assertNotIn(descriptive_column, normalized_sql)
 
     def test_identifier_filter_uses_the_existing_project_search_permission(self):
         denied_user = get_user_model().objects.create_user(

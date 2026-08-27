@@ -1,5 +1,6 @@
 import django_filters
 from django.db.models import Q
+from django.db.models.expressions import RawSQL
 
 from .models import Survey, SurveyAttempt
 
@@ -36,18 +37,44 @@ class SurveyFilter(django_filters.FilterSet):
         if not identifier:
             return queryset
 
-        query = (
-            Q(local_id__iexact=identifier)
-            | Q(source_key__iexact=identifier)
-            | Q(buyer_id__iexact=identifier)
+        # Keep each identifier lookup in its own indexable UNION branch.  A
+        # single OR across these columns makes MySQL scan the full survey
+        # table for the pagination COUNT, even though every field is indexed.
+        # The outer queryset remains responsible for tenant/API-key scoping;
+        # this derived table supplies candidate primary keys only.
+        table_name = Survey._meta.db_table
+        source_key_identifier = (
+            identifier.upper()
+            if identifier[:3].casefold() == "rfg"
+            else identifier
         )
+        branches = [
+            f"SELECT id FROM {table_name} WHERE local_id = %s",
+            f"SELECT id FROM {table_name} WHERE source_key = %s",
+            f"SELECT id FROM {table_name} WHERE buyer_id = %s",
+        ]
+        params = [identifier, source_key_identifier, identifier]
         if identifier.isdigit():
             if len(identifier) <= 19:
                 numeric_identifier = int(identifier)
                 if numeric_identifier <= 9223372036854775807:
-                    query |= Q(source_id=numeric_identifier)
-            query |= Q(source_key__startswith=f"{identifier}:")
-        return queryset.filter(query)
+                    branches.append(
+                        f"SELECT id FROM {table_name} WHERE source_id = %s"
+                    )
+                    params.append(numeric_identifier)
+            branches.append(
+                f"SELECT id FROM {table_name} WHERE source_key LIKE %s"
+            )
+            params.append(f"{identifier}:%")
+
+        candidate_sql = (
+            "SELECT identifier_candidates.id FROM ("
+            + " UNION ALL ".join(branches)
+            + ") AS identifier_candidates"
+        )
+        return queryset.filter(
+            pk__in=RawSQL(candidate_sql, params, output_field=Survey._meta.pk)
+        )
 
     def filter_survey_type(self, queryset, _name, value):
         values = value if isinstance(value, (list, tuple, set)) else str(value or "").split(",")
