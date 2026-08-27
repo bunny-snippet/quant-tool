@@ -486,7 +486,11 @@ class TolunaProvider(SurveyProvider):
             for survey in _pick(payload, "Surveys", default=[]):
                 if isinstance(survey, dict) and _pick(survey, "SurveyID") is not None and _pick(survey, "WaveID") is not None:
                     inventory.append({"survey": survey, "toluna": metadata})
-        self.inventory_cache_expires_at = min(cache_expiries, default=None)
+        # A full sync requests every configured panel. Wait until the latest
+        # panel cache has expired; polling at the earliest expiry would still
+        # re-download cached responses for the remaining panels and repeat the
+        # same database merge work.
+        self.inventory_cache_expires_at = max(cache_expiries, default=None)
         return inventory
 
     def normalize_inventory_item(self, payload, seen_at):

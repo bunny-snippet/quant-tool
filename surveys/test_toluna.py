@@ -361,6 +361,40 @@ class TolunaProviderTests(TestCase):
         self.assertNotIn("panel-guid", str(rows))
         self.assertEqual(session.calls[2][2]["headers"]["API_AUTH_KEY"], "api-key")
 
+    @patch.dict("os.environ", {"TOLUNA_PANEL_EN_GB": "panel-gb"}, clear=False)
+    def test_inventory_waits_for_latest_configured_panel_cache_expiry(self):
+        credential_refs = dict(self.integration.credential_env_keys)
+        credential_refs["panel_en_gb"] = "TOLUNA_PANEL_EN_GB"
+        self.integration.credential_env_keys = credential_refs
+        self.integration.save(update_fields=["credential_env_keys", "updated_at"])
+        cultures = [
+            *CULTURES,
+            {"CultureID": 2, "Name": "en-gb", "Description": "United Kingdom English"},
+        ]
+        first_quotas = copy.deepcopy(QUOTAS)
+        first_quotas["CacheExpires"] = "2026-08-18T10:00:00Z"
+        second_quotas = copy.deepcopy(QUOTAS)
+        second_quotas["CacheExpires"] = "2026-08-18T10:02:30Z"
+        second_quotas["Surveys"][0]["SurveyID"] = 73
+        second_quotas["Surveys"][0]["WaveID"] = 74
+        provider = TolunaProvider(
+            self.integration,
+            session=RecordingSession(
+                FakeResponse(cultures),
+                FakeResponse(REFERENCE),
+                FakeResponse(first_quotas),
+                FakeResponse(second_quotas),
+            ),
+        )
+
+        rows = provider.inventory()
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            provider.inventory_cache_expires_at.isoformat(),
+            "2026-08-18T10:02:30+00:00",
+        )
+
     def test_generic_typed_question_with_options_is_selectable(self):
         survey = Survey.objects.create(
             client=self.integration.client,
