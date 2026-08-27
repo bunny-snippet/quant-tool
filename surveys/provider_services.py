@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
@@ -9,6 +10,18 @@ from .providers import ProviderError, get_provider
 
 
 logger = logging.getLogger(__name__)
+
+
+# Keep each CASE-based statement comfortably below common database packet and
+# parameter limits.  A Toluna inventory can contain thousands of JSON-heavy
+# rows, so one unbounded statement would merely replace many small writes with
+# one risky oversized write.
+_PROVIDER_BULK_UPDATE_BATCH_SIZE = 100
+_SURVEY_CONCRETE_UPDATE_FIELDS = frozenset(
+    field.name
+    for field in Survey._meta.concrete_fields
+    if not field.primary_key
+)
 
 
 def provider_preview(integration: ClientIntegration, limit: int = 10) -> dict:
@@ -139,40 +152,96 @@ def _toluna_targeting_contract(raw_data):
     return tuple(sorted(quota_contracts, key=repr))
 
 
-def _sync_toluna_quota_snapshots(survey: Survey, raw_data) -> bool:
-    """Refresh numeric capacity/raw snapshots without rebuilding questions."""
+def _sync_toluna_quota_snapshots_bulk(candidates) -> dict[int, bool]:
+    """Refresh numeric quota snapshots in bounded batches.
 
-    expected_ids = set()
-    updated_ids = set()
-    for quota in _toluna_value(raw_data or {}, "Quotas", default=[]) or []:
-        quota_id = _toluna_integer(_toluna_value(quota, "QuotaID"))
-        if quota_id < 0:
-            continue
-        expected_ids.add(quota_id)
-        target = max(0, _toluna_integer(_toluna_value(quota, "CompletesRequired"), 0))
-        remaining = max(
-            0,
-            _toluna_integer(
-                _toluna_value(quota, "EstimatedCompletesRemaining"), 0
-            ),
+    The old merge issued one ``UPDATE`` for every quota in every changed
+    survey.  Load and lock the same derived rows once, apply the same values in
+    memory, and let ``bulk_update`` emit bounded CASE statements.  The boolean
+    result retains the old fail-closed contract: every provider quota ID must
+    already have at least one derived row or the survey detail is marked stale.
+    """
+
+    prepared = []
+    survey_ids = set()
+    quota_ids = set()
+    for survey, raw_data in candidates:
+        quota_payloads = []
+        for quota in _toluna_value(raw_data or {}, "Quotas", default=[]) or []:
+            quota_id = _toluna_integer(_toluna_value(quota, "QuotaID"))
+            if quota_id < 0:
+                continue
+            quota_payloads.append((quota_id, quota))
+            quota_ids.add(quota_id)
+        prepared.append((survey, quota_payloads))
+        survey_ids.add(survey.pk)
+
+    rows_by_key = {}
+    if survey_ids and quota_ids:
+        quota_rows = SurveyQuota.objects.select_for_update().filter(
+            survey_id__in=survey_ids,
+            quota_id__in=quota_ids,
         )
-        updated = SurveyQuota.objects.filter(
-            survey=survey,
-            quota_id=quota_id,
-        ).update(
-            sample_size=target,
-            completes=max(0, target - remaining),
-            remaining=remaining,
-            status="Open" if remaining > 0 else "Full",
-            raw_data=quota,
-            targeting={
-                "layers": _toluna_value(quota, "Layers", default=[]) or []
-            },
-            updated_at=timezone.now(),
+        for quota_row in quota_rows:
+            rows_by_key.setdefault(
+                (quota_row.survey_id, quota_row.quota_id), []
+            ).append(quota_row)
+
+    updates_by_pk = {}
+    results = {}
+    for survey, quota_payloads in prepared:
+        expected_ids = set()
+        updated_ids = set()
+        for quota_id, quota in quota_payloads:
+            expected_ids.add(quota_id)
+            matching_rows = rows_by_key.get((survey.pk, quota_id), ())
+            if matching_rows:
+                updated_ids.add(quota_id)
+            target = max(
+                0,
+                _toluna_integer(
+                    _toluna_value(quota, "CompletesRequired"), 0
+                ),
+            )
+            remaining = max(
+                0,
+                _toluna_integer(
+                    _toluna_value(quota, "EstimatedCompletesRemaining"), 0
+                ),
+            )
+            updated_at = timezone.now()
+            for quota_row in matching_rows:
+                quota_row.sample_size = target
+                quota_row.completes = max(0, target - remaining)
+                quota_row.remaining = remaining
+                quota_row.status = "Open" if remaining > 0 else "Full"
+                quota_row.raw_data = quota
+                quota_row.targeting = {
+                    "layers": _toluna_value(
+                        quota, "Layers", default=[]
+                    ) or []
+                }
+                quota_row.updated_at = updated_at
+                # Duplicate provider IDs retain the old last-write-wins
+                # behavior while each physical derived row is written once.
+                updates_by_pk[quota_row.pk] = quota_row
+        results[survey.pk] = expected_ids.issubset(updated_ids)
+
+    if updates_by_pk:
+        SurveyQuota.objects.bulk_update(
+            list(updates_by_pk.values()),
+            [
+                "sample_size",
+                "completes",
+                "remaining",
+                "status",
+                "raw_data",
+                "targeting",
+                "updated_at",
+            ],
+            batch_size=_PROVIDER_BULK_UPDATE_BATCH_SIZE,
         )
-        if updated:
-            updated_ids.add(quota_id)
-    return expected_ids.issubset(updated_ids)
+    return results
 
 
 def sync_client_integration(integration: ClientIntegration, *, refresh_details=False) -> SyncRun:
@@ -181,6 +250,12 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
         raise ProviderError("This client integration is inactive.")
     provider = get_provider(integration)
     now = timezone.now()
+    # Touched rows must sort strictly after the close boundary. Some host
+    # clocks expose timestamps at a coarser resolution than Python's datetime,
+    # so a pre-existing missing row can legitimately equal ``now``. A separate
+    # marker lets the close query include that equality without ever closing a
+    # row merged by this snapshot.
+    snapshot_marker = now + timedelta(microseconds=1)
     run = SyncRun.objects.create(integration=integration)
     touched = []
     try:
@@ -204,6 +279,9 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                 )
             }
             unchanged_ids = []
+            changed_surveys = []
+            changed_survey_fields = set()
+            toluna_quota_candidates = []
             for source_key, normalized in normalized_rows.items():
                 survey = existing_surveys.get(source_key)
                 # Some provider inventory APIs (including Toluna Get Quotas)
@@ -228,6 +306,11 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                     "integration": integration,
                     "source_key": source_key,
                     "source_id": normalized.numeric_source_id,
+                    # The merge owns one snapshot marker.  Provider adapters
+                    # cannot accidentally supply a different timestamp, and
+                    # missing live rows can be closed with an indexed range
+                    # instead of a potentially huge NOT IN source-key list.
+                    "last_seen_at": snapshot_marker,
                 }
                 if survey is None:
                     survey = Survey.objects.create(**values)
@@ -250,33 +333,64 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                         setattr(survey, field, value)
                     if toluna_targeting_changed or (source_changed and not is_toluna):
                         survey.detail_synced_at = None
-                    survey.save()
+                        changed_survey_fields.add("detail_synced_at")
+                    # ``bulk_update`` does not invoke ``auto_now``.  Preserve
+                    # the previous save() timestamp semantics explicitly.
+                    survey.updated_at = timezone.now()
+                    changed_surveys.append(survey)
+                    changed_survey_fields.update(values)
+                    changed_survey_fields.add("updated_at")
                     if is_toluna and not toluna_targeting_changed:
-                        if _sync_toluna_quota_snapshots(survey, values.get("raw_data")):
-                            survey.quota_synced_at = now
-                            Survey.objects.filter(pk=survey.pk).update(quota_synced_at=now)
-                        else:
-                            # A supposedly hydrated survey is missing a derived
-                            # quota row. Fail closed and rebuild it on the next
-                            # detail pass instead of routing on partial data.
-                            survey.detail_synced_at = None
-                            Survey.objects.filter(pk=survey.pk).update(detail_synced_at=None)
+                        toluna_quota_candidates.append(
+                            (survey, values.get("raw_data"))
+                        )
                     run.updated += 1
                     touched.append(survey)
                 else:
                     unchanged_ids.append(survey.pk)
                     run.unchanged += 1
 
+            quota_snapshot_results = _sync_toluna_quota_snapshots_bulk(
+                toluna_quota_candidates
+            )
+            for survey, _raw_data in toluna_quota_candidates:
+                if quota_snapshot_results.get(survey.pk, False):
+                    survey.quota_synced_at = now
+                    changed_survey_fields.add("quota_synced_at")
+                else:
+                    # A supposedly hydrated survey is missing a derived quota
+                    # row. Fail closed and rebuild it on the next detail pass
+                    # instead of routing on partial data.
+                    survey.detail_synced_at = None
+                    changed_survey_fields.add("detail_synced_at")
+
+            if changed_surveys:
+                Survey.objects.bulk_update(
+                    changed_surveys,
+                    sorted(
+                        changed_survey_fields
+                        & _SURVEY_CONCRETE_UPDATE_FIELDS
+                    ),
+                    batch_size=_PROVIDER_BULK_UPDATE_BATCH_SIZE,
+                )
+
             # One set-based heartbeat replaces an UPDATE per unchanged survey.
             # Do not touch updated_at: an identical provider row was observed,
             # but the survey itself was not modified.
             if unchanged_ids:
-                Survey.objects.filter(pk__in=unchanged_ids).update(last_seen_at=now)
+                Survey.objects.filter(pk__in=unchanged_ids).update(
+                    last_seen_at=snapshot_marker
+                )
 
             run.closed = Survey.objects.filter(
                 integration=integration,
                 status=Survey.Status.LIVE,
-            ).exclude(source_key__in=normalized_rows).update(status=Survey.Status.CLOSED, updated_at=now)
+                # A newer concurrent snapshot must never be closed by this
+                # older worker. Every row merged by this snapshot carries the
+                # strictly newer ``snapshot_marker`` and therefore falls
+                # outside this inclusive cutoff.
+                last_seen_at__lte=now,
+            ).update(status=Survey.Status.CLOSED, updated_at=now)
 
         if integration.provider_code == "toluna":
             # Notifications can arrive just before the matching inventory row
