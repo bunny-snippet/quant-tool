@@ -1,6 +1,8 @@
 from django.db.models import Q
 
 from accounts.models import EmployeeProfile
+from accounts.profile_context import employee_profile_for_user
+from accounts.request_cache import request_cached
 
 
 VENDOR_ACCOUNT_TYPES = {
@@ -41,30 +43,26 @@ def vendor_scope_user_id(user) -> int | None:
 
     if not user or not user.is_authenticated:
         return None
-    if hasattr(user, "_vendor_scope_user_id_cache"):
-        return user._vendor_scope_user_id_cache
-    current = user
-    visited: set[int] = set()
-    while current and current.pk not in visited:
-        visited.add(current.pk)
-        profile = EmployeeProfile.objects.select_related(
-            "created_by", "organization_unit__workspace_owner__employee_profile"
-        ).filter(user=current).first()
-        if not profile:
-            user._vendor_scope_user_id_cache = None
-            return None
-        if profile.organization_unit_id:
-            owner = profile.organization_unit.workspace_owner
-            owner_profile = getattr(owner, "employee_profile", None)
-            if getattr(owner_profile, "account_type", "") in VENDOR_ACCOUNT_TYPES:
-                user._vendor_scope_user_id_cache = owner.pk
-                return owner.pk
-        if profile.account_type in VENDOR_ACCOUNT_TYPES:
-            user._vendor_scope_user_id_cache = current.pk
-            return current.pk
-        current = profile.created_by
-    user._vendor_scope_user_id_cache = None
-    return None
+
+    def load():
+        current = user
+        visited: set[int] = set()
+        while current and current.pk not in visited:
+            visited.add(current.pk)
+            profile = employee_profile_for_user(current)
+            if not profile:
+                return None
+            if profile.organization_unit_id:
+                owner = profile.organization_unit.workspace_owner
+                owner_profile = getattr(owner, "employee_profile", None)
+                if getattr(owner_profile, "account_type", "") in VENDOR_ACCOUNT_TYPES:
+                    return owner.pk
+            if profile.account_type in VENDOR_ACCOUNT_TYPES:
+                return current.pk
+            current = profile.created_by
+        return None
+
+    return request_cached(("vendor-scope-user-id", user.pk), load)
 
 
 def is_external_vendor_scope(user) -> bool:
@@ -72,15 +70,15 @@ def is_external_vendor_scope(user) -> bool:
 
     if not user or not user.is_authenticated:
         return False
-    if hasattr(user, "_external_vendor_scope_cache"):
-        return user._external_vendor_scope_cache
-    vendor_id = vendor_scope_user_id(user)
-    result = bool(vendor_id and EmployeeProfile.objects.filter(
-        user_id=vendor_id,
-        account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
-    ).exists())
-    user._external_vendor_scope_cache = result
-    return result
+
+    def load():
+        vendor_id = vendor_scope_user_id(user)
+        return bool(vendor_id and EmployeeProfile.objects.filter(
+            user_id=vendor_id,
+            account_type=EmployeeProfile.AccountType.EXTERNAL_VENDOR,
+        ).exists())
+
+    return bool(request_cached(("external-vendor-scope", user.pk), load))
 
 
 def organization_workspace_owner_ids(user) -> set[int]:
@@ -88,19 +86,23 @@ def organization_workspace_owner_ids(user) -> set[int]:
 
     if not user or not user.is_authenticated:
         return set()
-    if user.is_superuser:
-        internal_vendor_ids = EmployeeProfile.objects.filter(
+
+    def load():
+        if user.is_superuser:
+            internal_vendor_ids = EmployeeProfile.objects.filter(
+                account_type=EmployeeProfile.AccountType.INTERNAL_VENDOR,
+                user__is_active=True,
+            ).values_list("user_id", flat=True)
+            return frozenset({user.pk, *internal_vendor_ids})
+        vendor_id = vendor_scope_user_id(user)
+        if vendor_id and EmployeeProfile.objects.filter(
+            user_id=vendor_id,
             account_type=EmployeeProfile.AccountType.INTERNAL_VENDOR,
-            user__is_active=True,
-        ).values_list("user_id", flat=True)
-        return {user.pk, *internal_vendor_ids}
-    vendor_id = vendor_scope_user_id(user)
-    if vendor_id and EmployeeProfile.objects.filter(
-        user_id=vendor_id,
-        account_type=EmployeeProfile.AccountType.INTERNAL_VENDOR,
-    ).exists():
-        return {vendor_id}
-    return set()
+        ).exists():
+            return frozenset({vendor_id})
+        return frozenset()
+
+    return set(request_cached(("organization-workspace-owners", user.pk), load))
 
 
 def organization_unit_descendant_ids(unit, include_self=True) -> set[int]:

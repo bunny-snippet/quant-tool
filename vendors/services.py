@@ -229,8 +229,13 @@ def organization_client_ids_for_user(user) -> set[int] | None:
     return {client_id for client_id, policy in policies.items() if policy.is_active}
 
 
-def scope_surveys_for_user(queryset, user):
-    """Expose every project under a client grant; project rules are overrides."""
+def scope_surveys_for_user(queryset, user, *, require_capacity=True):
+    """Expose projects under a client grant; project rules are overrides.
+
+    Routing and project inventory require positive remaining capacity by
+    default. Audit callers may retain the same tenant/allocation boundaries
+    while including depleted or closed projects.
+    """
 
     vendor_id = vendor_scope_user_id(user)
     organization_policies = organization_client_policies_for_user(user)
@@ -265,8 +270,11 @@ def scope_surveys_for_user(queryset, user):
         .filter(_active_window_q(now))
         .select_related("client_allocation", "client_allocation__vendor", "client_allocation__vendor__employee_profile")
     )
+    scoped_queryset = queryset.filter(_survey_policy_q(supplier_policies))
+    if require_capacity:
+        scoped_queryset = scoped_queryset.filter(remaining__gt=0)
     scoped = (
-        queryset.filter(_survey_policy_q(supplier_policies), remaining__gt=0)
+        scoped_queryset
         .annotate(
             request_has_project_rule=Exists(all_project_rules),
             request_has_available_project_rule=Exists(available_rules.filter(survey_id=OuterRef("pk"))),

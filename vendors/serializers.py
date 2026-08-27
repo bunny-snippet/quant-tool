@@ -123,7 +123,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
     api_token = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=False)
     has_credential = serializers.SerializerMethodField()
     masked_credential = serializers.SerializerMethodField()
-    survey_count = serializers.IntegerField(source="surveys.count", read_only=True)
+    survey_count = serializers.SerializerMethodField()
     profile_reuse_status = serializers.SerializerMethodField()
     profile_reuse_available_country_codes = serializers.SerializerMethodField()
     config = serializers.JSONField(
@@ -165,17 +165,27 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         ]
 
     def get_profile_reuse_status(self, obj) -> dict:
+        attached = getattr(obj, "_profile_reuse_status", None)
+        if attached is not None:
+            return attached
         from prescreener_vault.reuse import profile_reuse_month_status
 
         return profile_reuse_month_status(obj)
 
     def get_profile_reuse_available_country_codes(self, obj) -> list[str]:
+        attached = getattr(obj, "_profile_reuse_available_country_codes", None)
+        if attached is not None:
+            return attached
         return list(
             obj.surveys.exclude(country_code="")
             .order_by("country_code")
             .values_list("country_code", flat=True)
             .distinct()[:250]
         )
+
+    def get_survey_count(self, obj) -> int:
+        attached = getattr(obj, "_survey_count", None)
+        return attached if attached is not None else obj.surveys.count()
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -449,7 +459,12 @@ class ClientSerializer(serializers.ModelSerializer):
 
     def get_integrations(self, obj) -> list[dict]:
         request = self.context.get("request")
-        if not request or not has_function_access(request.user, "clients.integration.view"):
+        can_view_integrations = self.context.get("can_view_client_integrations")
+        if can_view_integrations is None and request:
+            can_view_integrations = has_function_access(
+                request.user, "clients.integration.view"
+            )
+        if not request or not can_view_integrations:
             return []
         return ClientIntegrationSerializer(obj.integrations.all(), many=True, context=self.context).data
 

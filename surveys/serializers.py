@@ -490,7 +490,12 @@ class SurveyListSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         request = self.context.get("request")
-        if request and not has_function_access(request.user, "projects.column.client_name"):
+        can_view_client_name = self.context.get("can_view_project_client_name")
+        if can_view_client_name is None and request:
+            can_view_client_name = has_function_access(
+                request.user, "projects.column.client_name"
+            )
+        if request and not can_view_client_name:
             data["client_name"] = ""
             data["display_company_name"] = ""
             data["company_name"] = ""
@@ -522,9 +527,13 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     def get_display_company_name(self, obj) -> str:
         request = self.context.get("request")
-        if request and (
-            vendor_scope_user_id(request.user) or organization_client_ids_for_user(request.user) is not None
-        ) and obj.client:
+        client_scoped = self.context.get("project_client_scoped")
+        if client_scoped is None and request:
+            client_scoped = bool(
+                vendor_scope_user_id(request.user)
+                or organization_client_ids_for_user(request.user) is not None
+            )
+        if request and client_scoped and obj.client:
             return obj.client.name
         return obj.company_name
 
@@ -544,8 +553,19 @@ class SurveyListSerializer(serializers.ModelSerializer):
         return obj.raw_data.get("modifiedDate") or obj.raw_data.get("lastModified") or None
 
     def _pricing(self, obj):
+        cache = getattr(self, "_pricing_cache", None)
+        if cache is None:
+            cache = self._pricing_cache = {}
+        cache_key = obj.pk if obj.pk is not None else id(obj)
+        if cache_key in cache:
+            return cache[cache_key]
         request = self.context.get("request")
-        return survey_pricing_for_user(request.user, obj) if request and request.user.is_authenticated else (obj.cpi, None)
+        cache[cache_key] = (
+            survey_pricing_for_user(request.user, obj)
+            if request and request.user.is_authenticated
+            else (obj.cpi, None)
+        )
+        return cache[cache_key]
 
     @extend_schema_field(serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True))
     def get_cpi(self, obj):
@@ -557,12 +577,18 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     def get_vendor_pricing(self, obj) -> bool:
         request = self.context.get("request")
-        return bool(request and vendor_scope_user_id(request.user))
+        vendor_pricing = self.context.get("vendor_pricing")
+        if vendor_pricing is None:
+            vendor_pricing = bool(request and vendor_scope_user_id(request.user))
+        return bool(vendor_pricing)
 
     def get_start_link(self, obj) -> str | None:
         """Return the shareable platform pre-screener URL, never the supplier entry URL."""
         request = self.context.get("request")
-        if not request or not request.user.is_authenticated or not has_function_access(request.user, "survey_links.copy"):
+        can_copy_link = self.context.get("can_copy_survey_link")
+        if can_copy_link is None and request and request.user.is_authenticated:
+            can_copy_link = has_function_access(request.user, "survey_links.copy")
+        if not request or not request.user.is_authenticated or not can_copy_link:
             return None
         # The start endpoint intentionally accepts only live inventory. Never
         # offer a link in Projects that the same backend will reject because

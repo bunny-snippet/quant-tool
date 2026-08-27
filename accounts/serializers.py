@@ -6,7 +6,6 @@ from .access import (
     EXTERNAL_VENDOR_FORBIDDEN_CODES,
     assignable_functions,
     assignable_roles,
-    effective_permission_codes,
     has_function_access,
 )
 from .models import AccessFunction, EmployeeProfile, Role, RoleFunctionPermission, UserFunctionOverride
@@ -35,7 +34,23 @@ class RoleSerializer(serializers.ModelSerializer):
         read_only_fields = ["is_system", "created_at", "updated_at"]
 
     def get_effective_permission_codes(self, obj) -> list[str]:
-        return list(obj.function_assignments.filter(allowed=True, function__is_active=True).values_list("function__code", flat=True))
+        assignments = getattr(obj, "_access_function_assignments", None)
+        if assignments is None:
+            assignments = getattr(obj, "_prefetched_objects_cache", {}).get(
+                "function_assignments"
+            )
+        if assignments is None:
+            return list(
+                obj.function_assignments.filter(
+                    allowed=True,
+                    function__is_active=True,
+                ).values_list("function__code", flat=True)
+            )
+        return [
+            assignment.function.code
+            for assignment in assignments
+            if assignment.allowed and assignment.function.is_active
+        ]
 
     def validate_permission_codes(self, codes):
         codes = list(dict.fromkeys(codes))
@@ -56,6 +71,9 @@ class RoleSerializer(serializers.ModelSerializer):
         role.function_assignments.exclude(function__in=functions).delete()
         for function in functions:
             RoleFunctionPermission.objects.update_or_create(role=role, function=function, defaults={"allowed": True})
+        getattr(role, "_prefetched_objects_cache", {}).pop("function_assignments", None)
+        if hasattr(role, "_access_function_assignments"):
+            delattr(role, "_access_function_assignments")
 
     @transaction.atomic
     def create(self, validated_data):
@@ -140,14 +158,74 @@ class UserAccessSerializer(serializers.ModelSerializer):
             "workspace_owner_name": owner.get_full_name() or owner.username,
         }
 
+    def _serialized_access(self, obj) -> tuple[list[str], list[str], list[str]]:
+        cached = getattr(obj, "_serialized_access_permissions", None)
+        if cached is not None:
+            return cached
+
+        overrides = getattr(obj, "_access_function_overrides", None)
+        if overrides is None:
+            overrides = list(obj.function_overrides.select_related("function").all())
+
+        allowed_overrides = [
+            override.function.code
+            for override in overrides
+            if override.effect == UserFunctionOverride.Effect.ALLOW
+        ]
+        denied_overrides = [
+            override.function.code
+            for override in overrides
+            if override.effect == UserFunctionOverride.Effect.DENY
+        ]
+
+        if not obj.is_active:
+            effective = set()
+        elif obj.is_superuser:
+            active_codes = getattr(self, "_active_function_codes", None)
+            if active_codes is None:
+                active_codes = list(
+                    AccessFunction.objects.filter(is_active=True).values_list("code", flat=True)
+                )
+                self._active_function_codes = active_codes
+            effective = set(active_codes)
+        else:
+            profile = getattr(obj, "employee_profile", None)
+            role = profile.role if profile else None
+            effective = set()
+            if role and role.is_active:
+                assignments = getattr(role, "_access_function_assignments", None)
+                if assignments is None:
+                    assignments = list(role.function_assignments.select_related("function").all())
+                effective.update(
+                    assignment.function.code
+                    for assignment in assignments
+                    if assignment.allowed and assignment.function.is_active
+                )
+            for override in overrides:
+                if not override.function.is_active:
+                    continue
+                if override.effect == UserFunctionOverride.Effect.ALLOW:
+                    effective.add(override.function.code)
+                else:
+                    effective.discard(override.function.code)
+            if profile and profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
+                effective.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
+                effective = {
+                    code for code in effective if not code.startswith("organization.")
+                }
+
+        cached = (allowed_overrides, denied_overrides, sorted(effective))
+        obj._serialized_access_permissions = cached
+        return cached
+
     def get_allowed_overrides(self, obj) -> list[str]:
-        return list(obj.function_overrides.filter(effect=UserFunctionOverride.Effect.ALLOW).values_list("function__code", flat=True))
+        return self._serialized_access(obj)[0]
 
     def get_denied_overrides(self, obj) -> list[str]:
-        return list(obj.function_overrides.filter(effect=UserFunctionOverride.Effect.DENY).values_list("function__code", flat=True))
+        return self._serialized_access(obj)[1]
 
     def get_effective_permissions(self, obj) -> list[str]:
-        return sorted(effective_permission_codes(obj))
+        return self._serialized_access(obj)[2]
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -293,16 +371,18 @@ class UserAccessSerializer(serializers.ModelSerializer):
         user.employee_profile = profile
         if profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
             user.function_overrides.filter(function__code__in=EXTERNAL_VENDOR_FORBIDDEN_CODES).delete()
-        if allow_codes is serializers.empty and deny_codes is serializers.empty:
-            return
-        allow_codes = [] if allow_codes is serializers.empty else allow_codes
-        deny_codes = [] if deny_codes is serializers.empty else deny_codes
-        selected = set(allow_codes) | set(deny_codes)
-        user.function_overrides.exclude(function__code__in=selected).delete()
-        effects = [(allow_codes, UserFunctionOverride.Effect.ALLOW), (deny_codes, UserFunctionOverride.Effect.DENY)]
-        for codes, effect in effects:
-            for function in AccessFunction.objects.filter(code__in=codes):
-                UserFunctionOverride.objects.update_or_create(user=user, function=function, defaults={"effect": effect})
+        if allow_codes is not serializers.empty or deny_codes is not serializers.empty:
+            allow_codes = [] if allow_codes is serializers.empty else allow_codes
+            deny_codes = [] if deny_codes is serializers.empty else deny_codes
+            selected = set(allow_codes) | set(deny_codes)
+            user.function_overrides.exclude(function__code__in=selected).delete()
+            effects = [(allow_codes, UserFunctionOverride.Effect.ALLOW), (deny_codes, UserFunctionOverride.Effect.DENY)]
+            for codes, effect in effects:
+                for function in AccessFunction.objects.filter(code__in=codes):
+                    UserFunctionOverride.objects.update_or_create(user=user, function=function, defaults={"effect": effect})
+        for attr in ("_access_function_overrides", "_serialized_access_permissions"):
+            if hasattr(user, attr):
+                delattr(user, attr)
 
     @transaction.atomic
     def create(self, validated_data):

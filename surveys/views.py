@@ -263,6 +263,18 @@ TOLUNA_NOTIFICATION_TABS = (
     (TolunaNotification.EventType.RECONCILIATION, "Reconciliation", "Post-fieldwork adjustments"),
 )
 
+TOLUNA_MEMBER_NOTIFICATION_EVENTS = frozenset({
+    TolunaNotification.EventType.MEMBER_COMPLETE,
+    TolunaNotification.EventType.MEMBER_TERMINATE,
+    TolunaNotification.EventType.ENHANCED_TERMINATION,
+    TolunaNotification.EventType.RECONCILIATION,
+})
+
+TOLUNA_OPERATIONAL_NOTIFICATION_EVENTS = frozenset({
+    TolunaNotification.EventType.QUOTA_STATUS,
+    TolunaNotification.EventType.SURVEY_CLOSED,
+})
+
 TERM_REASON_CARD_PERMISSIONS = {
     "total": "termination_reasons.card.total",
     "terminated": "termination_reasons.card.terminated",
@@ -350,6 +362,28 @@ def _project_columns_for_user(user):
     if "actions" in columns and "survey_details.view" not in codes:
         columns.remove("actions")
     return columns
+
+
+def _survey_list_serializer_context(request):
+    """Resolve request-wide project serializer decisions once, not once per row."""
+
+    user = request.user
+    if user.is_superuser:
+        can_view_client_name = can_copy_survey_link = True
+    else:
+        codes = effective_permission_codes(user)
+        can_view_client_name = "projects.column.client_name" in codes
+        can_copy_survey_link = "survey_links.copy" in codes
+    vendor_id = vendor_scope_user_id(user)
+    return {
+        "request": request,
+        "can_view_project_client_name": can_view_client_name,
+        "can_copy_survey_link": can_copy_survey_link,
+        "vendor_pricing": bool(vendor_id),
+        "project_client_scoped": bool(
+            vendor_id or organization_client_ids_for_user(user) is not None
+        ),
+    }
 
 
 def _component_access(codes, permissions):
@@ -441,7 +475,7 @@ def projects_page(request):
 def studies_page(request):
     codes = effective_permission_codes(request.user)
     user_ids = activity_visible_user_ids(request.user)
-    hierarchy_options = user_hit_filter_options(request.user)
+    hierarchy_options = user_hit_filter_options(request.user, user_ids=user_ids)
     visible_attempts = SurveyAttempt.objects.all()
     if not request.user.is_superuser:
         visible_attempts = visible_attempts.filter(platform_user_id__in=user_ids)
@@ -730,11 +764,32 @@ def _term_report_filter_state(request, filters_access):
     return selected
 
 
-def _term_report_base_queryset():
-    return SurveyAttempt.objects.select_related(
+def _scope_attempt_queryset_to_user(queryset, user):
+    """Apply the tracking hierarchy boundary to an attempt-backed report.
+
+    Current journeys use ``platform_user``. Historical rows may only contain
+    the numeric ``user_id`` snapshot, so that fallback is accepted exclusively
+    when the authoritative foreign key is empty.
+    """
+
+    if user.is_superuser:
+        return queryset
+    visible_user_ids = activity_visible_user_ids(user)
+    return queryset.filter(
+        Q(platform_user_id__in=visible_user_ids)
+        | Q(
+            platform_user_id__isnull=True,
+            user_id__in=[str(user_id) for user_id in visible_user_ids],
+        )
+    )
+
+
+def _term_report_base_queryset(user):
+    queryset = SurveyAttempt.objects.select_related(
         "survey__integration__client", "survey__client",
         "platform_user__employee_profile__organization_unit__parent__parent",
     ).filter(status__in=UNSUCCESSFUL_ATTEMPT_STATUSES)
+    return _scope_attempt_queryset_to_user(queryset, user)
 
 
 def _term_report_datetime(value, label):
@@ -750,7 +805,7 @@ def _term_report_datetime(value, label):
 
 def _filtered_term_report_queryset(request, filters_access):
     selected = _term_report_filter_state(request, filters_access)
-    queryset = _term_report_base_queryset()
+    queryset = _term_report_base_queryset(request.user)
     search = selected["search"]
     if search:
         queryset = queryset.filter(
@@ -864,8 +919,38 @@ def _toluna_notification_filter_state(request, filters_access):
     return selected
 
 
-def _toluna_notification_base_queryset():
-    return TolunaNotification.objects.select_related(
+def _scope_toluna_notification_queryset_to_user(queryset, user):
+    """Restrict Toluna audit rows to activity or project visibility.
+
+    Respondent notifications are visible only through an activity-visible
+    attempt. Operational notifications contain no member identity, so they use
+    the matched survey's current client/project scope. A non-superuser never
+    receives a globally unmatched notification row.
+    """
+
+    if user.is_superuser:
+        return queryset
+
+    visible_attempts = _scope_attempt_queryset_to_user(
+        SurveyAttempt.objects.all(), user
+    ).order_by().values("pk")
+    visible_surveys = scope_surveys_for_user(
+        Survey.objects.all(), user, require_capacity=False
+    ).order_by().values("pk")
+    return queryset.filter(
+        Q(
+            event_type__in=TOLUNA_MEMBER_NOTIFICATION_EVENTS,
+            attempt_id__in=visible_attempts,
+        )
+        | Q(
+            event_type__in=TOLUNA_OPERATIONAL_NOTIFICATION_EVENTS,
+            survey_id__in=visible_surveys,
+        )
+    )
+
+
+def _toluna_notification_base_queryset(user):
+    queryset = TolunaNotification.objects.select_related(
         "integration__client",
         "survey__client",
         "survey__integration__client",
@@ -873,13 +958,14 @@ def _toluna_notification_base_queryset():
     ).defer("raw_payload").annotate(
         report_time=Coalesce("occurred_at", "received_at")
     )
+    return _scope_toluna_notification_queryset_to_user(queryset, user)
 
 
 def _filtered_toluna_notification_queryset(request, filters_access):
     """Filter the complete Toluna audit while retaining unmatched events by default."""
 
     selected = _toluna_notification_filter_state(request, filters_access)
-    queryset = _toluna_notification_base_queryset()
+    queryset = _toluna_notification_base_queryset(request.user)
     search = selected["search"]
     if search:
         queryset = queryset.filter(
@@ -953,11 +1039,11 @@ def _filtered_toluna_notification_queryset(request, filters_access):
 def _toluna_notification_options(base_queryset, user):
     hierarchy = user_hit_filter_options(user)
     clients = {}
-    for row in base_queryset.filter(survey__client__isnull=False).values(
+    for row in base_queryset.filter(survey__client__isnull=False).order_by().values(
         "survey__client_id", "survey__client__name"
     ).distinct():
         clients[row["survey__client_id"]] = row["survey__client__name"]
-    for row in base_queryset.filter(integration__client__isnull=False).values(
+    for row in base_queryset.filter(integration__client__isnull=False).order_by().values(
         "integration__client_id", "integration__client__name"
     ).distinct():
         clients[row["integration__client_id"]] = row["integration__client__name"]
@@ -998,7 +1084,7 @@ def toluna_notifications_page(request):
     codes = effective_permission_codes(request.user)
     filters_access = _component_access(codes, TOLUNA_NOTIFICATION_FILTER_PERMISSIONS)
     queryset, selected = _filtered_toluna_notification_queryset(request, filters_access)
-    base_queryset = _toluna_notification_base_queryset()
+    base_queryset = _toluna_notification_base_queryset(request.user)
     options = _toluna_notification_options(base_queryset, request.user)
 
     summary = queryset.aggregate(
@@ -1143,7 +1229,7 @@ def termination_reasons_page(request):
     if detail_rid and "termination_reasons.action.details" not in codes:
         raise PermissionDenied("Your account cannot open outcome details.")
 
-    base_queryset = _term_report_base_queryset()
+    base_queryset = _term_report_base_queryset(request.user)
     filter_options = _term_report_options(base_queryset, request.user)
 
     summary = queryset.aggregate(
@@ -1165,8 +1251,11 @@ def termination_reasons_page(request):
         else:
             detail_attempt = base_queryset.filter(rid=detail_rid).first()
             if detail_attempt is None:
-                non_terminal_attempt = SurveyAttempt.objects.select_related(
-                    "survey__integration__client", "survey__client", "platform_user"
+                non_terminal_attempt = _scope_attempt_queryset_to_user(
+                    SurveyAttempt.objects.select_related(
+                        "survey__integration__client", "survey__client", "platform_user"
+                    ),
+                    request.user,
                 ).filter(rid=detail_rid).first()
                 if non_terminal_attempt:
                     lookup_error = (
@@ -3098,6 +3187,7 @@ def survey_status(request):
         ),
         parameters=[
             OpenApiParameter("search", OpenApiTypes.STR, description="Free-text search across survey identifiers and descriptive fields."),
+            OpenApiParameter("identifier", OpenApiTypes.STR, description="Indexed exact project/provider identifier lookup used by the Projects UI for ID-shaped searches."),
             OpenApiParameter("ordering", OpenApiTypes.STR, description="One of source_modified_at, source_created_at, cpi, sample_size, completes, created_at; prefix '-' for descending."),
             OpenApiParameter("page", OpenApiTypes.INT, description="1-based result page."),
             OpenApiParameter("page_size", OpenApiTypes.INT, description="Rows per page (1–100, default 20)."),
@@ -3124,6 +3214,11 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["source_modified_at", "source_created_at", "cpi", "sample_size", "completes", "created_at"]
     ordering = ["-source_modified_at", "-created_at"]
     permission_classes = [HasFunctionPermission]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update(_survey_list_serializer_context(self.request))
+        return context
 
     def get_queryset(self):
         queryset = scope_surveys_for_user(super().get_queryset(), self.request.user)
@@ -3211,7 +3306,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
 
     def filter_queryset(self, queryset):
         _enforce_query_permissions(self.request, {
-            "projects.filter.search": ("search",),
+            "projects.filter.search": ("search", "identifier"),
             "projects.filter.country": ("country",),
             "projects.filter.status": ("status",),
             "projects.filter.client": ("company", "client_name"),
@@ -3302,6 +3397,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         ),
         parameters=[
             OpenApiParameter("search", OpenApiTypes.STR, description="Search project ID, survey ID, name, country or category."),
+            OpenApiParameter("identifier", OpenApiTypes.STR, description="Indexed exact project/provider identifier lookup, including a numeric Toluna SurveyID prefix."),
             OpenApiParameter("country", OpenApiTypes.STR, description="Comma-separated country codes."),
             OpenApiParameter("status", OpenApiTypes.STR, description="Comma-separated survey statuses."),
             OpenApiParameter("company", OpenApiTypes.STR, description="Comma-separated client/company names."),
@@ -3867,7 +3963,7 @@ def _survey_excel_rows(queryset, request, columns):
     widths = [width for column in export_columns for width in widths_by_column[column]]
 
     def rows():
-        serializer_context = {"request": request}
+        serializer_context = _survey_list_serializer_context(request)
         for survey in queryset.iterator(chunk_size=500):
             data = SurveyListSerializer(survey, context=serializer_context).data
             values_by_column = {
@@ -3971,7 +4067,7 @@ def _survey_csv_rows(queryset, request, columns):
     headers = [header for column in export_columns for header in headers_by_column[column]]
     writer = csv.writer(_CsvEcho())
     yield "\ufeff" + writer.writerow(headers)
-    serializer_context = {"request": request}
+    serializer_context = _survey_list_serializer_context(request)
     for survey in queryset.iterator(chunk_size=500):
         data = SurveyListSerializer(survey, context=serializer_context).data
         values_by_column = {

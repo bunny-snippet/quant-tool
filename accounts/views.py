@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.views import LoginView, LogoutView
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from django.http import Http404
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
@@ -14,7 +14,7 @@ from .access import (
     can_manage_role, has_function_access, manageable_user_ids,
 )
 from .forms import FirstAdminSetupForm, WorkspaceAuthenticationForm
-from .models import AccessFunction, EmployeeProfile, Role
+from .models import AccessFunction, EmployeeProfile, Role, RoleFunctionPermission, UserFunctionOverride
 from .serializers import AccessFunctionSerializer, RoleSerializer, UserAccessSerializer
 from vendors.access import organization_workspace_owner_ids
 from vendors.models import OrganizationUnit
@@ -170,7 +170,22 @@ class RoleViewSet(viewsets.ModelViewSet):
     destroy=extend_schema(tags=["Access control"], summary="Delete an employee account"),
 )
 class UserAccessViewSet(viewsets.ModelViewSet):
-    queryset = get_user_model().objects.select_related("employee_profile__role").prefetch_related("function_overrides__function")
+    queryset = get_user_model().objects.select_related("employee_profile__role").prefetch_related(
+        Prefetch(
+            "employee_profile__role__function_assignments",
+            queryset=RoleFunctionPermission.objects.select_related("function").order_by(
+                "function__module", "function__name"
+            ),
+            to_attr="_access_function_assignments",
+        ),
+        Prefetch(
+            "function_overrides",
+            queryset=UserFunctionOverride.objects.select_related("function").order_by(
+                "function__module", "function__name"
+            ),
+            to_attr="_access_function_overrides",
+        ),
+    )
     serializer_class = UserAccessSerializer
     permission_classes = [HasFunctionPermission]
     def get_required_function_permission(self):
@@ -191,7 +206,22 @@ class UserAccessViewSet(viewsets.ModelViewSet):
             "employee_profile__role", "employee_profile__created_by",
             "employee_profile__organization_unit__workspace_owner",
             "employee_profile__organization_unit__parent__parent",
-        ).prefetch_related("function_overrides__function")
+        ).prefetch_related(
+            Prefetch(
+                "employee_profile__role__function_assignments",
+                queryset=RoleFunctionPermission.objects.select_related("function").order_by(
+                    "function__module", "function__name"
+                ),
+                to_attr="_access_function_assignments",
+            ),
+            Prefetch(
+                "function_overrides",
+                queryset=UserFunctionOverride.objects.select_related("function").order_by(
+                    "function__module", "function__name"
+                ),
+                to_attr="_access_function_overrides",
+            ),
+        )
         if self.request.user.is_superuser:
             return queryset
         return queryset.filter(id__in=manageable_user_ids(self.request.user), is_superuser=False)

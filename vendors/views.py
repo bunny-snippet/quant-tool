@@ -455,7 +455,12 @@ class VendorDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
     destroy=extend_schema(tags=["Suppliers & allocations"], summary="Deactivate a survey client"),
 )
 class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
-    queryset = Client.objects.select_related("created_by").prefetch_related("integrations").exclude(
+    queryset = Client.objects.select_related("created_by").prefetch_related(
+        Prefetch(
+            "integrations",
+            queryset=ClientIntegration.objects.select_related("client", "created_by"),
+        )
+    ).exclude(
         is_active=False, provider_code__in=("biobrain", "voqall")
     )
     serializer_class = ClientSerializer
@@ -468,6 +473,44 @@ class ClientViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at", "updated_at"]
     ordering = ["name"]
     vendor_scope_filter = "vendor_allocations__vendor_id"
+
+    def _can_view_client_integrations(self):
+        if not hasattr(self, "_can_view_client_integrations_cache"):
+            user = self.request.user
+            self._can_view_client_integrations_cache = bool(
+                user.is_superuser
+                or "clients.integration.view" in effective_permission_codes(user)
+            )
+        return self._can_view_client_integrations_cache
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["can_view_client_integrations"] = self._can_view_client_integrations()
+        return context
+
+    @staticmethod
+    def _attach_page_integration_metadata(clients):
+        clients = list(clients)
+        integrations = [
+            integration
+            for client in clients
+            for integration in client.integrations.all()
+        ]
+        ClientIntegrationViewSet._attach_list_metadata(integrations)
+        return clients
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            if self._can_view_client_integrations():
+                page = self._attach_page_integration_metadata(page)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        rows = list(queryset)
+        if self._can_view_client_integrations():
+            rows = self._attach_page_integration_metadata(rows)
+        return Response(self.get_serializer(rows, many=True).data)
 
 
 @extend_schema_view(
@@ -490,6 +533,49 @@ class ClientIntegrationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
     filterset_fields = ["client", "provider_code", "scheduled_sync_enabled", "is_active"]
     search_fields = ["name", "client__name", "client__code"]
     vendor_scope_filter = "client__vendor_allocations__vendor_id"
+
+    @staticmethod
+    def _attach_list_metadata(integrations):
+        """Batch integration-card counters that otherwise cost five queries per row."""
+
+        integrations = list(integrations)
+        integration_ids = [integration.pk for integration in integrations]
+        if not integration_ids:
+            return integrations
+
+        survey_counts = {integration_id: 0 for integration_id in integration_ids}
+        country_codes = {integration_id: [] for integration_id in integration_ids}
+        for row in (
+            Survey.objects.filter(integration_id__in=integration_ids)
+            .values("integration_id", "country_code")
+            .annotate(total=Count("id"))
+            .order_by("integration_id", "country_code")
+        ):
+            integration_id = row["integration_id"]
+            survey_counts[integration_id] += row["total"]
+            if row["country_code"] and len(country_codes[integration_id]) < 250:
+                country_codes[integration_id].append(row["country_code"])
+
+        from prescreener_vault.reuse import profile_reuse_month_statuses
+
+        reuse_statuses = profile_reuse_month_statuses(integrations)
+        for integration in integrations:
+            integration._survey_count = survey_counts[integration.pk]
+            integration._profile_reuse_available_country_codes = country_codes[
+                integration.pk
+            ]
+            integration._profile_reuse_status = reuse_statuses[integration.pk]
+        return integrations
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            page = self._attach_list_metadata(page)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        rows = self._attach_list_metadata(queryset)
+        return Response(self.get_serializer(rows, many=True).data)
 
     def get_required_function_permission(self):
         if self.action in {"list", "retrieve", "providers"}:

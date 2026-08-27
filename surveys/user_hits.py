@@ -47,8 +47,16 @@ def _build_user_metadata(user_ids: set[int]) -> dict[int, dict]:
         )
         .order_by("first_name", "last_name", "username")
     )
-    profiles = {}
-    pending_ids = set(user_ids)
+    profiles = {
+        platform_user.pk: profile
+        for platform_user in users
+        if (profile := getattr(platform_user, "employee_profile", None)) is not None
+    }
+    pending_ids = {
+        profile.created_by_id
+        for profile in profiles.values()
+        if profile.created_by_id and profile.created_by_id not in profiles
+    }
     while pending_ids:
         batch = list(
             EmployeeProfile.objects.filter(user_id__in=pending_ids)
@@ -113,8 +121,10 @@ def _build_user_metadata(user_ids: set[int]) -> dict[int, dict]:
     return metadata
 
 
-def user_hit_filter_options(user) -> dict:
-    metadata = _build_user_metadata(_visible_user_ids(user))
+def user_hit_filter_options(user, user_ids=None) -> dict:
+    metadata = _build_user_metadata(
+        set(user_ids) if user_ids is not None else _visible_user_ids(user)
+    )
     visible_users = list(metadata.values())
     visible_users.sort(key=lambda item: (item["user_name"].casefold(), item["user_id"]))
 

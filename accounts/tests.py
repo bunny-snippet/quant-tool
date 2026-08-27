@@ -314,7 +314,7 @@ class FunctionAccessTests(TestCase):
         self.assertContains(page, "user_hits.card.completes")
         self.assertContains(page, "termination_reasons.card.quality")
         self.assertContains(page, "organization.card.client_grants")
-        self.assertContains(page, "vendors.card.quantity")
+        self.assertNotContains(page, "vendors.card.quantity")
         self.assertContains(page, "user_hits.column.completes")
         self.assertContains(page, "Select entire group")
         self.assertContains(page, "assigned functions")

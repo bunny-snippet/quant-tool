@@ -129,6 +129,26 @@ class Survey(models.Model):
         indexes = [
             models.Index(fields=["status", "country_code"]),
             models.Index(fields=["client", "cpi"]),
+            models.Index(
+                fields=["-source_modified_at", "-created_at"],
+                name="survey_modified_created_idx",
+            ),
+            models.Index(
+                fields=["country_code", "country"],
+                name="survey_country_label_idx",
+            ),
+            models.Index(
+                fields=["buyer_id", "client", "company_name"],
+                name="survey_buyer_scope_idx",
+            ),
+            models.Index(
+                fields=["integration", "status", "last_seen_at"],
+                name="survey_int_status_seen_idx",
+            ),
+            models.Index(
+                fields=["integration", "country_code"],
+                name="survey_int_country_idx",
+            ),
         ]
         constraints = [
             models.UniqueConstraint(fields=["integration", "source_id"], name="unique_integration_survey_source"),
@@ -487,6 +507,48 @@ class SurveyAttempt(models.Model):
         indexes = [
             models.Index(fields=["survey", "user_id", "-initiated_at"]),
             models.Index(fields=["initiation_ip"], name="attempt_entry_ip_idx"),
+            models.Index(
+                fields=["status", "-initiated_at"],
+                name="attempt_status_init_idx",
+            ),
+            models.Index(
+                fields=["platform_user", "-initiated_at"],
+                name="attempt_user_init_idx",
+            ),
+            models.Index(
+                fields=["platform_user", "status", "-initiated_at"],
+                name="attempt_user_status_idx",
+            ),
+            models.Index(
+                fields=["survey", "status"],
+                name="attempt_survey_status_idx",
+            ),
+            models.Index(
+                fields=["status", "-callback_at"],
+                name="attempt_status_cb_idx",
+            ),
+            models.Index(
+                fields=["client", "-initiated_at"],
+                name="attempt_client_init_idx",
+            ),
+            models.Index(fields=["-callback_at"], name="attempt_callback_idx"),
+            models.Index(fields=["callback_ip"], name="attempt_exit_ip_idx"),
+            models.Index(
+                fields=["user_id", "-initiated_at"],
+                name="attempt_legacy_user_init_idx",
+            ),
+            models.Index(
+                fields=["platform_user", "status", "-callback_at"],
+                name="attempt_user_status_cb_idx",
+            ),
+            models.Index(
+                fields=["user_id", "status", "-callback_at"],
+                name="attempt_legacy_status_cb_idx",
+            ),
+            models.Index(
+                fields=["-callback_at", "-initiated_at", "status"],
+                name="attempt_term_order_idx",
+            ),
         ]
 
     def __str__(self):

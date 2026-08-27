@@ -114,6 +114,25 @@ def profile_reuse_month_status(integration, reference=None):
     counter = ProfileReuseMonthlyCounter.objects.filter(
         integration_id=integration.pk, period_start=period_start
     ).first()
+    return _profile_reuse_status_payload(
+        integration,
+        period_start=period_start,
+        previous_attempts=previous_attempts,
+        live_baseline=live_baseline,
+        baseline_source=baseline_source,
+        counter=counter,
+    )
+
+
+def _profile_reuse_status_payload(
+    integration,
+    *,
+    period_start,
+    previous_attempts,
+    live_baseline,
+    baseline_source,
+    counter,
+):
     baseline = live_baseline
     used = first_used = repeat_used = 0
     if counter:
@@ -143,6 +162,64 @@ def profile_reuse_month_status(integration, reference=None):
         "max_uses_per_window": integration.profile_reuse_max_uses_per_window,
         "window_minutes": integration.profile_reuse_window_minutes,
     }
+
+
+def profile_reuse_month_statuses(integrations, reference=None):
+    """Return the same status payload for many integration cards in two queries."""
+
+    integrations = list(integrations)
+    integration_ids = [integration.pk for integration in integrations if integration.pk]
+    if not integration_ids:
+        return {}
+    previous_start, current_start, period_start = _calendar_bounds(reference)
+    traffic = {
+        row["survey__integration_id"]: row
+        for row in (
+            SurveyAttempt.objects.filter(
+                survey__integration_id__in=integration_ids,
+                initiated_at__gte=previous_start,
+            )
+            .values("survey__integration_id")
+            .annotate(
+                previous_attempts=Count(
+                    "id",
+                    filter=Q(
+                        initiated_at__gte=previous_start,
+                        initiated_at__lt=current_start,
+                    ),
+                ),
+                current_attempts=Count(
+                    "id", filter=Q(initiated_at__gte=current_start)
+                ),
+            )
+        )
+    }
+    counters = {
+        counter.integration_id: counter
+        for counter in ProfileReuseMonthlyCounter.objects.filter(
+            integration_id__in=integration_ids,
+            period_start=period_start,
+        )
+    }
+    statuses = {}
+    for integration in integrations:
+        counts = traffic.get(integration.pk, {})
+        previous_attempts = counts.get("previous_attempts", 0)
+        if previous_attempts > 0:
+            live_baseline = previous_attempts
+            baseline_source = "previous_month"
+        else:
+            live_baseline = counts.get("current_attempts", 0)
+            baseline_source = "current_month_bootstrap"
+        statuses[integration.pk] = _profile_reuse_status_payload(
+            integration,
+            period_start=period_start,
+            previous_attempts=previous_attempts,
+            live_baseline=live_baseline,
+            baseline_source=baseline_source,
+            counter=counters.get(integration.pk),
+        )
+    return statuses
 
 
 def _claim_month_slot(integration):

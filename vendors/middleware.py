@@ -2,6 +2,7 @@ from django.contrib.auth import logout
 from django.contrib.auth.views import redirect_to_login
 
 from accounts.models import EmployeeProfile
+from accounts.profile_context import employee_profile_for_user
 
 
 class VendorPanelAccessMiddleware:
@@ -12,7 +13,7 @@ class VendorPanelAccessMiddleware:
 
     def __call__(self, request):
         user = getattr(request, "user", None)
-        profile = getattr(user, "employee_profile", None) if user and user.is_authenticated else None
+        profile = employee_profile_for_user(user)
         if getattr(profile, "account_type", "") == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
             commercial = getattr(user, "vendor_commercial_profile", None)
             if not commercial or not commercial.is_active or not commercial.panel_access_enabled:

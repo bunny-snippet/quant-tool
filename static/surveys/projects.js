@@ -21,6 +21,8 @@
     timer: null,
     controller: null,
     loading: false,
+    displayedSearchTerm: '',
+    searchMode: 'search',
   };
 
   const els = {
@@ -311,13 +313,31 @@
   });
   els.cpiReset?.addEventListener('click', () => resetCpiControl(true));
 
-  function queryString(includePage = true) {
+  function isIdentifierShaped(term) {
+    return /^\d+$/.test(term)
+      || /^\d+:\d+$/.test(term)
+      || /^RFG\d+-\d+$/i.test(term);
+  }
+
+  function preferredSearchMode(term) {
+    return isIdentifierShaped(term) ? 'identifier' : 'search';
+  }
+
+  function queryString(includePage = true, searchMode = null) {
     const params = new URLSearchParams({ ordering: selectedOrdering()?.value || '-source_modified_at' });
     if (includePage) {
       params.set('page', state.page);
       params.set('page_size', state.pageSize);
     }
-    if (els.search?.value.trim()) params.set('search', els.search.value.trim());
+    const searchTerm = els.search?.value.trim() || '';
+    if (searchTerm) {
+      const mode = searchMode || (
+        searchTerm === state.displayedSearchTerm
+          ? state.searchMode
+          : preferredSearchMode(searchTerm)
+      );
+      params.set(mode, searchTerm);
+    }
     els.multiSelects.forEach((filter) => {
       const values = selectedValues(filter);
       if (values.length) params.set(filter.dataset.multiFilter, values.join(','));
@@ -351,9 +371,28 @@
       els.cards.innerHTML = '<div class="mobile-loading">Fetching surveys…</div>';
     }
     try {
-      const response = await fetch(`/api/v1/surveys/?${queryString()}`, { signal: controller.signal });
+      const searchTerm = els.search?.value.trim() || '';
+      let searchMode = searchTerm === state.displayedSearchTerm
+        ? state.searchMode
+        : preferredSearchMode(searchTerm);
+      const requestPage = (mode) => fetch(
+        `/api/v1/surveys/?${queryString(true, mode)}`,
+        { signal: controller.signal },
+      );
+      let response = await requestPage(searchMode);
       if (!response.ok) throw new Error(`Request failed (${response.status})`);
-      const data = await response.json();
+      let data = await response.json();
+      // ID-shaped input normally uses indexed predicates. If no exact ID is
+      // present, retry free-text once so numeric names/categories retain the
+      // existing search behavior without making every ID lookup scan them.
+      if (searchTerm && searchMode === 'identifier' && data.count === 0) {
+        searchMode = 'search';
+        response = await requestPage(searchMode);
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        data = await response.json();
+      }
+      state.displayedSearchTerm = searchTerm;
+      state.searchMode = searchMode;
       state.results = data.results || [];
       state.pages = Math.max(1, Math.ceil(data.count / state.pageSize));
       if (state.page > state.pages) { state.page = state.pages; return loadSurveys({ silent }); }

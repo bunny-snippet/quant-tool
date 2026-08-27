@@ -9,6 +9,13 @@ class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
 
 
 class SurveyFilter(django_filters.FilterSet):
+    identifier = django_filters.CharFilter(
+        method="filter_identifier",
+        help_text=(
+            "Indexed exact project/provider identifier lookup. Numeric values also match "
+            "the provider survey ID and the SurveyID prefix of a composite provider key."
+        ),
+    )
     client = django_filters.NumberFilter(field_name="client_id", help_text="Internal client record ID")
     client_name = CharInFilter(field_name="client__name", lookup_expr="in", help_text="Comma-separated allocated client names")
     country = CharInFilter(field_name="country_code", lookup_expr="in", help_text="Comma-separated country codes, e.g. US,IN")
@@ -24,6 +31,24 @@ class SurveyFilter(django_filters.FilterSet):
     min_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="gte")
     max_cpi = django_filters.NumberFilter(field_name="visible_cpi", lookup_expr="lte")
 
+    def filter_identifier(self, queryset, _name, value):
+        identifier = str(value or "").strip()
+        if not identifier:
+            return queryset
+
+        query = (
+            Q(local_id__iexact=identifier)
+            | Q(source_key__iexact=identifier)
+            | Q(buyer_id__iexact=identifier)
+        )
+        if identifier.isdigit():
+            if len(identifier) <= 19:
+                numeric_identifier = int(identifier)
+                if numeric_identifier <= 9223372036854775807:
+                    query |= Q(source_id=numeric_identifier)
+            query |= Q(source_key__startswith=f"{identifier}:")
+        return queryset.filter(query)
+
     def filter_survey_type(self, queryset, _name, value):
         values = value if isinstance(value, (list, tuple, set)) else str(value or "").split(",")
         values = {str(item).strip().upper() for item in values if str(item).strip()}
@@ -36,7 +61,7 @@ class SurveyFilter(django_filters.FilterSet):
 
     class Meta:
         model = Survey
-        fields = ["client", "client_name", "country", "language", "status", "company", "buyer_id", "survey_type", "created_from", "created_to", "modified_from", "modified_to", "min_cpi", "max_cpi"]
+        fields = ["identifier", "client", "client_name", "country", "language", "status", "company", "buyer_id", "survey_type", "created_from", "created_to", "modified_from", "modified_to", "min_cpi", "max_cpi"]
 
 
 class SurveyAttemptFilter(django_filters.FilterSet):
@@ -99,7 +124,9 @@ class SurveyAttemptFilter(django_filters.FilterSet):
                 | Q(platform_user__employee_profile__company_name__in=labels)
             )
             query = label_query if query is None else query | label_query
-        return queryset.filter(query).distinct() if query is not None else queryset
+        # Every path above is a one-to-one / foreign-key traversal, so it
+        # cannot multiply SurveyAttempt rows and does not need DISTINCT.
+        return queryset.filter(query) if query is not None else queryset
 
     def filter_sub_branch(self, queryset, _name, value):
         unit = "platform_user__employee_profile__organization_unit"
@@ -117,7 +144,7 @@ class SurveyAttemptFilter(django_filters.FilterSet):
                 | Q(platform_user__employee_profile__department__in=labels)
             )
             query = label_query if query is None else query | label_query
-        return queryset.filter(query).distinct() if query is not None else queryset
+        return queryset.filter(query) if query is not None else queryset
 
     def filter_shift(self, queryset, _name, value):
         unit = "platform_user__employee_profile__organization_unit"
@@ -128,7 +155,7 @@ class SurveyAttemptFilter(django_filters.FilterSet):
         if labels:
             label_query = Q(**{f"{unit}__name__in": labels, f"{unit}__unit_type": "shift"})
             query = label_query if query is None else query | label_query
-        return queryset.filter(query).distinct() if query is not None else queryset
+        return queryset.filter(query) if query is not None else queryset
 
     class Meta:
         model = SurveyAttempt

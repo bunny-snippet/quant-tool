@@ -5,6 +5,8 @@ from django.core.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission
 
 from .models import AccessFunction, EmployeeProfile, Role, UserFunctionOverride
+from .profile_context import employee_profile_for_user
+from .request_cache import request_cached
 
 
 EXTERNAL_VENDOR_FORBIDDEN_CODES = frozenset({
@@ -41,32 +43,42 @@ def is_super_admin_account(user) -> bool:
         return False
     if user.is_superuser:
         return True
-    profile = EmployeeProfile.objects.select_related("role").filter(user=user).first()
+    profile = employee_profile_for_user(user)
     return bool(profile and profile.role and profile.role.is_active and profile.role.slug in {"super-admin", "superadmin"})
 
 
 def effective_permission_codes(user) -> set[str]:
     if not user or not user.is_authenticated or not user.is_active:
         return set()
-    if user.is_superuser:
-        return set(AccessFunction.objects.filter(is_active=True).values_list("code", flat=True))
 
-    profile = EmployeeProfile.objects.select_related("role").filter(user=user).first()
-    codes: set[str] = set()
-    if profile and profile.role and profile.role.is_active:
-        codes.update(
-            profile.role.function_assignments.filter(allowed=True, function__is_active=True)
-            .values_list("function__code", flat=True)
-        )
-    for code, effect in user.function_overrides.filter(function__is_active=True).values_list("function__code", "effect"):
-        if effect == UserFunctionOverride.Effect.ALLOW:
-            codes.add(code)
-        else:
-            codes.discard(code)
-    if profile and profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
-        codes.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
-        codes = {code for code in codes if not code.startswith("organization.")}
-    return codes
+    def load():
+        if user.is_superuser:
+            return frozenset(
+                AccessFunction.objects.filter(is_active=True).values_list("code", flat=True)
+            )
+
+        profile = employee_profile_for_user(user)
+        codes: set[str] = set()
+        if profile and profile.role and profile.role.is_active:
+            codes.update(
+                profile.role.function_assignments.filter(
+                    allowed=True,
+                    function__is_active=True,
+                ).values_list("function__code", flat=True)
+            )
+        for code, effect in user.function_overrides.filter(
+            function__is_active=True
+        ).values_list("function__code", "effect"):
+            if effect == UserFunctionOverride.Effect.ALLOW:
+                codes.add(code)
+            else:
+                codes.discard(code)
+        if profile and profile.account_type == EmployeeProfile.AccountType.EXTERNAL_VENDOR:
+            codes.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
+            codes = {code for code in codes if not code.startswith("organization.")}
+        return frozenset(codes)
+
+    return set(request_cached(("effective-permissions", user.pk), load))
 
 
 def has_function_access(user, code: str) -> bool:
@@ -111,34 +123,47 @@ def any_function_permission_required(*codes: str):
 def subordinate_user_ids(user) -> set[int]:
     if not user or not user.is_authenticated:
         return set()
-    if user.is_superuser:
-        from django.contrib.auth import get_user_model
-        return set(get_user_model().objects.values_list("id", flat=True))
-    descendants: set[int] = set()
-    frontier = {user.id}
-    while frontier:
-        children = set(EmployeeProfile.objects.filter(created_by_id__in=frontier).values_list("user_id", flat=True)) - descendants
-        descendants.update(children)
-        frontier = children
-    descendants.discard(user.id)
-    return descendants
+
+    def load():
+        if user.is_superuser:
+            from django.contrib.auth import get_user_model
+            return frozenset(get_user_model().objects.values_list("id", flat=True))
+        descendants: set[int] = set()
+        frontier = {user.id}
+        while frontier:
+            children = set(
+                EmployeeProfile.objects.filter(created_by_id__in=frontier)
+                .values_list("user_id", flat=True)
+            ) - descendants
+            descendants.update(children)
+            frontier = children
+        descendants.discard(user.id)
+        return frozenset(descendants)
+
+    return set(request_cached(("subordinate-users", user.pk), load))
 
 
 def manageable_user_ids(user) -> set[int]:
     """Subordinates plus members explicitly placed in an internal vendor workspace."""
 
-    ids = subordinate_user_ids(user)
-    if not user or not user.is_authenticated or user.is_superuser:
-        return ids
-    profile = EmployeeProfile.objects.filter(user=user).first()
-    if profile and profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR:
-        ids.update(
-            EmployeeProfile.objects.filter(
-                organization_unit__workspace_owner=user,
-                account_type=EmployeeProfile.AccountType.EMPLOYEE,
-            ).values_list("user_id", flat=True)
-        )
-    return ids
+    if not user or not user.is_authenticated:
+        return set()
+
+    def load():
+        ids = subordinate_user_ids(user)
+        if user.is_superuser:
+            return frozenset(ids)
+        profile = employee_profile_for_user(user)
+        if profile and profile.account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR:
+            ids.update(
+                EmployeeProfile.objects.filter(
+                    organization_unit__workspace_owner=user,
+                    account_type=EmployeeProfile.AccountType.EMPLOYEE,
+                ).values_list("user_id", flat=True)
+            )
+        return frozenset(ids)
+
+    return set(request_cached(("manageable-users", user.pk), load))
 
 
 def activity_visible_user_ids(user) -> set[int]:
@@ -153,15 +178,22 @@ def activity_visible_user_ids(user) -> set[int]:
     """
     if not user or not user.is_authenticated:
         return set()
+
+    def load():
+        return frozenset(_activity_visible_user_ids_uncached(user))
+
+    return set(request_cached(("activity-visible-users", user.pk), load))
+
+
+def _activity_visible_user_ids_uncached(user) -> set[int]:
+    """Uncached implementation used by the request-local public resolver."""
+
     if user.is_superuser:
         from django.contrib.auth import get_user_model
         return set(get_user_model().objects.values_list("id", flat=True))
 
     visible_ids = {user.id}
-    profile = EmployeeProfile.objects.select_related(
-        "role", "organization_unit__workspace_owner",
-        "organization_unit__parent", "organization_unit__parent__parent",
-    ).filter(user=user).first()
+    profile = employee_profile_for_user(user)
     if (
         not profile
         or not profile.role
