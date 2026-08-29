@@ -29,7 +29,7 @@ from .supply_common import (
 class TrackOpinionProvider(SurveyProvider):
     code = "track_opinion"
     label = "Track Opinion"
-    default_base_url = "https://stagingsupply.opinionest.com"
+    default_base_url = "https://supply.opinionest.com"
     minimum_sync_interval_seconds = 300
     credential_fields = (("token", "Access-token environment key"),)
 
