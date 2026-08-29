@@ -329,9 +329,16 @@ def sync_client_integration(integration: ClientIntegration, *, refresh_details=F
                         and _toluna_targeting_contract(survey.raw_data)
                         != _toluna_targeting_contract(values.get("raw_data"))
                     )
+                    detail_signature = getattr(provider, "detail_signature", lambda raw: None)
+                    old_detail_signature = detail_signature(survey.raw_data)
+                    new_detail_signature = detail_signature(values.get("raw_data"))
+                    provider_detail_changed = bool(
+                        old_detail_signature is not None
+                        and old_detail_signature != new_detail_signature
+                    )
                     for field, value in values.items():
                         setattr(survey, field, value)
-                    if toluna_targeting_changed or (source_changed and not is_toluna):
+                    if toluna_targeting_changed or provider_detail_changed or (source_changed and not is_toluna):
                         survey.detail_synced_at = None
                         changed_survey_fields.add("detail_synced_at")
                     # ``bulk_update`` does not invoke ``auto_now``.  Preserve

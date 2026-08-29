@@ -2,13 +2,23 @@ from .base import ProviderConfigurationError
 
 
 def _provider_classes():
+    from .acuity import AcuityAnalyticsProvider
     from .rfg import ResearchForGoodProvider
+    from .track_opinion import TrackOpinionProvider
     from .toluna import TolunaProvider
+    from .unimarket import UniMarketProvider
 
     return {
+        AcuityAnalyticsProvider.code: AcuityAnalyticsProvider,
         ResearchForGoodProvider.code: ResearchForGoodProvider,
+        TrackOpinionProvider.code: TrackOpinionProvider,
         TolunaProvider.code: TolunaProvider,
+        UniMarketProvider.code: UniMarketProvider,
     }
+
+
+def installed_provider_codes():
+    return frozenset(_provider_classes())
 
 
 def provider_catalog() -> list[dict]:

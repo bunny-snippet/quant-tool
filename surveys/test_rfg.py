@@ -124,10 +124,12 @@ class ResearchForGoodIntegrationTests(TestCase):
         api = APIClient(); api.force_authenticate(admin)
         response = api.get("/api/v1/vendors/integrations/providers/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()[0]["code"], "rfg")
         self.assertEqual(
             {provider["code"] for provider in response.json()},
-            {"rfg", "toluna", "innovatemr", "custom"},
+            {
+                "acuity", "rfg", "track_opinion", "toluna", "unimarket",
+                "innovatemr", "custom",
+            },
         )
         response = api.post("/api/v1/vendors/integrations/", {
             "client": self.client_record.pk,

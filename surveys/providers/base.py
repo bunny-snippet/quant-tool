@@ -58,6 +58,10 @@ class SurveyProvider:
     def refresh_details(self, survey) -> None:
         raise NotImplementedError
 
+    def detail_signature(self, raw_data):
+        """Stable provider fields whose change invalidates derived quota/targeting rows."""
+        return None
+
     def duplicate_check(self, survey, attempt, ip_address: str | None) -> bool:
         return False
 

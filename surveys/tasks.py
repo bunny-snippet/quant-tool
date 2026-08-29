@@ -13,12 +13,16 @@ from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, SurveyAttempt, SyncLease
 from .services import reconcile_attempt_status, replace_survey_details, sync_surveys
 from .provider_services import refresh_client_integration_details, sync_client_integration
+from .providers import installed_provider_codes
 
 
 PROVIDER_MINIMUM_SYNC_INTERVAL_SECONDS = {
     "innovatemr": 150,
     "rfg": 600,
     "toluna": 60,
+    "track_opinion": 300,
+    "acuity": 300,
+    "unimarket": 300,
 }
 
 
@@ -33,6 +37,9 @@ def effective_sync_interval_seconds(integration):
         "innovatemr": settings.CLIENT_INTEGRATION_INNOVATEMR_SYNC_INTERVAL_SECONDS,
         "rfg": settings.CLIENT_INTEGRATION_RFG_SYNC_INTERVAL_SECONDS,
         "toluna": settings.CLIENT_INTEGRATION_TOLUNA_SYNC_INTERVAL_SECONDS,
+        "track_opinion": 300,
+        "acuity": 300,
+        "unimarket": 300,
     }.get(integration.provider_code, 60)
     return max(
         60,
@@ -126,7 +133,7 @@ def sync_client_integration_task(integration_id):
     integration.last_sync_error = ""
     integration.save(update_fields=["last_sync_started_at", "last_sync_status", "last_sync_error", "updated_at"])
     try:
-        if integration.provider_code in {"rfg", "toluna"}:
+        if integration.provider_code in installed_provider_codes():
             run = sync_client_integration(integration, refresh_details=False)
             details = refresh_client_integration_details(integration)
             summary = {
@@ -218,7 +225,7 @@ def reconcile_pending_attempts_task():
     lookback = now - timedelta(hours=settings.INNOVATEMR_ATTEMPT_RECONCILE_LOOKBACK_HOURS)
     pending = SurveyAttempt.objects.select_related("survey__integration").filter(
         status=SurveyAttempt.Status.REDIRECTED, callback_at__isnull=True, initiated_at__gte=lookback,
-    ).exclude(survey__integration__provider_code__in=("rfg", "toluna")).filter(
+    ).exclude(survey__integration__provider_code__in=installed_provider_codes()).filter(
         Q(upstream_checked_at__isnull=True) | Q(upstream_checked_at__lte=retry_before)
     ).order_by(
         "upstream_checked_at", "-initiated_at"

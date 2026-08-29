@@ -97,7 +97,7 @@ from prescreener_vault.services import (
 from prescreener_vault.models import PrescreenerSubmission
 from prescreener_vault.reuse import maybe_assign_reusable_profile
 from .age_rules import OPEN_ENDED_AGE_MAX, normalize_age_range
-from .providers import ProviderError, TolunaInviteRejected, get_provider
+from .providers import ProviderError, TolunaInviteRejected, get_provider, installed_provider_codes
 from .providers.rfg import RFG_TARGETING_ADAPTER_VERSION
 from .providers.toluna import TOLUNA_ADAPTER_VERSION
 from .geolocation import (
@@ -2367,7 +2367,8 @@ def survey_start(request):
             survey.integration_id and survey.integration.provider_code == "rfg"
         )
         is_dynamic_provider = bool(
-            survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}
+            survey.integration_id
+            and survey.integration.provider_code in installed_provider_codes()
         )
         if not survey.entry_link and not is_dynamic_provider:
             return _invalid_survey_link(request)
@@ -2557,7 +2558,7 @@ def survey_start(request):
                 if provider_code == "biobrain":
                     ensure_attempt_prescreener_uid(attempt)
                 provider = None
-                if provider_code in {"rfg", "toluna"}:
+                if provider_code in installed_provider_codes():
                     provider = get_provider(attempt.survey.integration)
                 if provider_code == "rfg":
                     eligible, reason = provider.validate_prescreener(attempt.survey, answers)
@@ -2604,6 +2605,19 @@ def survey_start(request):
                             reason="This respondent has already attempted this survey or survey group.",
                         )
                         return HttpResponseRedirect(_rfg_result_url(attempt.rid, "8"))
+                if provider_code == "unimarket" and provider.duplicate_check(
+                    attempt.survey,
+                    attempt,
+                    get_request_ip(request) or attempt.initiation_ip,
+                ):
+                    _finish_local_rfg_attempt(
+                        attempt,
+                        answers,
+                        request,
+                        result="8",
+                        reason="This respondent has already attempted a survey in the same UniMarket group.",
+                    )
+                    return HttpResponseRedirect(_rfg_result_url(attempt.rid, "8"))
                 if not errors:
                     with transaction.atomic():
                         locked = SurveyAttempt.objects.select_for_update().select_related(
@@ -3466,7 +3480,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
                 raw_data__adapter_version=RFG_TARGETING_ADAPTER_VERSION,
             ).exists()
         if stale:
-            if survey.integration_id and survey.integration.provider_code in {"rfg", "toluna"}:
+            if survey.integration_id and survey.integration.provider_code in installed_provider_codes():
                 get_provider(survey.integration).refresh_details(survey)
             else:
                 refresh = replace_survey_quotas if detail_type == "quotas" else replace_survey_targeting

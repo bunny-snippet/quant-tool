@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 import ipaddress
 import re
+from urllib.parse import urlsplit
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -355,6 +356,71 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "scheduled_sync_enabled": "Test and verify this Toluna connection before scheduling it."
                 })
+        elif provider in {"track_opinion", "acuity", "unimarket"}:
+            required_credentials = {
+                "track_opinion": {"token"},
+                "acuity": {"supplier_id", "token"},
+                "unimarket": {"token"},
+            }[provider]
+            credential_refs = attrs.get(
+                "credential_env_keys", getattr(self.instance, "credential_env_keys", {})
+            ) or {}
+            if set(credential_refs) != required_credentials:
+                raise serializers.ValidationError({
+                    "credential_env_keys": (
+                        f"{provider.replace('_', ' ').title()} requires exactly: "
+                        f"{', '.join(sorted(required_credentials))}."
+                    )
+                })
+            env_pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+            if any(
+                not isinstance(reference, str) or not env_pattern.fullmatch(reference)
+                for reference in credential_refs.values()
+            ):
+                raise serializers.ValidationError({
+                    "credential_env_keys": "Use environment-variable names here, never credential values."
+                })
+            allowed_hosts = {
+                "track_opinion": {"stagingsupply.opinionest.com", "supply.opinionest.com"},
+                "acuity": {"api.acuitykp.online"},
+                "unimarket": {"stg-api.supplier.unimrktresponse.net"},
+            }[provider]
+            parsed_url = urlsplit(base_url)
+            if parsed_url.scheme != "https" or parsed_url.hostname not in allowed_hosts:
+                raise serializers.ValidationError({
+                    "base_url": "Use the provider's official HTTPS API host."
+                })
+            interval = int(attrs.get(
+                "sync_interval_seconds", getattr(self.instance, "sync_interval_seconds", 300)
+            ))
+            if interval < 300:
+                raise serializers.ValidationError({
+                    "sync_interval_seconds": "Inventory sync must be at least 300 seconds."
+                })
+            config = attrs.get("config", getattr(self.instance, "config", {})) or {}
+            allowed_config = {
+                "timeout_seconds", "detail_refresh_batch", "callback_urls",
+                "configure_redirects", "public_callback_base", "country_codes",
+            }
+            unexpected = set(config) - allowed_config
+            if unexpected:
+                raise serializers.ValidationError({
+                    "config": f"Unsupported provider settings: {', '.join(sorted(unexpected))}."
+                })
+            if provider == "unimarket":
+                countries = config.get("country_codes") or []
+                if not isinstance(countries, list) or any(
+                    not re.fullmatch(r"[A-Z]{2}", str(country)) for country in countries
+                ):
+                    raise serializers.ValidationError({
+                        "config": "UniMarket country_codes must be a list of two-letter uppercase codes."
+                    })
+            if attrs.get("scheduled_sync_enabled", False) and getattr(
+                self.instance, "last_test_status", ""
+            ) != "success":
+                raise serializers.ValidationError({
+                    "scheduled_sync_enabled": "Test and verify this connection before scheduling it."
+                })
         elif provider_key in {"biobrain", "voqall"} or "voqall.com" in base_url.lower():
             api_root = base_url[:-8] if base_url.lower().endswith("/surveys") else base_url
             current_inventory = attrs.get(
@@ -401,7 +467,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
         if token is not None:
             set_integration_token(instance, token)
-        if connection_changed and instance.provider_code in {"rfg", "toluna"}:
+        if connection_changed and instance.provider_code in {"rfg", "toluna", "track_opinion", "acuity", "unimarket"}:
             instance.last_test_status = ""
             instance.last_test_error = "Connection settings changed; test the connection again."
             instance.scheduled_sync_enabled = False

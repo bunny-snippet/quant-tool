@@ -197,16 +197,23 @@ class ClientIntegration(models.Model):
 
     def clean(self):
         super().clean()
-        minimum_interval = 600 if self.provider_code == "rfg" else 60
-        if self.provider_code in {"rfg", "toluna"} and self.sync_interval_seconds < minimum_interval:
+        minimum_interval = {
+            "rfg": 600,
+            "toluna": 60,
+            "track_opinion": 300,
+            "acuity": 300,
+            "unimarket": 300,
+        }.get(self.provider_code, 60)
+        managed_providers = {"rfg", "toluna", "track_opinion", "acuity", "unimarket"}
+        if self.provider_code in managed_providers and self.sync_interval_seconds < minimum_interval:
             raise ValidationError({
                 "sync_interval_seconds": (
                     "RFG inventory cannot be polled more often than every 600 seconds."
                     if self.provider_code == "rfg"
-                    else "Toluna inventory cannot be polled more often than every 60 seconds."
+                    else f"{self.provider_code.replace('_', ' ').title()} inventory cannot be polled more often than every {minimum_interval} seconds."
                 )
             })
-        if self.provider_code in {"rfg", "toluna"} and self.scheduled_sync_enabled and self.last_test_status != "success":
+        if self.provider_code in managed_providers and self.scheduled_sync_enabled and self.last_test_status != "success":
             raise ValidationError({
                 "scheduled_sync_enabled": "Test and verify the connection before enabling scheduled sync."
             })
