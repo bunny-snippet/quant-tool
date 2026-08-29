@@ -80,7 +80,7 @@ class SupplyProviderContractTests(TestCase):
                     {"quotaId": "169506692", "quotaName": "", "totalRemaining": 25, "criteria": [{"qualificationId": 10560, "answerIds": [133078]}]},
                     {"quotaId": "169506692", "quotaName": "", "totalRemaining": 25, "criteria": [{"qualificationId": 10558, "answerIds": ["50-64"]}]},
                 ]}
-            return {"TotalRemaining": 25}
+            return {"totalRemainaing": {"TotalRemaining": 25}}
 
         with patch.object(provider, "_request", side_effect=response), patch.object(
             provider,

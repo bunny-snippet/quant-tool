@@ -301,7 +301,17 @@ class TrackOpinionProvider(SurveyProvider):
                 value(
                     remaining_payload,
                     "totalRemaining", "generalReservedRemaining", "remaining",
-                    default=value(value(remaining_payload, "result", default={}), "totalRemaining"),
+                    default=value(
+                        value(
+                            remaining_payload,
+                            # The live API currently exposes this misspelling;
+                            # retain the documented spelling as a fallback.
+                            "totalRemainaing", "surveyRemaining",
+                            default={},
+                        ),
+                        "TotalRemaining",
+                        default=value(value(remaining_payload, "result", default={}), "totalRemaining"),
+                    ),
                 )
             ),
         )
