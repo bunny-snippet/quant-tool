@@ -85,9 +85,28 @@ class TrackOpinionProvider(SurveyProvider):
 
     def test_connection(self):
         rows = self.inventory()
+        redirect_result = {"requested": False, "configured": False}
         if (self.integration.config or {}).get("configure_redirects"):
-            self.configure_redirects()
-        return {"provider": self.code, "authenticated": True, "inventory_count": len(rows)}
+            redirect_result["requested"] = True
+            try:
+                redirect_result.update({
+                    "configured": True,
+                    "survey_count": self.configure_redirects(),
+                })
+            except ProviderError:
+                # Authentication/inventory verification must remain usable
+                # when Track Opinion's separate redirect-update endpoint has
+                # a provider-side outage. Surface a non-secret warning so an
+                # operator can retry without disabling inventory sync.
+                redirect_result["warning"] = (
+                    "Track Opinion authenticated, but its redirect-update endpoint is temporarily unavailable."
+                )
+        return {
+            "provider": self.code,
+            "authenticated": True,
+            "inventory_count": len(rows),
+            "redirects": redirect_result,
+        }
 
     def inventory(self):
         return self._list(self._request("/api/v1/survey/surveys"), "surveys")

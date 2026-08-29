@@ -6,6 +6,7 @@ from django.test import TestCase
 from vendors.models import Client, ClientIntegration
 
 from .models import Survey
+from .providers import ProviderError
 from .providers.acuity import AcuityAnalyticsProvider
 from .providers.track_opinion import TrackOpinionProvider
 from .providers.unimarket import UniMarketProvider
@@ -27,6 +28,27 @@ class SupplyProviderContractTests(TestCase):
             credential_env_keys=credentials,
             sync_interval_seconds=300,
         )
+
+    @patch.dict("os.environ", {"TRACK_TEST_TOKEN": "secret"})
+    def test_track_connection_does_not_disable_inventory_when_redirect_endpoint_is_down(self):
+        integration = self.integration(
+            "track_opinion",
+            "https://stagingsupply.opinionest.com",
+            {"token": "TRACK_TEST_TOKEN"},
+        )
+        integration.config = {"configure_redirects": True}
+        provider = TrackOpinionProvider(integration)
+        with patch.object(provider, "inventory", return_value=[{"SurveyId": 1}]), patch.object(
+            provider, "configure_redirects", side_effect=Exception("provider outage")
+        ):
+            with self.assertRaises(Exception):
+                provider.test_connection()
+        with patch.object(provider, "inventory", return_value=[{"SurveyId": 1}]), patch.object(
+            provider, "configure_redirects", side_effect=ProviderError("provider outage")
+        ):
+            result = provider.test_connection()
+        self.assertTrue(result["authenticated"])
+        self.assertFalse(result["redirects"]["configured"])
 
     @patch.dict("os.environ", {"TRACK_TEST_TOKEN": "secret"})
     def test_track_merges_repeated_quota_rows_and_hydrates_required_questions(self):
