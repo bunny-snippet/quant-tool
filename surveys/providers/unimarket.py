@@ -267,12 +267,9 @@ class UniMarketProvider(SurveyProvider):
             ))
 
         supplier_stats = value(stats_payload or {}, "supplierStats", default={}) or {}
-        raw_data = dict(survey.raw_data or {})
-        raw_data["_unimarket_groups"] = group_sources
         persist_details(survey, questions, quotas, survey_updates={
             "starts": max(0, integer(value(supplier_stats, "starts"), survey.starts)),
             "completes": max(0, integer(value(supplier_stats, "completes"), survey.completes)),
-            "raw_data": raw_data,
         })
 
     def duplicate_check(self, survey, attempt, ip_address):
