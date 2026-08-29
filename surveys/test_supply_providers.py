@@ -51,6 +51,26 @@ class SupplyProviderContractTests(TestCase):
         self.assertFalse(result["redirects"]["configured"])
 
     @patch.dict("os.environ", {"TRACK_TEST_TOKEN": "secret"})
+    def test_track_redirects_use_provider_callback_transaction_token(self):
+        integration = self.integration(
+            "track_opinion",
+            "https://stagingsupply.opinionest.com",
+            {"token": "TRACK_TEST_TOKEN"},
+        )
+        provider = TrackOpinionProvider(integration)
+        with patch.object(provider, "inventory", return_value=[{"SurveyId": 42}]), patch.object(
+            provider, "_request", return_value={"Success": True}
+        ) as request:
+            self.assertEqual(provider.configure_redirects(), 1)
+
+        payload = request.call_args.kwargs["payload"]
+        self.assertEqual(payload["surveyId"], 42)
+        for key, url in payload.items():
+            if key != "surveyId":
+                self.assertIn("rid=[toid]", url)
+                self.assertNotIn("[transid]", url)
+
+    @patch.dict("os.environ", {"TRACK_TEST_TOKEN": "secret"})
     def test_track_merges_repeated_quota_rows_and_hydrates_required_questions(self):
         integration = self.integration(
             "track_opinion",

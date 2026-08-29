@@ -335,14 +335,14 @@ class TrackOpinionProvider(SurveyProvider):
     def configure_redirects(self):
         base = str((self.integration.config or {}).get("public_callback_base") or "https://exchange.api-grid.com").rstrip("/")
         redirects = {
-            "completeRedirect": f"{base}/survey?status=1&rid=[transid]",
-            "overQuotaRedirect": f"{base}/survey?status=3&rid=[transid]",
-            "terminateRedirect": f"{base}/survey?status=2&rid=[transid]",
-            "securityTerminateRedirect": f"{base}/survey?status=4&rid=[transid]",
-            "completeS2SRedirect": f"{base}/survey?status=1&rid=[transid]",
-            "overQuotaS2SRedirect": f"{base}/survey?status=3&rid=[transid]",
-            "terminateS2SRedirect": f"{base}/survey?status=2&rid=[transid]",
-            "securityTerminateS2SRedirect": f"{base}/survey?status=4&rid=[transid]",
+            "completeRedirect": f"{base}/survey?status=1&rid=[toid]",
+            "overQuotaRedirect": f"{base}/survey?status=3&rid=[toid]",
+            "terminateRedirect": f"{base}/survey?status=2&rid=[toid]",
+            "securityTerminateRedirect": f"{base}/survey?status=4&rid=[toid]",
+            "completeS2SRedirect": f"{base}/survey?status=1&rid=[toid]",
+            "overQuotaS2SRedirect": f"{base}/survey?status=3&rid=[toid]",
+            "terminateS2SRedirect": f"{base}/survey?status=2&rid=[toid]",
+            "securityTerminateS2SRedirect": f"{base}/survey?status=4&rid=[toid]",
         }
         rows = self.inventory()
         configured = 0
