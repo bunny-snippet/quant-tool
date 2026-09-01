@@ -55,8 +55,9 @@
   function syncPanel(panel) {
     const strip = stripFor(panel);
     const chips = strip.querySelector('.active-filter-chips');
-    const selected = [...panel.querySelectorAll('.multi-select input[type="checkbox"]:checked')]
-      .filter((input) => !input.closest('label')?.hidden);
+    // Dropdown search only changes an option's visibility; it must never hide
+    // an already-selected filter from the removable chip strip.
+    const selected = [...panel.querySelectorAll('.multi-select input[type="checkbox"]:checked')];
     chips.replaceChildren();
     selected.forEach((input) => {
       const button = document.createElement('button');
