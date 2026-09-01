@@ -23,6 +23,10 @@
   const panels = [...document.querySelectorAll('.filter-panel')]
     .filter((panel) => panel.querySelector('.multi-select input[type="checkbox"]'));
   if (!panels.length) return;
+  // A dropdown search hides labels only; it does not change the selected
+  // filters. Remember selection by the actual checkbox node so chips cannot
+  // disappear merely because their option is outside the current search.
+  const selectedByPanel = new WeakMap();
 
   function fieldName(input) {
     const field = input.closest('.field');
@@ -55,9 +59,18 @@
   function syncPanel(panel) {
     const strip = stripFor(panel);
     const chips = strip.querySelector('.active-filter-chips');
-    // Dropdown search only changes an option's visibility; it must never hide
-    // an already-selected filter from the removable chip strip.
-    const selected = [...panel.querySelectorAll('.multi-select input[type="checkbox"]:checked')];
+    let selected = selectedByPanel.get(panel);
+    if (!selected) {
+      selected = new Set();
+      selectedByPanel.set(panel, selected);
+    }
+    // Capture initial/programmatic checked values, but remove values only in
+    // the checkbox change handler below. Search-filtered labels remain in the
+    // set and therefore stay removable from the chip strip.
+    panel.querySelectorAll('.multi-select input[type="checkbox"]:checked').forEach(
+      (input) => selected.add(input),
+    );
+    selected = [...selected].filter((input) => input.isConnected);
     chips.replaceChildren();
     selected.forEach((input) => {
       const button = document.createElement('button');
@@ -88,13 +101,24 @@
 
   document.addEventListener('change', (event) => {
     const panel = event.target.closest?.('.filter-panel');
-    if (panel && event.target.closest?.('.multi-select')) {
+    const input = event.target.matches?.('.multi-select input[type="checkbox"]')
+      ? event.target
+      : null;
+    if (panel && input) {
+      const selected = selectedByPanel.get(panel) || new Set();
+      if (input.checked) selected.add(input);
+      else selected.delete(input);
+      selectedByPanel.set(panel, selected);
       queueMicrotask(() => syncPanel(panel));
     }
   });
   document.addEventListener('click', (event) => {
     const clear = event.target.closest?.('.filter-panel .clear-button');
-    if (clear) window.setTimeout(() => syncPanel(clear.closest('.filter-panel')), 0);
+    if (clear) {
+      const panel = clear.closest('.filter-panel');
+      selectedByPanel.delete(panel);
+      window.setTimeout(() => syncPanel(panel), 0);
+    }
   });
   window.FilterSelectionChips = { sync: syncAll, syncPanel };
   window.setTimeout(syncAll, 0);
