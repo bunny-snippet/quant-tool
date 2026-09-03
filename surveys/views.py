@@ -123,6 +123,7 @@ from .survey_flow import (
 )
 from .tasks import sync_innovatemr_surveys_task
 from .user_hits import aggregate_user_hits, user_hit_filter_options
+from .user_dashboard import build_user_dashboard_payload, user_dashboard_filter_options
 
 
 logger = logging.getLogger(__name__)
@@ -597,6 +598,23 @@ def user_hits_page(request):
         "can_change_hit_page_size": "user_hits.control.page_size" in codes,
         "can_paginate_hits": "user_hits.control.pagination" in codes,
         **user_hit_filter_options(request.user),
+    })
+
+
+@function_permission_required("user_dashboard.view")
+def user_dashboard_page(request):
+    local_today = timezone.localdate()
+    filter_options = user_dashboard_filter_options(request.user)
+    return render(request, "surveys/user_dashboard.html", {
+        "active_page": "user-dashboard",
+        "selected_month": local_today.month,
+        "selected_year": local_today.year,
+        "month_options": [
+            {"value": month, "label": date(2000, month, 1).strftime("%B")}
+            for month in range(1, 13)
+        ],
+        "year_options": range(local_today.year, max(2019, local_today.year - 5), -1),
+        **filter_options,
     })
 
 
@@ -3979,6 +3997,45 @@ class UserHitsAPIView(APIView):
         page = paginator.paginate_queryset(rows, request, view=self)
         response = paginator.get_paginated_response(page)
         response.data["summary"] = summary
+        return response
+
+
+class UserDashboardAPIView(APIView):
+    permission_classes = [HasFunctionPermission]
+    required_function_permission = "user_dashboard.view"
+
+    @extend_schema(
+        tags=["User dashboard"],
+        summary="Monthly employee completion and final-ID performance",
+        description=(
+            "Returns one row per visible active employee for the selected IST month. "
+            "Accepted and rejected counts come from the latest client Final ID decision; "
+            "completed journeys without a decision remain pending."
+        ),
+        parameters=[
+            OpenApiParameter("search", OpenApiTypes.STR, description="Search employee identity or hierarchy."),
+            OpenApiParameter("user", OpenApiTypes.STR, description="Comma-separated platform user IDs."),
+            OpenApiParameter("branch", OpenApiTypes.STR, description="Comma-separated branch IDs or labels."),
+            OpenApiParameter("sub_branch", OpenApiTypes.STR, description="Comma-separated sub-branch IDs or labels."),
+            OpenApiParameter("shift", OpenApiTypes.STR, description="Comma-separated shift IDs or labels."),
+            OpenApiParameter("month", OpenApiTypes.INT, description="IST calendar month, 1-12."),
+            OpenApiParameter("year", OpenApiTypes.INT, description="IST calendar year."),
+            OpenApiParameter("page", OpenApiTypes.INT, description="1-based employee page."),
+            OpenApiParameter("page_size", OpenApiTypes.INT, description="Rows per page, 1-100."),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        try:
+            payload = build_user_dashboard_payload(request.user, request.query_params)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        paginator = SurveyPagination()
+        page_rows = paginator.paginate_queryset(payload["rows"], request, view=self)
+        response = paginator.get_paginated_response(page_rows)
+        response.data["summary"] = payload["summary"]
+        response.data["period"] = payload["period"]
         return response
 
 

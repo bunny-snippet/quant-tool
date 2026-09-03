@@ -13,6 +13,7 @@ from .webhook_views import (
 from .views import (
     DashboardAPIView,
     SurveyAttemptViewSet,
+    UserDashboardAPIView,
     UserHitsAPIView,
     SyncRunViewSet,
     SyncTriggerView,
@@ -28,6 +29,7 @@ from .views import (
     toluna_notifications_page,
     toluna_notifications_export,
     user_hits_page,
+    user_dashboard_page,
     survey_start,
     toluna_member_ready,
     RFGCallbackAPIView,
@@ -90,8 +92,10 @@ urlpatterns = [
     path("toluna-notifications/", toluna_notifications_page, name="toluna-notifications"),
     path("toluna-notifications/export/", toluna_notifications_export, name="toluna-notifications-export"),
     path("user-hits/", user_hits_page, name="user-hits"),
+    path("user-dashboard/", user_dashboard_page, name="user-dashboard"),
     path("api/v1/dashboard/", DashboardAPIView.as_view(), name="dashboard-api"),
     path("api/v1/user-hits/", UserHitsAPIView.as_view(), name="user-hits-api"),
+    path("api/v1/user-dashboard/", UserDashboardAPIView.as_view(), name="user-dashboard-api"),
     path("api/v1/sync/", SyncTriggerView.as_view(), name="sync-trigger"),
     path("api/v1/", include(router.urls)),
 ]

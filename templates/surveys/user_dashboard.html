@@ -1,0 +1,88 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}User Dashboard · Survey Workspace{% endblock %}
+{% block content %}
+<section class="page-intro user-performance-intro">
+  <div>
+    <p class="eyebrow">Final ID performance</p>
+    <h1>User Dashboard</h1>
+    <p>Monthly employee completes and their latest client acceptance status.</p>
+  </div>
+</section>
+
+<section class="user-performance-overview" aria-label="Filtered user performance totals">
+  <article><span class="user-performance-icon completes">✓</span><div><small>Completes</small><strong id="userDashboardCompletes">—</strong><em id="userDashboardPeriod">Selected month</em></div></article>
+  <article><span class="user-performance-icon accepted">A</span><div><small>Accepted</small><strong id="userDashboardAccepted">—</strong><em>Latest client decision</em></div></article>
+  <article><span class="user-performance-icon rejected">R</span><div><small>Rejected</small><strong id="userDashboardRejected">—</strong><em>Latest client decision</em></div></article>
+  <article><span class="user-performance-icon pending">…</span><div><small>Pending</small><strong id="userDashboardPending">—</strong><em>Awaiting Final IDs</em></div></article>
+  <article><span class="user-performance-icon ratio">%</span><div><small>Acceptance</small><strong id="userDashboardAcceptance">—</strong><em>Accepted out of reviewed</em></div></article>
+  <article><span class="user-performance-icon users">◎</span><div><small>Active users</small><strong id="userDashboardActiveUsers">—</strong><em id="userDashboardUserTotal">Filtered employees</em></div></article>
+</section>
+
+<section class="filter-panel user-performance-filters" aria-label="User dashboard filters">
+  <div class="field search-field">
+    <label for="userDashboardSearch">Search user</label>
+    <div class="field-control"><span aria-hidden="true">⌕</span><input id="userDashboardSearch" type="search" placeholder="Name, email or employee ID…" autocomplete="off"></div>
+  </div>
+
+  <div class="field multi-field">
+    <label id="userDashboardBranchLabel">Branch</label>
+    <div class="multi-select" data-user-dashboard-filter="branch">
+      <button class="multi-trigger" type="button" aria-labelledby="userDashboardBranchLabel" aria-expanded="false"><span>All branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search branch…" autocomplete="off"></div><div class="multi-options">{% for branch in branches %}<label><input type="checkbox" value="{{ branch.value }}"><span>{{ branch.name }}</span></label>{% empty %}<span class="filter-empty">No branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching branch</p></div>
+    </div>
+  </div>
+
+  <div class="field multi-field">
+    <label id="userDashboardSubBranchLabel">Sub-branch</label>
+    <div class="multi-select" data-user-dashboard-filter="sub_branch">
+      <button class="multi-trigger" type="button" aria-labelledby="userDashboardSubBranchLabel" aria-expanded="false"><span>All sub-branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search sub-branch…" autocomplete="off"></div><div class="multi-options">{% for sub_branch in sub_branches %}<label data-branch-value="{{ sub_branch.branch_value }}"><input type="checkbox" value="{{ sub_branch.value }}"><span>{{ sub_branch.name }}</span></label>{% empty %}<span class="filter-empty">No sub-branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching sub-branch</p></div>
+    </div>
+  </div>
+
+  <div class="field multi-field">
+    <label id="userDashboardShiftLabel">Shift</label>
+    <div class="multi-select" data-user-dashboard-filter="shift">
+      <button class="multi-trigger" type="button" aria-labelledby="userDashboardShiftLabel" aria-expanded="false"><span>All shifts</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search shift…" autocomplete="off"></div><div class="multi-options">{% for shift in shifts %}<label data-branch-value="{{ shift.branch_value }}" data-sub-branch-value="{{ shift.sub_branch_value }}"><input type="checkbox" value="{{ shift.value }}"><span>{{ shift.name }}</span></label>{% empty %}<span class="filter-empty">No shifts available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching shift</p></div>
+    </div>
+  </div>
+
+  <div class="field multi-field">
+    <label id="userDashboardUserLabel">Users</label>
+    <div class="multi-select" data-user-dashboard-filter="user">
+      <button class="multi-trigger" type="button" aria-labelledby="userDashboardUserLabel" aria-expanded="false"><span>All users</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search user…" autocomplete="off"></div><div class="multi-options">{% for tracked_user in users %}<label data-branch-value="{{ tracked_user.branch_value }}" data-sub-branch-value="{{ tracked_user.sub_branch_value }}" data-shift-value="{{ tracked_user.shift_value }}"><input type="checkbox" value="{{ tracked_user.user_id }}"><span>{{ tracked_user.user_name }}</span></label>{% empty %}<span class="filter-empty">No users available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching user</p></div>
+    </div>
+  </div>
+
+  <div class="field"><label for="userDashboardMonth">Month</label><select id="userDashboardMonth">{% for option in month_options %}<option value="{{ option.value }}"{% if option.value == selected_month %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="userDashboardYear">Year</label><select id="userDashboardYear">{% for year in year_options %}<option value="{{ year }}"{% if year == selected_year %} selected{% endif %}>{{ year }}</option>{% endfor %}</select></div>
+  <button class="clear-button" id="clearUserDashboardFilters" type="button">Clear filters</button>
+</section>
+
+<section class="survey-panel user-performance-panel" data-api-url="{% url 'user-dashboard-api' %}">
+  <div class="panel-head">
+    <div><h2>Employee performance</h2><p id="userDashboardSummary">Loading monthly performance…</p></div>
+    <div class="panel-tools"><label class="compact-select">Rows<select id="userDashboardPageSize"><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label></div>
+  </div>
+  <div class="table-wrap user-performance-table-wrap">
+    <table class="survey-table user-performance-table">
+      <thead><tr><th>User</th><th>Branch</th><th>Sub-branch</th><th>Shift</th><th>Completes</th><th>Accepted</th><th>Rejected</th><th>Pending</th><th>Performance</th></tr></thead>
+      <tbody id="userDashboardRows"><tr><td colspan="9"><div class="table-loader"><i></i><span>Building user performance…</span></div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="mobile-cards user-performance-cards" id="userDashboardCards"></div>
+  <div class="panel-foot">
+    <span id="userDashboardPageStatus">Page 1</span>
+    <nav class="pagination" aria-label="User dashboard pages">
+      <button id="userDashboardFirstPage" type="button" aria-label="First page">«</button><button id="userDashboardPrevPage" type="button" aria-label="Previous page">‹</button>
+      <label><span class="sr-only">Current page</span><input id="userDashboardPageInput" type="number" min="1" value="1"></label>
+      <span id="userDashboardTotalPages">of 1</span>
+      <button id="userDashboardNextPage" type="button" aria-label="Next page">›</button><button id="userDashboardLastPage" type="button" aria-label="Last page">»</button>
+    </nav>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/user_dashboard.js' %}?v=1" defer></script>{% endblock %}

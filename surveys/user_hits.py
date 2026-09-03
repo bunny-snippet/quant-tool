@@ -111,6 +111,7 @@ def _build_user_metadata(user_ids: set[int]) -> dict[int, dict]:
             "user_name": platform_user.get_full_name() or platform_user.username,
             "username": platform_user.username,
             "user_email": platform_user.email,
+            "employee_id": (profile.employee_id or "").strip() if profile else "",
             "branch": branch,
             "sub_branch": sub_branch,
             "shift": shift,
@@ -119,6 +120,26 @@ def _build_user_metadata(user_ids: set[int]) -> dict[int, dict]:
             "shift_id": shift_id,
         }
     return metadata
+
+
+def _user_metadata(user, visible_ids: set[int]) -> dict[int, dict]:
+    """Return hierarchy metadata for the supplied visible user set."""
+
+    return _build_user_metadata(visible_ids)
+
+
+def _legacy_identifier_user_map(metadata: dict[int, dict]) -> dict[str, int]:
+    """Map historical exact user snapshots back to a visible employee."""
+
+    mapping = {str(user_id): user_id for user_id in metadata}
+    for user_id, item in metadata.items():
+        for value in (
+            item.get("employee_id"), item.get("username"), item.get("user_email"),
+        ):
+            identifier = str(value or "").strip()
+            if identifier:
+                mapping.setdefault(identifier, user_id)
+    return mapping
 
 
 def user_hit_filter_options(user, user_ids=None) -> dict:

@@ -211,6 +211,8 @@ FUNCTION_CATALOG = (
     ("user_hits.column.hits", "Show Hits column", "User Hits - Table columns", "Display total and device-wise hits.", TRACKING_ROLES),
     ("user_hits.column.completes", "Show Completes column", "User Hits - Table columns", "Display total and device-wise completes.", TRACKING_ROLES),
 
+    ("user_dashboard.view", "View User Dashboard page and performance", "User Dashboard - Page & navigation", "Open the monthly employee Final ID performance dashboard, display its sidebar item and read its scoped API.", SUPER_ADMIN_ROLES),
+
     ("organization.view", "View Organization page and hierarchy", "Organization - Page & navigation", "Open Organization and read the permitted Branch, Sub-branch and Shift tree.", ADMIN_ROLES),
     ("organization.card.branches", "Show Branches card", "Organization - Summary cards", "Display active organization branches.", ADMIN_ROLES),
     ("organization.card.shifts", "Show Shifts card", "Organization - Summary cards", "Display active organization shifts.", ADMIN_ROLES),
