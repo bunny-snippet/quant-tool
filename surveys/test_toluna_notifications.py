@@ -22,6 +22,7 @@ from .toluna_notifications import reconcile_toluna_operational_notifications
     TOLUNA_NOTIFICATION_IP_ALLOWLIST=("203.0.113.10/32",),
     TOLUNA_NOTIFICATION_TRUSTED_PROXY_IPS=("127.0.0.1/32", "::1/128"),
     TOLUNA_NOTIFICATION_HMAC_KEY="notification-hmac-key",
+    TOLUNA_NOTIFICATION_REQUIRE_HMAC=False,
 )
 class TolunaNotificationTests(TestCase):
     def setUp(self):
@@ -172,7 +173,34 @@ class TolunaNotificationTests(TestCase):
         self.assertEqual(rejected.status_code, 403)
         self.assertEqual(TolunaNotification.objects.count(), 1)
 
-    def test_member_status_requires_valid_encrypted_value(self):
+    def test_member_status_accepts_unsigned_payload_from_allowlisted_source(self):
+        payload = {
+            "UniqueCode": self.attempt.prescreener_uid,
+            "SurveyId": 123,
+            "SurveyRef": "123560-US",
+            "Revenue": 100,
+            "DateTime": "2026-08-21 10:20:00",
+            "WaveId": 100,
+            "QuotaID": 900,
+            "AdditionalData": f"rid={self.attempt.rid}",
+        }
+        missing = self._post(
+            "toluna-notification-member-complete",
+            payload,
+            sign=False,
+        )
+        invalid = self._post(
+            "toluna-notification-member-complete",
+            {**payload, "EncryptedValue": "0" * 64},
+            sign=False,
+        )
+
+        self.assertEqual(missing.status_code, 200)
+        self.assertEqual(invalid.status_code, 200)
+        self.assertEqual(TolunaNotification.objects.count(), 2)
+
+    @override_settings(TOLUNA_NOTIFICATION_REQUIRE_HMAC=True)
+    def test_member_status_can_require_a_valid_encrypted_value(self):
         payload = {
             "UniqueCode": self.attempt.prescreener_uid,
             "SurveyId": 123,

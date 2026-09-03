@@ -167,17 +167,21 @@ class TolunaNotificationAPIView(APIView):
             TolunaNotification.EventType.MEMBER_COMPLETE,
             TolunaNotification.EventType.MEMBER_TERMINATE,
         }:
-            valid_hmac = _valid_member_status_hmac(request.data)
-            if valid_hmac is None:
-                return Response(
-                    {"detail": "Toluna member-status verification is not configured."},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                )
-            if not valid_hmac:
-                return Response(
-                    {"detail": "Invalid member-status signature."},
-                    status=status.HTTP_401_UNAUTHORIZED,
-                )
+            require_hmac = bool(
+                getattr(settings, "TOLUNA_NOTIFICATION_REQUIRE_HMAC", False)
+            )
+            if require_hmac:
+                valid_hmac = _valid_member_status_hmac(request.data)
+                if valid_hmac is None:
+                    return Response(
+                        {"detail": "Toluna member-status verification is not configured."},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
+                if not valid_hmac:
+                    return Response(
+                        {"detail": "Invalid member-status signature."},
+                        status=status.HTTP_401_UNAUTHORIZED,
+                    )
         try:
             result = ingest_toluna_notification(self.event_type, request.data)
         except TolunaNotificationError as exc:

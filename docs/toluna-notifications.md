@@ -33,21 +33,26 @@ Forwarding headers are ignored unless `REMOTE_ADDR` belongs to the explicit
 trusted-proxy list. Trusted proxy hops are stripped from the right of
 `X-Forwarded-For`; a caller-prepended leftmost value is never trusted.
 
-Toluna member completion and member termination notifications receive a second
-validation layer. Ask Toluna to configure **Standard Encryption: HMAC SHA256**
-with the same secret configured on Quant:
+The static source-IP allowlist is the required authentication control. Toluna
+may also send Standard Encryption on completion and termination notifications.
+Quant does not reject a request solely because that optional encrypted value is
+absent or differs: the request is already authenticated by the verified Toluna
+source address. This matches Toluna's documented source-IP or encrypted-value
+validation options.
+
+To make HMAC mandatory as an additional control, explicitly enable it only
+after Toluna has confirmed the exact algorithm and shared secret:
 
 ```dotenv
 TOLUNA_NOTIFICATION_HMAC_KEY=<strong secret configured with Toluna>
+TOLUNA_NOTIFICATION_REQUIRE_HMAC=true
 ```
 
-When that setting is omitted, Quant falls back to the existing
-`TOLUNA_HMAC_KEY`. For member-status JSON, Quant verifies `EncryptedValue`
-against HMAC-SHA256 of the exact concatenation
-`SurveyID + WaveID + UniqueCode`, with no separators. Missing or invalid member
-signatures are rejected before storage. Operational notifications that do not
-carry `EncryptedValue` (quota status, survey closed, enhanced termination and
-reconciliation) remain protected by the source-IP allowlist.
+When a key is configured, Quant checks `EncryptedValue` against HMAC-SHA256 of
+the exact concatenation `SurveyID + WaveID + UniqueCode`, with no separators.
+Operational notifications that do not carry `EncryptedValue` (quota status,
+survey closed, enhanced termination and reconciliation) remain protected by
+the source-IP allowlist.
 
 Every request must use `Content-Type: application/json`.
 Every event must include both `SurveyID` and `WaveID`; the pair is Toluna's
