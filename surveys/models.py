@@ -564,6 +564,110 @@ class SurveyAttempt(models.Model):
         return max(0, int((ended_at - self.loi_started_at).total_seconds()))
 
 
+class FinalIDUpload(models.Model):
+    """One auditable client reconciliation file submitted by an administrator."""
+
+    class Decision(models.TextChoices):
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
+
+    client = models.ForeignKey(
+        "vendors.Client", on_delete=models.PROTECT, related_name="final_id_uploads"
+    )
+    accounting_month = models.DateField(
+        db_index=True,
+        help_text="First day of the selected invoice/reconciliation month.",
+    )
+    decision = models.CharField(max_length=10, choices=Decision.choices, db_index=True)
+    original_filename = models.CharField(max_length=255)
+    file_sha256 = models.CharField(max_length=64, editable=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="final_id_uploads",
+    )
+    submitted_count = models.PositiveIntegerField(default=0)
+    unique_rid_count = models.PositiveIntegerField(default=0)
+    applied_count = models.PositiveIntegerField(default=0)
+    not_found_count = models.PositiveIntegerField(default=0)
+    client_mismatch_count = models.PositiveIntegerField(default=0)
+    not_completed_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["client", "accounting_month", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.client} · {self.decision} · {self.accounting_month:%b %Y}"
+
+
+class FinalIDStatus(models.Model):
+    """Latest client approval state for one completed respondent journey."""
+
+    attempt = models.OneToOneField(
+        SurveyAttempt, on_delete=models.PROTECT, related_name="final_id_status"
+    )
+    client = models.ForeignKey(
+        "vendors.Client", on_delete=models.PROTECT, related_name="final_id_statuses"
+    )
+    status = models.CharField(max_length=10, choices=FinalIDUpload.Decision.choices, db_index=True)
+    accounting_month = models.DateField(
+        db_index=True,
+        help_text="Invoice month selected for the most recent client decision.",
+    )
+    upload = models.ForeignKey(
+        FinalIDUpload, on_delete=models.PROTECT, related_name="current_statuses"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["client", "status", "accounting_month"]),
+        ]
+
+    def __str__(self):
+        return f"{self.attempt.rid} · {self.status}"
+
+
+class FinalIDUploadItem(models.Model):
+    """Immutable per-RID outcome retained for every final-ID upload."""
+
+    class Outcome(models.TextChoices):
+        APPLIED = "applied", "Applied"
+        NOT_FOUND = "not_found", "RID not found"
+        CLIENT_MISMATCH = "client_mismatch", "RID belongs to another client"
+        NOT_COMPLETED = "not_completed", "RID is not a completed journey"
+
+    upload = models.ForeignKey(FinalIDUpload, on_delete=models.CASCADE, related_name="items")
+    rid = models.CharField(max_length=10, db_index=True)
+    attempt = models.ForeignKey(
+        SurveyAttempt,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="final_id_upload_items",
+    )
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, db_index=True)
+    previous_status = models.CharField(max_length=10, blank=True)
+    applied_status = models.CharField(max_length=10, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(fields=["upload", "rid"], name="unique_final_id_upload_rid"),
+        ]
+        indexes = [
+            models.Index(fields=["upload", "outcome"]),
+            models.Index(fields=["rid", "-created_at"]),
+        ]
+
+
 class SurveyEntryIPClaim(models.Model):
     """Permanent, race-safe claim for one public respondent entry IP.
 

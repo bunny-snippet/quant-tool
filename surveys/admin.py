@@ -1,6 +1,9 @@
 from django.contrib import admin
 
 from .models import (
+    FinalIDStatus,
+    FinalIDUpload,
+    FinalIDUploadItem,
     ProfileReuseEvent,
     ProfileReuseMonthlyCounter,
     Survey,
@@ -67,6 +70,34 @@ class SurveyAttemptAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "status_source", "supplier_code", "entry_device", "entry_browser", "is_verified", "initiated_at"]
     readonly_fields = [field.name for field in SurveyAttempt._meta.fields]
+
+
+class FinalIDUploadItemInline(admin.TabularInline):
+    model = FinalIDUploadItem
+    extra = 0
+    can_delete = False
+    readonly_fields = [field.name for field in FinalIDUploadItem._meta.fields]
+
+
+@admin.register(FinalIDUpload)
+class FinalIDUploadAdmin(admin.ModelAdmin):
+    list_display = [
+        "id", "client", "decision", "accounting_month", "submitted_count",
+        "applied_count", "not_found_count", "client_mismatch_count",
+        "not_completed_count", "uploaded_by", "created_at",
+    ]
+    list_filter = ["client", "decision", "accounting_month", "created_at"]
+    search_fields = ["original_filename", "file_sha256", "items__rid"]
+    readonly_fields = [field.name for field in FinalIDUpload._meta.fields]
+    inlines = [FinalIDUploadItemInline]
+
+
+@admin.register(FinalIDStatus)
+class FinalIDStatusAdmin(admin.ModelAdmin):
+    list_display = ["attempt", "client", "status", "accounting_month", "upload", "updated_at"]
+    list_filter = ["client", "status", "accounting_month"]
+    search_fields = ["attempt__rid"]
+    readonly_fields = [field.name for field in FinalIDStatus._meta.fields]
 
 
 @admin.register(ProfileReuseMonthlyCounter)

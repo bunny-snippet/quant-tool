@@ -14,13 +14,13 @@ from django.core import signing
 from django.db import DatabaseError, transaction
 from django.db.models import Count, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse, StreamingHttpResponse
 from django.core.paginator import Paginator
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema, extend_schema_view
@@ -49,7 +49,7 @@ from vendors.services import (
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
 from vendors.credentials import decrypt_secret
-from vendors.models import ClientIntegration, VendorAPIKey
+from vendors.models import Client, ClientIntegration, VendorAPIKey
 from vendors.security import decode_delivery_token, sign_supplier_callback
 
 from .filters import SurveyAttemptFilter, SurveyFilter
@@ -63,6 +63,7 @@ from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .innovatemr_callbacks import verify_callback_request
 from .models import Survey, SurveyAttempt, SyncRun, TolunaNotification
+from .final_ids import FinalIDImportError, import_final_ids
 from .outcomes import describe_toluna_callback, provider_outcome
 from .report_pricing import (
     apply_percentage,
@@ -522,8 +523,65 @@ def studies_page(request):
         "study_column_count": max(1, len(_permitted_columns(codes, STUDY_COLUMN_PERMISSIONS))),
         "study_cards": _permitted_columns(codes, STUDY_CARD_PERMISSIONS),
         "can_export": "attempts.export" in codes,
+        "can_import_final_ids": "attempts.final_ids.import" in codes,
+        "final_id_clients": list(
+            Client.objects.filter(is_active=True).only("id", "name").order_by("name", "id")
+        ) if "attempts.final_ids.import" in codes else [],
+        "final_id_months": [
+            (1, "January"), (2, "February"), (3, "March"), (4, "April"),
+            (5, "May"), (6, "June"), (7, "July"), (8, "August"),
+            (9, "September"), (10, "October"), (11, "November"), (12, "December"),
+        ],
+        "final_id_years": range(timezone.localdate().year - 3, timezone.localdate().year + 3),
+        "final_id_current_month": timezone.localdate().month,
+        "final_id_current_year": timezone.localdate().year,
         "can_change_study_page_size": "studies.control.page_size" in codes,
         "can_paginate_studies": "studies.control.pagination" in codes,
+    })
+
+
+@require_POST
+@function_permission_required("attempts.final_ids.import")
+def final_ids_import(request):
+    """Apply one accepted/rejected client final-ID file by immutable RID."""
+
+    client_value = str(request.POST.get("client") or "").strip()
+    year_value = str(request.POST.get("year") or "").strip()
+    month_value = str(request.POST.get("month") or "").strip()
+    decision = str(request.POST.get("status") or "").strip().lower()
+    uploaded_file = request.FILES.get("file")
+    try:
+        client_id = int(client_value)
+        year = int(year_value)
+        month = int(month_value)
+        if not 2000 <= year <= 2100:
+            raise ValueError
+        accounting_month = date(year, month, 1)
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "Choose a valid client, month and year."}, status=400)
+    client = Client.objects.filter(pk=client_id, is_active=True).first()
+    if client is None:
+        return JsonResponse({"detail": "Choose an active client."}, status=400)
+    if uploaded_file is None:
+        return JsonResponse({"detail": "Choose a CSV or Excel file."}, status=400)
+    try:
+        result = import_final_ids(
+            uploaded_file=uploaded_file,
+            client=client,
+            accounting_month=accounting_month,
+            decision=decision,
+            uploaded_by=request.user,
+        )
+    except FinalIDImportError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+    return JsonResponse({
+        "message": (
+            f"{result['applied']:,} RID(s) marked {decision}. "
+            f"{result['not_found']:,} not found, "
+            f"{result['client_mismatch']:,} client mismatch, "
+            f"{result['not_completed']:,} not completed."
+        ),
+        "result": result,
     })
 
 

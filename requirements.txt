@@ -11,4 +11,5 @@ whitenoise==6.9.0
 gunicorn==23.0.0
 PyMySQL[rsa]==1.2.0
 cryptography>=46,<51
+openpyxl==3.1.5
 supervisor==4.3.0

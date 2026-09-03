@@ -75,6 +75,7 @@ FUNCTION_CATALOG = (
     ("studies.filter.date", "Use Date and time filter", "Traffic Reports - Filters", "Filter entry or callback timestamps with combined From and To controls.", TRACKING_ROLES),
     ("studies.filters.clear", "Clear traffic report filters", "Traffic Reports - Filters", "Use the Clear filters action on Traffic Reports.", TRACKING_ROLES),
     ("attempts.export", "Export Traffic Reports workbook", "Traffic Reports - Actions", "Export the agreed respondent audit columns matching permitted filters as an Excel workbook.", ("super-admin",)),
+    ("attempts.final_ids.import", "Import client final-ID decisions", "Traffic Reports - Actions", "Upload a client CSV/XLSX of completed RIDs and mark them Accepted or Rejected for the selected invoice month.", ("super-admin",)),
     ("studies.control.page_size", "Change rows per page", "Traffic Reports - Page controls", "Change the number of traffic report rows displayed per page.", TRACKING_ROLES),
     ("studies.control.pagination", "Use pagination", "Traffic Reports - Page controls", "Move between pages of respondent rows.", TRACKING_ROLES),
     ("studies.column.project_id", "Show Project ID column", "Traffic Reports - Table columns", "Display the internal project identifier.", TRACKING_ROLES),

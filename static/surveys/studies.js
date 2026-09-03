@@ -29,6 +29,12 @@
     },
   };
   if (!elements.rows) return;
+  const finalIdImport = {
+    modal: byId('finalIdImportModal'), open: byId('openFinalIdImport'),
+    close: byId('closeFinalIdImport'), backdrop: byId('closeFinalIdImportBackdrop'),
+    cancel: byId('cancelFinalIdImport'), form: byId('finalIdImportForm'),
+    error: byId('finalIdImportError'), submit: byId('submitFinalIdImport'),
+  };
   document.querySelector('.studies-table').style.minWidth = `${Math.max(980, columnCount * 96)}px`;
 
   const state = {
@@ -53,6 +59,70 @@
     return node.innerHTML;
   }
   const escapeAttr = (value) => escapeHtml(value).replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+
+  function toast(message, kind = 'success') {
+    const region = byId('toastRegion');
+    if (!region) return;
+    const node = document.createElement('div');
+    node.className = `toast ${kind}`;
+    node.textContent = message;
+    region.append(node);
+    requestAnimationFrame(() => node.classList.add('show'));
+    window.setTimeout(() => {
+      node.classList.remove('show');
+      window.setTimeout(() => node.remove(), 250);
+    }, 6500);
+  }
+
+  function closeFinalIdImport() {
+    if (!finalIdImport.modal) return;
+    finalIdImport.modal.hidden = true;
+    document.body.classList.remove('final-id-modal-open');
+    finalIdImport.error.hidden = true;
+    finalIdImport.error.textContent = '';
+  }
+
+  function openFinalIdImport() {
+    if (!finalIdImport.modal) return;
+    finalIdImport.modal.hidden = false;
+    document.body.classList.add('final-id-modal-open');
+    window.setTimeout(() => finalIdImport.form?.querySelector('select[name="client"]')?.focus(), 0);
+  }
+
+  finalIdImport.open?.addEventListener('click', openFinalIdImport);
+  [finalIdImport.close, finalIdImport.backdrop, finalIdImport.cancel].forEach((element) => {
+    element?.addEventListener('click', closeFinalIdImport);
+  });
+  finalIdImport.form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = finalIdImport.form;
+    const data = new FormData(form);
+    const file = data.get('file');
+    if (!data.get('client') || !file?.name) {
+      finalIdImport.error.textContent = 'Choose a client and a final-ID CSV or Excel file.';
+      finalIdImport.error.hidden = false;
+      return;
+    }
+    finalIdImport.error.hidden = true;
+    finalIdImport.submit.disabled = true;
+    try {
+      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+      const response = await fetch('/api/v1/final-ids/import/', {
+        method: 'POST', credentials: 'same-origin', body: data,
+        headers: { 'X-CSRFToken': csrf },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'Final ID import could not be completed.');
+      toast(payload.message || 'Final IDs imported successfully.');
+      form.reset();
+      closeFinalIdImport();
+    } catch (error) {
+      finalIdImport.error.textContent = error.message || 'Final ID import could not be completed.';
+      finalIdImport.error.hidden = false;
+    } finally {
+      finalIdImport.submit.disabled = false;
+    }
+  });
 
   const selectedValues = (container) => container ? [...container.querySelectorAll('input:checked')].map((input) => input.value) : [];
 
@@ -387,6 +457,12 @@
   elements.pageInput?.addEventListener('change', () => go(elements.pageInput.value));
   elements.export?.addEventListener('click', () => { elements.export.classList.add('exporting'); window.location.assign(`/api/v1/survey-attempts/export/?${filterParams(false)}`); setTimeout(() => elements.export.classList.remove('exporting'), 1000); });
   document.addEventListener('click', (event) => { if (!event.target.closest('.studies-filters .multi-select')) closeMultiSelects(); });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMultiSelects(); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    closeMultiSelects();
+    closeFinalIdImport();
+  });
+  if (responsiveLayout.addEventListener) responsiveLayout.addEventListener('change', renderAttempts);
+  else responsiveLayout.addListener(renderAttempts);
   loadAttempts();
 })();

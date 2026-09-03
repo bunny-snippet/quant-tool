@@ -10,8 +10,33 @@
     <h1>Traffic Reports</h1>
     <p>Follow every survey journey from entry through its final callback.</p>
   </div>
-  {% if can_export %}<button class="primary-button export-button" id="exportStudies" type="button"><span aria-hidden="true">↓</span> Export</button>{% endif %}
+  <div class="page-intro-actions">
+    {% if can_import_final_ids %}<button class="primary-button final-id-import-button" id="openFinalIdImport" type="button"><span aria-hidden="true">↑</span> Import</button>{% endif %}
+    {% if can_export %}<button class="primary-button export-button" id="exportStudies" type="button"><span aria-hidden="true">↓</span> Export</button>{% endif %}
+  </div>
 </section>
+
+{% if can_import_final_ids %}<div class="final-id-modal-shell" id="finalIdImportModal" hidden>
+  <button class="final-id-modal-backdrop" id="closeFinalIdImportBackdrop" type="button" aria-label="Close final ID import"></button>
+  <section class="final-id-modal" role="dialog" aria-modal="true" aria-labelledby="finalIdImportTitle">
+    <header>
+      <div><p class="eyebrow">Client reconciliation</p><h2 id="finalIdImportTitle">Import final IDs</h2><p>Upload completed RIDs as accepted or rejected for the selected invoice month.</p></div>
+      <button class="final-id-modal-close" id="closeFinalIdImport" type="button" aria-label="Close">×</button>
+    </header>
+    <form id="finalIdImportForm" novalidate>
+      <div class="final-id-form-grid">
+        <label>Client<select name="client" required><option value="">Select client</option>{% for client in final_id_clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></label>
+        <label>Month<select name="month" required>{% for value, label in final_id_months %}<option value="{{ value }}"{% if value == final_id_current_month %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Year<select name="year" required>{% for year in final_id_years %}<option value="{{ year }}"{% if year == final_id_current_year %} selected{% endif %}>{{ year }}</option>{% endfor %}</select></label>
+        <label>Status<select name="status" required><option value="accepted">Accepted</option><option value="rejected">Rejected</option></select></label>
+        <label class="final-id-file-field">Final ID file<input type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><small>CSV or Excel (.xlsx), one <strong>RID</strong> column, up to 15 MB.</small></label>
+      </div>
+      <p class="final-id-note">The selected month is the invoice month. Each RID is searched globally but can be updated only when it belongs to the selected client and has a completed survey status.</p>
+      <div class="final-id-form-error" id="finalIdImportError" role="alert" hidden></div>
+      <footer><button class="final-id-cancel" id="cancelFinalIdImport" type="button">Cancel</button><button class="primary-button" id="submitFinalIdImport" type="submit"><span>↑</span> Import final IDs</button></footer>
+    </form>
+  </section>
+</div>{% endif %}
 
 {% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
   {% if 'revenue' in study_cards %}<article class="revenue"><span>↗</span><div><small>Total revenue</small><strong id="studyMetricRevenue">—</strong><em>All completed · historical CPI recovered</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
@@ -168,4 +193,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=19" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=25" defer></script>{% endblock %}
