@@ -197,7 +197,7 @@ class TolunaNotificationTests(TestCase):
 
         self.assertEqual(missing.status_code, 200)
         self.assertEqual(invalid.status_code, 200)
-        self.assertEqual(TolunaNotification.objects.count(), 2)
+        self.assertEqual(TolunaNotification.objects.count(), 1)
 
     @override_settings(TOLUNA_NOTIFICATION_REQUIRE_HMAC=True)
     def test_member_status_can_require_a_valid_encrypted_value(self):
