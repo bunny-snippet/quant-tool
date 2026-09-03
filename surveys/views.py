@@ -57,6 +57,7 @@ from .dashboard import (
     build_dashboard_payload,
     dashboard_attempts,
     dashboard_client_options,
+    dashboard_financial_year_options,
     dashboard_range_window,
 )
 from .excel import ExcelSheet, build_excel_response
@@ -3852,14 +3853,16 @@ class DashboardAPIView(APIView):
         parameters=[
             OpenApiParameter(
                 "range", OpenApiTypes.STR,
-                description="Global analytics window: 24h, 48h, 72h, 3m, 6m or 1y. Defaults to 24h.",
-                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+                description="Global analytics window: 24h, 48h, 72h, current month, 3m, 6m or financial year. Defaults to 24h.",
+                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
             ),
+            OpenApiParameter("financial_year", OpenApiTypes.INT, description="Starting year when range=fy, for example 2026 for 2026-27."),
             OpenApiParameter(
                 "traffic_range", OpenApiTypes.STR,
                 description="Independent Traffic graph window; does not change dashboard cards.",
-                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
             ),
+            OpenApiParameter("traffic_financial_year", OpenApiTypes.INT, description="Starting year when traffic_range=fy."),
             OpenApiParameter(
                 "traffic_client", OpenApiTypes.INT,
                 description="Visible internal client ID for the Traffic graph only.",
@@ -3867,8 +3870,9 @@ class DashboardAPIView(APIView):
             OpenApiParameter(
                 "finance_range", OpenApiTypes.STR,
                 description="Independent Revenue/RPC graph window; does not change dashboard cards.",
-                enum=["24h", "48h", "72h", "3m", "6m", "1y"],
+                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
             ),
+            OpenApiParameter("finance_financial_year", OpenApiTypes.INT, description="Starting year when finance_range=fy."),
             OpenApiParameter(
                 "finance_client", OpenApiTypes.INT,
                 description="Visible internal client ID for the Revenue/RPC graph only.",
@@ -3879,22 +3883,55 @@ class DashboardAPIView(APIView):
     def get(self, request):
         codes = effective_permission_codes(request.user)
         if any(request.query_params.get(key) not in {None, ""} for key in (
-            "traffic_range", "traffic_client"
+            "traffic_range", "traffic_financial_year", "traffic_client"
         )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["traffic"] not in codes:
             raise PermissionDenied("Your account cannot filter the Traffic dashboard graph.")
         if any(request.query_params.get(key) not in {None, ""} for key in (
-            "finance_range", "finance_client"
+            "finance_range", "finance_financial_year", "finance_client"
         )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["finance"] not in codes:
             raise PermissionDenied("Your account cannot filter the Finance dashboard graph.")
-        try:
-            range_window = dashboard_range_window(request.query_params.get("range", "24h"))
-            traffic_window = dashboard_range_window(
-                request.query_params.get("traffic_range") or range_window["key"]
-            )
-            finance_window = dashboard_range_window(
-                request.query_params.get("finance_range") or range_window["key"]
-            )
+        def load_dashboard():
+            # Anchor all three windows to one instant. Equal range selections
+            # then have exactly equal buckets and can safely reuse one series.
+            dashboard_now = timezone.now()
             visible_queryset = dashboard_attempts(request.user, {})
+            financial_years = dashboard_financial_year_options(
+                visible_queryset, now=dashboard_now
+            )
+            available_financial_years = {
+                item["start_year"] for item in financial_years
+            }
+
+            def selected_window(range_parameter, year_parameter, fallback=None):
+                fallback_key = fallback.get("key") if isinstance(fallback, dict) else fallback
+                range_key = request.query_params.get(range_parameter) or fallback_key or "24h"
+                selected_year = request.query_params.get(year_parameter)
+                if range_key == "fy":
+                    if selected_year in {None, ""}:
+                        selected_year = (
+                            fallback.get("financial_year")
+                            if isinstance(fallback, dict) and fallback.get("key") == "fy"
+                            else financial_years[0]["start_year"]
+                        )
+                    try:
+                        selected_year = int(selected_year)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Financial year must be a numeric starting year.") from exc
+                    if selected_year not in available_financial_years:
+                        raise ValueError("The selected financial year has no visible dashboard data.")
+                return dashboard_range_window(
+                    range_key,
+                    now=dashboard_now,
+                    financial_year=selected_year,
+                )
+
+            range_window = selected_window("range", "financial_year")
+            traffic_window = selected_window(
+                "traffic_range", "traffic_financial_year", fallback=range_window
+            )
+            finance_window = selected_window(
+                "finance_range", "finance_financial_year", fallback=range_window
+            )
             client_options = dashboard_client_options(visible_queryset)
             visible_client_ids = {item["id"] for item in client_options}
 
@@ -3915,29 +3952,40 @@ class DashboardAPIView(APIView):
 
             def graph_queryset(window, client_id=None):
                 scoped = visible_queryset.filter(
-                    initiated_at__gte=window["start"], initiated_at__lte=window["end"]
+                    initiated_at__gte=window["start"], initiated_at__lt=window["end"]
                 )
                 return scoped.filter(survey__client_id=client_id) if client_id else scoped
 
             queryset = graph_queryset(range_window)
+            comparison_duration = range_window["end"] - range_window["start"]
+            comparison_queryset = visible_queryset.filter(
+                initiated_at__gte=range_window["start"] - comparison_duration,
+                initiated_at__lt=range_window["start"],
+            )
             traffic_queryset = graph_queryset(traffic_window, traffic_client_id)
             finance_queryset = graph_queryset(finance_window, finance_client_id)
+            return build_dashboard_payload(
+                queryset,
+                request.user,
+                _component_access(codes, DASHBOARD_CARD_PERMISSIONS),
+                _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
+                range_window,
+                traffic_queryset=traffic_queryset,
+                traffic_range_window=traffic_window,
+                traffic_client_id=traffic_client_id,
+                finance_queryset=finance_queryset,
+                finance_range_window=finance_window,
+                finance_client_id=finance_client_id,
+                client_options=client_options,
+                comparison_queryset=comparison_queryset,
+                financial_years=financial_years,
+            )
+
+        try:
+            payload = load_dashboard()
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(build_dashboard_payload(
-            queryset,
-            request.user,
-            _component_access(codes, DASHBOARD_CARD_PERMISSIONS),
-            _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
-            range_window,
-            traffic_queryset=traffic_queryset,
-            traffic_range_window=traffic_window,
-            traffic_client_id=traffic_client_id,
-            finance_queryset=finance_queryset,
-            finance_range_window=finance_window,
-            finance_client_id=finance_client_id,
-            client_options=client_options,
-        ))
+        return Response(payload)
 
 
 class UserHitsAPIView(APIView):

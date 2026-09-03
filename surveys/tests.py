@@ -2117,9 +2117,11 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(page, 'data-dashboard-range="24h"')
         self.assertContains(page, 'data-dashboard-range="48h"')
         self.assertContains(page, 'data-dashboard-range="72h"')
+        self.assertContains(page, 'data-dashboard-range="month"')
         self.assertContains(page, 'data-dashboard-range="3m"')
         self.assertContains(page, 'data-dashboard-range="6m"')
-        self.assertContains(page, 'data-dashboard-range="1y"')
+        self.assertContains(page, 'id="dashboardFinancialYear"')
+        self.assertNotContains(page, 'data-dashboard-range="1y"')
         self.assertNotContains(page, 'data-dashboard-filter="branch"')
         self.assertNotContains(page, "Recent activity")
         self.assertContains(page, 'id="dashboardIR"')
@@ -2142,8 +2144,12 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(str(response.data["summary"]["rpc"]), "2.00")
         self.assertEqual(response.data["status_breakdown"]["terminated"], 1)
         self.assertEqual(response.data["device_breakdown"]["desktop"], 1)
+        self.assertEqual(response.data["device_performance"]["desktop"]["hits"], 1)
+        self.assertEqual(response.data["device_performance"]["desktop"]["conversion_rate"], 100.0)
         self.assertEqual(response.data["client_distribution"][0]["name"], "Client Alpha")
         self.assertEqual(response.data["client_distribution"][0]["share_percent"], 100.0)
+        self.assertEqual(response.data["client_distribution"][0]["hits"], 1)
+        self.assertEqual(response.data["client_distribution"][0]["conversion_rate"], 100.0)
         self.assertEqual(len(response.data["traffic_chart"]["points"]), 12)
         self.assertEqual(sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2)
         self.assertEqual(len(response.data["finance_chart"]["points"]), 12)
@@ -2152,20 +2158,30 @@ class DashboardAnalyticsTests(TestCase):
             {"Client Alpha", "Client Beta"},
         )
         self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
+        self.assertEqual(response.data["top_users"][0]["contribution_percent"], 100.0)
+        self.assertIsNotNone(response.data["comparison"])
+        self.assertTrue(response.data["financial_years"])
         self.assertNotIn("recent_activity", response.data)
 
     def test_dashboard_supports_every_global_analytics_range(self):
+        local_now = timezone.localtime(timezone.now())
+        financial_year = local_now.year if local_now.month >= 4 else local_now.year - 1
+        financial_year_months = local_now.month - 3 if local_now.month >= 4 else local_now.month + 9
         expected = {
             "24h": (12, "2-hour intervals"),
             "48h": (12, "4-hour intervals"),
             "72h": (12, "6-hour intervals"),
+            "month": (local_now.day, "Daily intervals"),
             "3m": (13, "Weekly intervals"),
             "6m": (6, "Monthly intervals"),
-            "1y": (12, "Monthly intervals"),
+            "fy": (financial_year_months, "Monthly intervals"),
         }
         for range_key, (point_count, bucket_label) in expected.items():
             with self.subTest(range_key=range_key):
-                response = self.api.get(reverse("dashboard-api"), {"range": range_key})
+                params = {"range": range_key}
+                if range_key == "fy":
+                    params["financial_year"] = financial_year
+                response = self.api.get(reverse("dashboard-api"), params)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.data["range"]["key"], range_key)
                 self.assertEqual(response.data["range"]["bucket_label"], bucket_label)
@@ -2176,6 +2192,8 @@ class DashboardAnalyticsTests(TestCase):
                 self.assertEqual(
                     sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2
                 )
+                if range_key == "fy":
+                    self.assertEqual(response.data["range"]["financial_year"], financial_year)
 
         invalid = self.api.get(reverse("dashboard-api"), {"range": "forever"})
         self.assertEqual(invalid.status_code, 400)

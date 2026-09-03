@@ -726,6 +726,31 @@ class DashboardRangeSerializer(serializers.Serializer):
     bucket_label = serializers.CharField()
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
+    financial_year = serializers.IntegerField(allow_null=True)
+
+
+class DashboardComparisonMetricsSerializer(serializers.Serializer):
+    hits = serializers.FloatField(allow_null=True)
+    completes = serializers.FloatField(allow_null=True)
+    conversion_rate = serializers.FloatField(allow_null=True)
+    incidence_rate = serializers.FloatField(allow_null=True)
+    active_users = serializers.FloatField(allow_null=True)
+    average_loi_seconds = serializers.FloatField(allow_null=True)
+    revenue = serializers.FloatField(allow_null=True)
+    average_cpi = serializers.FloatField(allow_null=True)
+    rpc = serializers.FloatField(allow_null=True)
+
+
+class DashboardComparisonSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    values = DashboardComparisonMetricsSerializer()
+    deltas = DashboardComparisonMetricsSerializer()
+
+
+class DashboardFinancialYearSerializer(serializers.Serializer):
+    start_year = serializers.IntegerField()
+    value = serializers.CharField()
+    label = serializers.CharField()
 
 
 class DashboardPerformancePointSerializer(serializers.Serializer):
@@ -744,8 +769,11 @@ class DashboardPerformancePointSerializer(serializers.Serializer):
 class DashboardClientShareSerializer(serializers.Serializer):
     client_id = serializers.IntegerField(allow_null=True)
     name = serializers.CharField()
+    hits = serializers.IntegerField(min_value=0)
     completes = serializers.IntegerField(min_value=0)
     share_percent = serializers.FloatField(min_value=0, max_value=100)
+    conversion_rate = serializers.FloatField(min_value=0)
+    revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class DashboardStatusBreakdownSerializer(serializers.Serializer):
@@ -763,12 +791,27 @@ class DashboardDeviceBreakdownSerializer(serializers.Serializer):
     unclassified = serializers.IntegerField(min_value=0)
 
 
+class DashboardDeviceMetricSerializer(serializers.Serializer):
+    hits = serializers.IntegerField(min_value=0)
+    completes = serializers.IntegerField(min_value=0)
+    conversion_rate = serializers.FloatField(min_value=0)
+
+
+class DashboardDevicePerformanceSerializer(serializers.Serializer):
+    desktop = DashboardDeviceMetricSerializer()
+    mobile = DashboardDeviceMetricSerializer()
+    tablet = DashboardDeviceMetricSerializer()
+    unclassified = DashboardDeviceMetricSerializer()
+
+
 class DashboardTopUserSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
     name = serializers.CharField()
     hits = serializers.IntegerField(min_value=0)
     completes = serializers.IntegerField(min_value=0)
     conversion_rate = serializers.FloatField(min_value=0)
+    contribution_percent = serializers.FloatField(min_value=0)
+    revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class DashboardGraphClientSerializer(serializers.Serializer):
@@ -795,12 +838,15 @@ class DashboardRecentActivitySerializer(serializers.Serializer):
 class DashboardResponseSerializer(serializers.Serializer):
     range = DashboardRangeSerializer()
     summary = DashboardSummarySerializer()
+    comparison = DashboardComparisonSerializer(allow_null=True)
+    financial_years = DashboardFinancialYearSerializer(many=True)
     traffic_chart = DashboardGraphSeriesSerializer(allow_null=True)
     finance_chart = DashboardGraphSeriesSerializer(allow_null=True)
     graph_clients = DashboardGraphClientSerializer(many=True)
     client_distribution = DashboardClientShareSerializer(many=True, allow_null=True)
     status_breakdown = DashboardStatusBreakdownSerializer(allow_null=True)
     device_breakdown = DashboardDeviceBreakdownSerializer(allow_null=True)
+    device_performance = DashboardDevicePerformanceSerializer(allow_null=True)
     top_users = DashboardTopUserSerializer(many=True, allow_null=True)
     generated_at = serializers.DateTimeField()
 
