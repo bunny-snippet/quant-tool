@@ -519,7 +519,23 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .page-studies .study-overview-compact>.study-summary-card{min-width:0}
 .page-studies .ir-metric{min-height:42px}.page-studies .ir-metric strong{font-size:20px}
 .page-prescreened-data .content,.page-studies .content,.page-termination-reasons .content,.page-toluna-notifications .content{width:100%;min-width:0}
-@media(min-width:901px){.page-studies .studies-table{min-width:100%!important}.page-studies .studies-table-wrap{overflow-x:hidden!important;scrollbar-gutter:auto}}
+@media(min-width:901px){
+  .page-studies .studies-table{
+    width:100%!important;
+    min-width:var(--studies-table-min-width,1560px)!important;
+  }
+  .page-studies .studies-table-wrap{
+    display:block!important;
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    scrollbar-gutter:stable;
+    overscroll-behavior-x:contain;
+  }
+  .page-studies .studies-table-wrap::-webkit-scrollbar{height:11px}
+  .page-studies .studies-table-wrap::-webkit-scrollbar-track{background:#eef3f7;border-radius:999px}
+  .page-studies .studies-table-wrap::-webkit-scrollbar-thumb{background:#9aa9bc;border:2px solid #eef3f7;border-radius:999px}
+  .page-studies .studies-table-wrap{scrollbar-width:thin;scrollbar-color:#9aa9bc #eef3f7}
+}
 
 .vault-answer-trigger{width:max-content;max-width:100%;min-height:38px;border:1px solid #cfe5ec;border-radius:10px;padding:0 11px;background:#f1fbfd;color:#087f99;display:inline-flex;align-items:center;justify-content:space-between;gap:13px;font-size:10px;font-weight:800;cursor:pointer;transition:border-color .2s,background .2s,transform .2s}
 .vault-answer-trigger:hover{border-color:var(--cyan);background:var(--cyan-soft);transform:translateY(-1px)}.vault-answer-trigger i{font-style:normal;font-size:15px}
