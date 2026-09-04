@@ -120,7 +120,9 @@ class UserDashboardTests(TestCase):
         self.assertEqual(row["accepted"], 1)
         self.assertEqual(row["rejected"], 1)
         self.assertEqual(row["pending"], 1)
-        self.assertEqual(row["acceptance_rate"], 50.0)
+        self.assertEqual(row["acceptance_rate"], 33.3)
+        self.assertEqual(row["rejection_rate"], 33.3)
+        self.assertEqual(row["pending_rate"], 33.3)
         self.assertEqual(row["reviewed_rate"], 66.7)
 
     def test_hierarchy_filter_and_page_are_available_to_super_admin(self):

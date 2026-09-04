@@ -5,11 +5,12 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from vendors.models import Client
@@ -31,7 +32,10 @@ def _normalise_header(value) -> str:
 
 
 def _normalise_rid(value) -> str:
-    return str(value or "").strip()
+    rid = str(value or "").strip()
+    if rid.startswith("'") and len(rid) == 11:
+        rid = rid[1:]
+    return rid
 
 
 def _csv_values(uploaded_file) -> Iterable[object]:
@@ -92,8 +96,8 @@ def _xlsx_values(uploaded_file) -> Iterable[object]:
         workbook.close()
 
 
-def read_uploaded_rids(uploaded_file) -> tuple[list[str], int, str]:
-    """Return distinct, valid RIDs while retaining the original row count."""
+def read_uploaded_rids(uploaded_file) -> tuple[list[str], int, int, str]:
+    """Return distinct valid RIDs, row counts and the immutable file digest."""
 
     filename = Path(str(uploaded_file.name or "")).name
     suffix = Path(filename).suffix.lower()
@@ -127,13 +131,13 @@ def read_uploaded_rids(uploaded_file) -> tuple[list[str], int, str]:
             rids.append(rid)
         if len(rids) > MAX_UNIQUE_RIDS:
             raise FinalIDImportError("One upload can contain at most 50,000 unique RIDs.")
-    if invalid_rows:
-        raise FinalIDImportError(
-            f"{invalid_rows} row(s) do not contain a valid 10-character RID. Correct the file and try again."
-        )
     if not rids:
+        if invalid_rows:
+            raise FinalIDImportError(
+                f"No valid 10-character RIDs were found; {invalid_rows} invalid row(s) were skipped."
+            )
         raise FinalIDImportError("No RID values were found in the uploaded file.")
-    return rids, submitted_count, hasher.hexdigest()
+    return rids, submitted_count, invalid_rows, hasher.hexdigest()
 
 
 def _attempt_matches_client(attempt: SurveyAttempt, client_id: int) -> bool:
@@ -143,6 +147,26 @@ def _attempt_matches_client(attempt: SurveyAttempt, client_id: int) -> bool:
         survey.client_id,
         survey.integration.client_id if survey.integration_id else None,
     }
+
+
+def _client_attempt_filter(client_id: int) -> Q:
+    return (
+        Q(client_id=client_id)
+        | Q(survey__client_id=client_id)
+        | Q(survey__integration__client_id=client_id)
+    )
+
+
+def _accounting_month_bounds(accounting_month: date) -> tuple[datetime, datetime]:
+    if accounting_month.month == 12:
+        next_month = date(accounting_month.year + 1, 1, 1)
+    else:
+        next_month = date(accounting_month.year, accounting_month.month + 1, 1)
+    timezone_value = timezone.get_current_timezone()
+    return (
+        timezone.make_aware(datetime.combine(accounting_month, datetime.min.time()), timezone_value),
+        timezone.make_aware(datetime.combine(next_month, datetime.min.time()), timezone_value),
+    )
 
 
 def import_final_ids(
@@ -166,7 +190,7 @@ def import_final_ids(
     if accounting_month.day != 1:
         raise FinalIDImportError("Accounting month must use the first day of the month.")
 
-    rids, submitted_count, file_sha256 = read_uploaded_rids(uploaded_file)
+    rids, submitted_count, invalid_count, file_sha256 = read_uploaded_rids(uploaded_file)
     filename = Path(str(uploaded_file.name or "")).name
     now = timezone.now()
 
@@ -180,6 +204,7 @@ def import_final_ids(
             uploaded_by=uploaded_by,
             submitted_count=submitted_count,
             unique_rid_count=len(rids),
+            invalid_count=invalid_count,
         )
         attempts = {
             attempt.rid: attempt
@@ -187,16 +212,36 @@ def import_final_ids(
                 "survey__integration", "client"
             ).filter(rid__in=rids)
         }
+        final_lifecycle_statuses = {
+            SurveyAttempt.Status.COMPLETED,
+            SurveyAttempt.Status.TERMINATED,
+            SurveyAttempt.Status.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED,
+        }
         eligible_attempts = {
             rid: attempt
             for rid, attempt in attempts.items()
             if _attempt_matches_client(attempt, client.pk)
-            and attempt.status == SurveyAttempt.Status.COMPLETED
+            and attempt.status in final_lifecycle_statuses
         }
+        auto_rejected_attempts = []
+        if decision == FinalIDUpload.Decision.ACCEPTED:
+            lower, upper = _accounting_month_bounds(accounting_month)
+            auto_rejected_attempts = list(
+                SurveyAttempt.objects.select_for_update().select_related(
+                    "survey__integration", "client"
+                ).filter(
+                    _client_attempt_filter(client.pk),
+                    status=SurveyAttempt.Status.COMPLETED,
+                    initiated_at__gte=lower,
+                    initiated_at__lt=upper,
+                ).exclude(rid__in=rids)
+            )
+        all_eligible_attempts = [*eligible_attempts.values(), *auto_rejected_attempts]
         existing_statuses = {
             item.attempt_id: item
             for item in FinalIDStatus.objects.select_for_update().filter(
-                attempt_id__in=[attempt.pk for attempt in eligible_attempts.values()]
+                attempt_id__in=[attempt.pk for attempt in all_eligible_attempts]
             )
         }
 
@@ -208,7 +253,31 @@ def import_final_ids(
             "not_found": 0,
             "client_mismatch": 0,
             "not_completed": 0,
+            "auto_rejected": 0,
         }
+
+        def apply_status(attempt, applied_status, rid):
+            previous = existing_statuses.get(attempt.pk)
+            previous_status = previous.status if previous else ""
+            if previous is None:
+                status = FinalIDStatus(
+                    attempt=attempt, client=client, status=applied_status,
+                    accounting_month=accounting_month, upload=upload,
+                )
+                status_creates.append(status)
+                existing_statuses[attempt.pk] = status
+            else:
+                previous.client = client
+                previous.status = applied_status
+                previous.accounting_month = accounting_month
+                previous.upload = upload
+                previous.updated_at = now
+                status_updates.append(previous)
+            upload_items.append(FinalIDUploadItem(
+                upload=upload, rid=rid, attempt=attempt,
+                outcome=FinalIDUploadItem.Outcome.APPLIED,
+                previous_status=previous_status, applied_status=applied_status,
+            ))
         for rid in rids:
             attempt = attempts.get(rid)
             if attempt is None:
@@ -223,7 +292,7 @@ def import_final_ids(
                     outcome=FinalIDUploadItem.Outcome.CLIENT_MISMATCH,
                 ))
                 continue
-            if attempt.status != SurveyAttempt.Status.COMPLETED:
+            if attempt.status not in final_lifecycle_statuses:
                 counters["not_completed"] += 1
                 upload_items.append(FinalIDUploadItem(
                     upload=upload, rid=rid, attempt=attempt,
@@ -231,32 +300,12 @@ def import_final_ids(
                 ))
                 continue
 
-            previous = existing_statuses.get(attempt.pk)
-            previous_status = previous.status if previous else ""
-            if previous is None:
-                status_creates.append(FinalIDStatus(
-                    attempt=attempt,
-                    client=client,
-                    status=decision,
-                    accounting_month=accounting_month,
-                    upload=upload,
-                ))
-            else:
-                previous.client = client
-                previous.status = decision
-                previous.accounting_month = accounting_month
-                previous.upload = upload
-                previous.updated_at = now
-                status_updates.append(previous)
             counters["applied"] += 1
-            upload_items.append(FinalIDUploadItem(
-                upload=upload,
-                rid=rid,
-                attempt=attempt,
-                outcome=FinalIDUploadItem.Outcome.APPLIED,
-                previous_status=previous_status,
-                applied_status=decision,
-            ))
+            apply_status(attempt, decision, rid)
+
+        for attempt in auto_rejected_attempts:
+            counters["auto_rejected"] += 1
+            apply_status(attempt, FinalIDUpload.Decision.REJECTED, attempt.rid)
 
         FinalIDStatus.objects.bulk_create(status_creates, batch_size=1000)
         if status_updates:
@@ -271,11 +320,13 @@ def import_final_ids(
             not_found_count=counters["not_found"],
             client_mismatch_count=counters["client_mismatch"],
             not_completed_count=counters["not_completed"],
+            auto_rejected_count=counters["auto_rejected"],
         )
 
     return {
         "upload_id": upload.pk,
         "submitted": submitted_count,
         "unique": len(rids),
+        "invalid": invalid_count,
         **counters,
     }

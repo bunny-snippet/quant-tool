@@ -4,7 +4,7 @@ from django.urls import reverse
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from accounts.access import has_function_access
+from accounts.access import effective_permission_codes, has_function_access
 from vendors.access import vendor_scope_user_id
 from vendors.models import VendorAPIKey
 from vendors.security import generate_delivery_token
@@ -12,6 +12,7 @@ from vendors.services import organization_client_ids_for_user, survey_pricing_fo
 
 from .age_rules import normalize_age_range
 from .models import (
+    FinalIDUpload,
     Survey,
     SurveyAttempt,
     SurveyQuota,
@@ -866,6 +867,9 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="platform_user.username", read_only=True, allow_null=True)
     user_email = serializers.EmailField(source="platform_user.email", read_only=True, allow_null=True)
     status_label = serializers.SerializerMethodField()
+    final_status = serializers.SerializerMethodField()
+    final_status_label = serializers.SerializerMethodField()
+    final_status_month = serializers.SerializerMethodField()
     entry_ip = serializers.IPAddressField(source="initiation_ip", read_only=True, allow_null=True)
     exit_ip = serializers.IPAddressField(source="callback_ip", read_only=True, allow_null=True)
     client_name = serializers.SerializerMethodField()
@@ -884,7 +888,8 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
             "language_code", "platform_user", "user_id", "user_name", "username", "user_email", "supplier",
             "supplier_name", "vendor", "vendor_name", "client", "client_name", "client_allocation", "survey_allocation", "supplier_code",
             "buyer_id", "source_cpi_snapshot", "cpi_snapshot_source", "cpi_cut_percent_snapshot", "payable_cpi_snapshot", "cpi_currency_snapshot",
-            "status_label", "termination_reason", "termination_category",
+            "status_label", "final_status", "final_status_label", "final_status_month",
+            "termination_reason", "termination_category",
             "status", "initiated_at", "submitted_at", "redirected_at", "callback_at", "last_callback_at",
             "loi_seconds", "entry_ip", "exit_ip", "initiation_ip", "callback_ip", "entry_user_agent",
             "exit_user_agent", "entry_browser", "exit_browser", "entry_device", "exit_device", "entry_os",
@@ -925,9 +930,36 @@ class SurveyAttemptSerializer(serializers.ModelSerializer):
         return viewer_attempt_cpi(obj, request.user) if request else obj.source_cpi_snapshot
 
     def get_status_label(self, obj) -> str:
+        final_status = getattr(obj, "final_id_status", None)
+        if final_status is not None:
+            return (
+                "Client Accepted"
+                if final_status.status == FinalIDUpload.Decision.ACCEPTED
+                else "Client Rejected"
+            )
         if obj.status in {SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED}:
             return "Initiated"
         return obj.get_status_display()
+
+    def get_final_status(self, obj) -> str:
+        final_status = getattr(obj, "final_id_status", None)
+        return final_status.status if final_status else ""
+
+    def get_final_status_label(self, obj) -> str:
+        value = self.get_final_status(obj)
+        return value.title() if value else ""
+
+    def get_final_status_month(self, obj):
+        final_status = getattr(obj, "final_id_status", None)
+        return final_status.accounting_month if final_status else None
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and "studies.column.final_status" not in effective_permission_codes(request.user):
+            for name in ("final_status", "final_status_label", "final_status_month"):
+                fields.pop(name, None)
+        return fields
 
     def get_termination_reason(self, obj) -> str:
         if obj.status not in {
@@ -977,6 +1009,7 @@ class SurveyAttemptSummarySerializer(serializers.Serializer):
     conversion_rate = serializers.FloatField(allow_null=True)
     incidence_rate = serializers.FloatField(allow_null=True)
     total_revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    invoiced_revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     revenue_currency = serializers.CharField(allow_null=True)
     completed_devices = SurveyAttemptCompletedDeviceSummarySerializer()
 

@@ -15,7 +15,7 @@
   <article><span class="user-performance-icon accepted">A</span><div><small>Accepted</small><strong id="userDashboardAccepted">—</strong><em>Latest client decision</em></div></article>
   <article><span class="user-performance-icon rejected">R</span><div><small>Rejected</small><strong id="userDashboardRejected">—</strong><em>Latest client decision</em></div></article>
   <article><span class="user-performance-icon pending">…</span><div><small>Pending</small><strong id="userDashboardPending">—</strong><em>Awaiting Final IDs</em></div></article>
-  <article><span class="user-performance-icon ratio">%</span><div><small>Acceptance</small><strong id="userDashboardAcceptance">—</strong><em>Accepted out of reviewed</em></div></article>
+  <article><span class="user-performance-icon ratio">%</span><div><small>Accepted %</small><strong id="userDashboardAcceptance">—</strong><em>Accepted out of all completes</em></div></article>
   <article><span class="user-performance-icon users">◎</span><div><small>Active users</small><strong id="userDashboardActiveUsers">—</strong><em id="userDashboardUserTotal">Filtered employees</em></div></article>
 </section>
 
@@ -85,4 +85,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/user_dashboard.js' %}?v=1" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/user_dashboard.js' %}?v=2" defer></script>{% endblock %}

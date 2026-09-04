@@ -209,8 +209,16 @@ def build_user_dashboard_payload(user, params) -> dict:
             **counts,
             "pending": pending,
             "acceptance_rate": (
-                round(counts["accepted"] / reviewed * 100, 1)
-                if reviewed else None
+                round(counts["accepted"] / counts["completes"] * 100, 1)
+                if counts["completes"] else 0.0
+            ),
+            "rejection_rate": (
+                round(counts["rejected"] / counts["completes"] * 100, 1)
+                if counts["completes"] else 0.0
+            ),
+            "pending_rate": (
+                round(pending / counts["completes"] * 100, 1)
+                if counts["completes"] else 0.0
             ),
             "reviewed_rate": (
                 round(reviewed / counts["completes"] * 100, 1)
@@ -236,8 +244,16 @@ def build_user_dashboard_payload(user, params) -> dict:
     }
     reviewed_total = summary["accepted"] + summary["rejected"]
     summary["acceptance_rate"] = (
-        round(summary["accepted"] / reviewed_total * 100, 1)
-        if reviewed_total else None
+        round(summary["accepted"] / summary["completes"] * 100, 1)
+        if summary["completes"] else 0.0
+    )
+    summary["rejection_rate"] = (
+        round(summary["rejected"] / summary["completes"] * 100, 1)
+        if summary["completes"] else 0.0
+    )
+    summary["pending_rate"] = (
+        round(summary["pending"] / summary["completes"] * 100, 1)
+        if summary["completes"] else 0.0
     )
     summary["reviewed_rate"] = (
         round(reviewed_total / summary["completes"] * 100, 1)

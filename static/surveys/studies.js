@@ -25,6 +25,7 @@
       conversion: byId('studyMetricConversion'), desktop: byId('studyMetricDesktop'),
       mobile: byId('studyMetricMobile'), tablet: byId('studyMetricTablet'),
       revenue: byId('studyMetricRevenue'),
+      invoicedRevenue: byId('studyMetricInvoicedRevenue'),
       ir: byId('studyMetricIR'),
     },
   };
@@ -284,17 +285,17 @@
     }
   }
 
-  function animateRevenue(value, currency) {
-    if (!elements.metrics.revenue || value == null) return;
+  function animateRevenue(value, currency, element = elements.metrics.revenue) {
+    if (!element || value == null) return;
     const target = Number(value || 0);
-    const start = Number(elements.metrics.revenue.dataset.value || 0);
+    const start = Number(element.dataset.value || 0);
     const started = performance.now();
     const duration = 780;
-    elements.metrics.revenue.dataset.value = String(target);
+    element.dataset.value = String(target);
     const frame = (now) => {
       const progress = Math.min(1, (now - started) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
-      elements.metrics.revenue.textContent = formatMoney(start + ((target - start) * eased), currency);
+      element.textContent = formatMoney(start + ((target - start) * eased), currency);
       if (progress < 1) requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
@@ -352,7 +353,15 @@
   function statusPill(attempt) {
     const label = ['initiated', 'redirected'].includes(attempt.status) ? 'Initiated' : (attempt.status_label || attempt.status);
     const reason = attempt.termination_reason || attempt.termination_category || '';
-    return `<div class="attempt-outcome"><span class="attempt-status ${statusTone[attempt.status] || 'neutral'}"><i></i>${escapeHtml(label)}</span>${reason ? `<small class="attempt-reason" title="${escapeAttr(reason)}">${escapeHtml(reason)}</small>` : ''}</div>`;
+    const tone = attempt.final_status === 'accepted' ? 'complete' : attempt.final_status === 'rejected' ? 'terminate' : (statusTone[attempt.status] || 'neutral');
+    return `<div class="attempt-outcome"><span class="attempt-status ${tone}"><i></i>${escapeHtml(label)}</span>${reason ? `<small class="attempt-reason" title="${escapeAttr(reason)}">${escapeHtml(reason)}</small>` : ''}</div>`;
+  }
+
+  function finalStatusPill(attempt) {
+    if (!attempt.final_status) return '<div class="attempt-outcome"><span class="attempt-status neutral"><i></i>—</span></div>';
+    const tone = attempt.final_status === 'accepted' ? 'complete' : 'terminate';
+    const month = attempt.final_status_month ? new Date(`${attempt.final_status_month}T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '';
+    return `<div class="attempt-outcome"><span class="attempt-status ${tone}"><i></i>${escapeHtml(attempt.final_status_label || attempt.final_status)}</span>${month ? `<small class="attempt-reason">Invoice ${escapeHtml(month)}</small>` : ''}</div>`;
   }
 
   function updateOverview(summary = {}) {
@@ -367,6 +376,7 @@
     animateMetric(elements.metrics.conversion, summary.conversion_rate, { suffix: '%', maximumFractionDigits: 2 });
     animateMetric(elements.metrics.ir, summary.incidence_rate, { suffix: '%', maximumFractionDigits: 2 });
     animateRevenue(summary.total_revenue, summary.revenue_currency || 'USD');
+    animateRevenue(summary.invoiced_revenue, summary.revenue_currency || 'USD', elements.metrics.invoicedRevenue);
   }
 
   function rowTemplate(attempt) {
@@ -384,6 +394,7 @@
     if (columns.has('ip')) cells.push(`<td class="study-col-ip">${ipPair(attempt)}</td>`);
     if (columns.has('loi')) cells.push(`<td class="study-col-loi"><strong class="study-loi">${formatLoi(attempt.loi_seconds)}</strong><small class="study-secondary">${attempt.loi_seconds == null ? 'Awaiting callback' : 'Actual duration'}</small></td>`);
     if (columns.has('status')) cells.push(`<td class="study-col-status">${statusPill(attempt)}</td>`);
+    if (columns.has('final_status')) cells.push(`<td class="study-col-final-status">${finalStatusPill(attempt)}</td>`);
     if (columns.has('start')) cells.push(`<td class="study-col-start">${timestampCell(attempt.initiated_at)}</td>`);
     if (columns.has('end')) cells.push(`<td class="study-col-end">${timestampCell(endTimestamp(attempt))}</td>`);
     return `<tr>${cells.length ? cells.join('') : '<td><div class="column-denied">No Traffic Report columns are assigned to your account.</div></td>'}</tr>`;
@@ -394,7 +405,7 @@
     const uid = attempt.prescreener_uid || '';
     const head = `${columns.has('respondent_id') ? `<div><strong>${escapeHtml(attempt.rid)}</strong><small>${uid ? `UID ${escapeHtml(uid)}` : 'UID unavailable'}</small><span>RID / UID</span></div>` : '<div></div>'}${columns.has('status') ? statusPill(attempt) : ''}`;
     const survey = columns.has('survey_id') || columns.has('project_id') ? `<div class="study-card-survey">${columns.has('survey_id') ? `<span>Survey ${escapeHtml(attempt.survey_source_id)} · ${attempt.buyer_id ? `Buyer ${escapeHtml(attempt.buyer_id)}` : 'Buyer ID unavailable'}</span>` : ''}${columns.has('project_id') ? `<strong>${escapeHtml(attempt.survey_local_id)}</strong><small>${escapeHtml(attempt.client_name || attempt.company_name || 'Survey client')}</small>` : ''}</div>` : '';
-    const metrics = `${columns.has('user') ? `<span><small>User</small><b>${escapeHtml(attempt.user_name)}</b></span>` : ''}${columns.has('country') ? `<span><small>Country</small><b>${escapeHtml(attempt.country || attempt.country_code || '—')}</b></span>` : ''}${columns.has('cpi') ? `<span><small>CPI</small><b>${attempt.source_cpi_snapshot == null ? '—' : formatMoney(attempt.source_cpi_snapshot, attempt.cpi_currency_snapshot || 'USD')}</b></span>` : ''}${columns.has('loi') ? `<span><small>LOI</small><b>${formatLoi(attempt.loi_seconds)}</b></span>` : ''}${columns.has('device') ? `<span><small>Device</small>${deviceBadge(attempt)}</span>` : ''}`;
+    const metrics = `${columns.has('user') ? `<span><small>User</small><b>${escapeHtml(attempt.user_name)}</b></span>` : ''}${columns.has('country') ? `<span><small>Country</small><b>${escapeHtml(attempt.country || attempt.country_code || '—')}</b></span>` : ''}${columns.has('cpi') ? `<span><small>CPI</small><b>${attempt.source_cpi_snapshot == null ? '—' : formatMoney(attempt.source_cpi_snapshot, attempt.cpi_currency_snapshot || 'USD')}</b></span>` : ''}${columns.has('loi') ? `<span><small>LOI</small><b>${formatLoi(attempt.loi_seconds)}</b></span>` : ''}${columns.has('device') ? `<span><small>Device</small>${deviceBadge(attempt)}</span>` : ''}${columns.has('final_status') ? `<span><small>Final Status</small>${finalStatusPill(attempt)}</span>` : ''}`;
     const times = columns.has('start') || columns.has('end') ? `<div class="study-card-times">${columns.has('start') ? `<time><small>Start</small><b>${formatIst(attempt.initiated_at)} IST</b></time>` : ''}${columns.has('end') ? `<time><small>End</small><b>${formatIst(endTimestamp(attempt))} IST</b></time>` : ''}</div>` : '';
     return `<article class="survey-card study-card"><div class="study-card-head">${head}</div>${survey}${metrics ? `<div class="study-card-grid">${metrics}</div>` : ''}${columns.has('ip') ? `<div class="study-card-network">${ipPair(attempt)}</div>` : ''}${times}</article>`;
   }

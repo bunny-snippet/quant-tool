@@ -135,8 +135,8 @@
   }
 
   function performanceCell(row) {
-    const acceptance = row.acceptance_rate === null ? 0 : Number(row.acceptance_rate);
-    return `<div class="user-performance-rate"><strong>${escapeHtml(rate(row.acceptance_rate))}</strong><span><i style="width:${Math.max(0, Math.min(100, acceptance))}%"></i></span><small>${Number(row.reviewed_rate || 0).toFixed(1)}% reviewed</small></div>`;
+    const acceptance = Number(row.acceptance_rate || 0);
+    return `<div class="user-performance-rate"><strong>Accepted ${escapeHtml(rate(row.acceptance_rate))}</strong><span><i style="width:${Math.max(0, Math.min(100, acceptance))}%"></i></span><small>Rejected ${Number(row.rejection_rate || 0).toFixed(1)}% · Awaited ${Number(row.pending_rate || 0).toFixed(1)}%</small></div>`;
   }
 
   function renderRows(rows) {
@@ -169,7 +169,7 @@
     $('#userDashboardActiveUsers').textContent = number(summary.active_users);
     $('#userDashboardPeriod').textContent = period.label;
     $('#userDashboardUserTotal').textContent = `${number(summary.users)} filtered employees`;
-    elements.summary.textContent = `${number(summary.users)} employees · ${number(summary.completes)} completes · ${Number(summary.reviewed_rate || 0).toFixed(1)}% reviewed for ${period.label}`;
+    elements.summary.textContent = `${number(summary.users)} employees · ${number(summary.completes)} completes · ${Number(summary.acceptance_rate || 0).toFixed(1)}% accepted · ${Number(summary.rejection_rate || 0).toFixed(1)}% rejected for ${period.label}`;
   }
 
   function updatePagination(count) {

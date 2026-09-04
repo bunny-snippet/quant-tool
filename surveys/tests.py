@@ -1261,6 +1261,7 @@ class StudiesTrackingTests(TestCase):
             "Current Client CPI", "Client entry link CPI", "Vendor CPI", "Vendor name",
             "RID", "User name", "Device", "OS", "Browser", "User agent",
             "Entry IP", "Exit IP", "Actual LOI (minutes)", "Status", "Status source",
+            "Final status", "Invoice month",
             "Inisitate at", "Presecreent at", "Redirect at", "entry date time",
             "Exit date time",
         ])

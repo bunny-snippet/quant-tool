@@ -31,7 +31,7 @@
         <label>Status<select name="status" required><option value="accepted">Accepted</option><option value="rejected">Rejected</option></select></label>
         <label class="final-id-file-field">Final ID file<input type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><small>CSV or Excel (.xlsx), one <strong>RID</strong> column, up to 15 MB.</small></label>
       </div>
-      <p class="final-id-note">The selected month is the invoice month. Each RID is searched globally but can be updated only when it belongs to the selected client and has a completed survey status.</p>
+      <p class="final-id-note">The selected month is the invoice month. RIDs are searched globally and a later file can replace an earlier decision. An Accepted file also marks every other completed journey for that client in the selected activity month as Client Rejected.</p>
       <div class="final-id-form-error" id="finalIdImportError" role="alert" hidden></div>
       <footer><button class="final-id-cancel" id="cancelFinalIdImport" type="button">Cancel</button><button class="primary-button" id="submitFinalIdImport" type="submit"><span>↑</span> Import final IDs</button></footer>
     </form>
@@ -40,6 +40,7 @@
 
 {% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
   {% if 'revenue' in study_cards %}<article class="revenue"><span>↗</span><div><small>Total revenue</small><strong id="studyMetricRevenue">—</strong><em>All completed · historical CPI recovered</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
+  {% if 'invoiced_revenue' in study_cards %}<article class="revenue"><span>✓</span><div><small>Invoiced revenue</small><strong id="studyMetricInvoicedRevenue">—</strong><em>Latest Client Accepted decisions</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
   {% if 'total' in study_cards or 'completed' in study_cards or 'conversion' in study_cards %}<article class="study-summary-card traffic-summary"><header><span>H</span><div><small>Traffic</small><em>Filtered journeys</em></div></header><div class="summary-metrics">
     {% if 'total' in study_cards %}<span><small>Total hits</small><strong id="studyMetricTotal">—</strong></span>{% endif %}
     {% if 'completed' in study_cards %}<span><small>Completes</small><strong id="studyMetricCompleted">—</strong></span>{% endif %}
@@ -175,6 +176,7 @@
         {% if 'ip' in study_columns %}<th class="study-col-ip">IP address</th>{% endif %}
         {% if 'loi' in study_columns %}<th class="study-col-loi">LOI</th>{% endif %}
         {% if 'status' in study_columns %}<th class="study-col-status">Status</th>{% endif %}
+        {% if 'final_status' in study_columns %}<th class="study-col-final-status">Final Status</th>{% endif %}
         {% if 'start' in study_columns %}<th class="study-col-start">Start</th>{% endif %}
         {% if 'end' in study_columns %}<th class="study-col-end">End</th>{% endif %}
       </tr></thead>
@@ -193,4 +195,4 @@
   </div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=27" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=28" defer></script>{% endblock %}
