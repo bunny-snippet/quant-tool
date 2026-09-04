@@ -41,7 +41,6 @@
     page: 1, pages: 1, pageSize: Number(elements.pageSize?.value || 10), timer: null, controller: null,
     projectId: byId('studyProjectScope') ? (new URLSearchParams(window.location.search).get('internal_id') || '') : '',
   };
-  const responsiveLayout = window.matchMedia('(max-width: 900px)');
   const statusTone = {
     initiated: 'initiate', redirected: 'initiate', '1': 'complete', '2': 'terminate',
     '3': 'quota', '4': 'quality', '7': 'terminate', '8': 'terminate', '9': 'quality',
@@ -463,7 +462,5 @@
     closeMultiSelects();
     closeFinalIdImport();
   });
-  if (responsiveLayout.addEventListener) responsiveLayout.addEventListener('change', renderAttempts);
-  else responsiveLayout.addListener(renderAttempts);
   loadAttempts();
 })();
