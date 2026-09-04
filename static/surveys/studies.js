@@ -351,7 +351,10 @@
   const endTimestamp = (attempt) => ['initiated', 'redirected'].includes(attempt.status) ? attempt.initiated_at : (attempt.callback_at || attempt.initiated_at);
   function timestampCell(value) { const stamp = formatIst(value, true); return `<div class="study-timestamp"><strong>${stamp.date}</strong><span>${stamp.time} IST</span></div>`; }
   function statusPill(attempt) {
-    const label = ['initiated', 'redirected'].includes(attempt.status) ? 'Initiated' : (attempt.status_label || attempt.status);
+    const clientDecision = attempt.final_status === 'accepted'
+      ? 'Client Accepted'
+      : attempt.final_status === 'rejected' ? 'Client Rejected' : '';
+    const label = clientDecision || (['initiated', 'redirected'].includes(attempt.status) ? 'Initiated' : (attempt.status_label || attempt.status));
     const reason = attempt.termination_reason || attempt.termination_category || '';
     const tone = attempt.final_status === 'accepted' ? 'complete' : attempt.final_status === 'rejected' ? 'terminate' : (statusTone[attempt.status] || 'neutral');
     return `<div class="attempt-outcome"><span class="attempt-status ${tone}"><i></i>${escapeHtml(label)}</span>${reason ? `<small class="attempt-reason" title="${escapeAttr(reason)}">${escapeHtml(reason)}</small>` : ''}</div>`;
