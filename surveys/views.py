@@ -17,6 +17,7 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse, StreamingHttpResponse
 from django.core.paginator import Paginator
 from django.shortcuts import render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -57,6 +58,7 @@ from .dashboard import (
     build_dashboard_payload,
     dashboard_attempts,
     dashboard_client_options,
+    dashboard_comparison_window,
     dashboard_financial_year_options,
     dashboard_range_window,
 )
@@ -591,27 +593,10 @@ def final_ids_import(request):
     })
 
 
-@function_permission_required("user_hits.view")
-def user_hits_page(request):
-    codes = effective_permission_codes(request.user)
-    return render(request, "surveys/user_hits.html", {
-        "active_page": "user-hits",
-        "hit_filters": _component_access(codes, USER_HIT_FILTER_PERMISSIONS),
-        "hit_columns": _permitted_columns(codes, USER_HIT_COLUMN_PERMISSIONS),
-        "hit_column_count": max(1, len(_permitted_columns(codes, USER_HIT_COLUMN_PERMISSIONS))),
-        "hit_cards": _permitted_columns(codes, USER_HIT_CARD_PERMISSIONS),
-        "can_change_hit_page_size": "user_hits.control.page_size" in codes,
-        "can_paginate_hits": "user_hits.control.pagination" in codes,
-        **user_hit_filter_options(request.user),
-    })
-
-
-@function_permission_required("user_dashboard.view")
-def user_dashboard_page(request):
+def _user_dashboard_page_context(user):
     local_today = timezone.localdate()
-    filter_options = user_dashboard_filter_options(request.user)
-    return render(request, "surveys/user_dashboard.html", {
-        "active_page": "user-dashboard",
+    filter_options = user_dashboard_filter_options(user)
+    return {
         "selected_month": local_today.month,
         "selected_year": local_today.year,
         "month_options": [
@@ -620,6 +605,40 @@ def user_dashboard_page(request):
         ],
         "year_options": range(local_today.year, max(2019, local_today.year - 5), -1),
         **filter_options,
+    }
+
+
+@function_permission_required("user_hits.view")
+def user_hits_page(request):
+    codes = effective_permission_codes(request.user)
+    hit_columns = _permitted_columns(codes, USER_HIT_COLUMN_PERMISSIONS)
+    can_view_user_dashboard = "user_dashboard.view" in codes
+    user_dashboard_panel = ""
+    if can_view_user_dashboard:
+        user_dashboard_panel = render_to_string(
+            "surveys/_user_dashboard_content.html",
+            _user_dashboard_page_context(request.user),
+            request=request,
+        )
+    return render(request, "surveys/user_hits.html", {
+        "active_page": "user-hits",
+        "hit_filters": _component_access(codes, USER_HIT_FILTER_PERMISSIONS),
+        "hit_columns": hit_columns,
+        "hit_column_count": max(1, len(hit_columns)),
+        "hit_cards": _permitted_columns(codes, USER_HIT_CARD_PERMISSIONS),
+        "can_change_hit_page_size": "user_hits.control.page_size" in codes,
+        "can_paginate_hits": "user_hits.control.pagination" in codes,
+        "can_view_user_dashboard": can_view_user_dashboard,
+        "user_dashboard_panel": user_dashboard_panel,
+        **user_hit_filter_options(request.user),
+    })
+
+
+@function_permission_required("user_dashboard.view")
+def user_dashboard_page(request):
+    return render(request, "surveys/user_dashboard.html", {
+        "active_page": "user-hits",
+        **_user_dashboard_page_context(request.user),
     })
 
 
@@ -3863,31 +3882,19 @@ class DashboardAPIView(APIView):
         summary="Get permission-scoped dashboard analytics",
         description=(
             "Returns permission-scoped KPI totals, incidence rate, immutable hit-time CPI revenue, "
-            "client completion share, performance, outcome/device breakdowns and top users."
+            "client completion share, performance, outcome/device breakdowns and top suppliers."
         ),
         parameters=[
             OpenApiParameter(
                 "range", OpenApiTypes.STR,
-                description="Global analytics window: 24h, 48h, 72h, current month, 3m, 6m or financial year. Defaults to 24h.",
-                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
+                description="Global analytics window for every card and graph: 24h, 48h, 7d, current month, 3m, 6m or financial year. Defaults to 24h.",
+                enum=["24h", "48h", "7d", "month", "3m", "6m", "fy"],
             ),
             OpenApiParameter("financial_year", OpenApiTypes.INT, description="Starting year when range=fy, for example 2026 for 2026-27."),
-            OpenApiParameter(
-                "traffic_range", OpenApiTypes.STR,
-                description="Independent Traffic graph window; does not change dashboard cards.",
-                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
-            ),
-            OpenApiParameter("traffic_financial_year", OpenApiTypes.INT, description="Starting year when traffic_range=fy."),
             OpenApiParameter(
                 "traffic_client", OpenApiTypes.INT,
                 description="Visible internal client ID for the Traffic graph only.",
             ),
-            OpenApiParameter(
-                "finance_range", OpenApiTypes.STR,
-                description="Independent Revenue/RPC graph window; does not change dashboard cards.",
-                enum=["24h", "48h", "72h", "month", "3m", "6m", "fy"],
-            ),
-            OpenApiParameter("finance_financial_year", OpenApiTypes.INT, description="Starting year when finance_range=fy."),
             OpenApiParameter(
                 "finance_client", OpenApiTypes.INT,
                 description="Visible internal client ID for the Revenue/RPC graph only.",
@@ -3897,13 +3904,13 @@ class DashboardAPIView(APIView):
     )
     def get(self, request):
         codes = effective_permission_codes(request.user)
-        if any(request.query_params.get(key) not in {None, ""} for key in (
-            "traffic_range", "traffic_financial_year", "traffic_client"
-        )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["traffic"] not in codes:
+        if request.query_params.get("traffic_client") not in {None, ""} and (
+            DASHBOARD_GRAPH_FILTER_PERMISSIONS["traffic"] not in codes
+        ):
             raise PermissionDenied("Your account cannot filter the Traffic dashboard graph.")
-        if any(request.query_params.get(key) not in {None, ""} for key in (
-            "finance_range", "finance_financial_year", "finance_client"
-        )) and DASHBOARD_GRAPH_FILTER_PERMISSIONS["finance"] not in codes:
+        if request.query_params.get("finance_client") not in {None, ""} and (
+            DASHBOARD_GRAPH_FILTER_PERMISSIONS["finance"] not in codes
+        ):
             raise PermissionDenied("Your account cannot filter the Finance dashboard graph.")
         def load_dashboard():
             # Anchor all three windows to one instant. Equal range selections
@@ -3941,12 +3948,6 @@ class DashboardAPIView(APIView):
                 )
 
             range_window = selected_window("range", "financial_year")
-            traffic_window = selected_window(
-                "traffic_range", "traffic_financial_year", fallback=range_window
-            )
-            finance_window = selected_window(
-                "finance_range", "finance_financial_year", fallback=range_window
-            )
             client_options = dashboard_client_options(visible_queryset)
             visible_client_ids = {item["id"] for item in client_options}
 
@@ -3972,13 +3973,13 @@ class DashboardAPIView(APIView):
                 return scoped.filter(survey__client_id=client_id) if client_id else scoped
 
             queryset = graph_queryset(range_window)
-            comparison_duration = range_window["end"] - range_window["start"]
+            comparison_window = dashboard_comparison_window(range_window)
             comparison_queryset = visible_queryset.filter(
-                initiated_at__gte=range_window["start"] - comparison_duration,
-                initiated_at__lt=range_window["start"],
+                initiated_at__gte=comparison_window["start"],
+                initiated_at__lt=comparison_window["end"],
             )
-            traffic_queryset = graph_queryset(traffic_window, traffic_client_id)
-            finance_queryset = graph_queryset(finance_window, finance_client_id)
+            traffic_queryset = graph_queryset(range_window, traffic_client_id)
+            finance_queryset = graph_queryset(range_window, finance_client_id)
             return build_dashboard_payload(
                 queryset,
                 request.user,
@@ -3986,13 +3987,14 @@ class DashboardAPIView(APIView):
                 _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
                 range_window,
                 traffic_queryset=traffic_queryset,
-                traffic_range_window=traffic_window,
+                traffic_range_window=range_window,
                 traffic_client_id=traffic_client_id,
                 finance_queryset=finance_queryset,
-                finance_range_window=finance_window,
+                finance_range_window=range_window,
                 finance_client_id=finance_client_id,
                 client_options=client_options,
                 comparison_queryset=comparison_queryset,
+                comparison_label=comparison_window["label"],
                 financial_years=financial_years,
             )
 

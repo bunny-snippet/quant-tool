@@ -18,6 +18,7 @@ from rest_framework.test import APIClient
 from accounts.models import AccessFunction, EmployeeProfile, Role, UserFunctionOverride
 from vendors.models import Client, ClientIntegration, OrganizationUnit
 
+from .dashboard import dashboard_comparison_window, dashboard_range_window
 from .integrations import InnovateMRClient, InnovateMRNotFound, PagedSurveyResult
 from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
 from .services import (
@@ -2112,12 +2113,12 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(page, 'id="financeChart"')
         self.assertContains(page, 'id="trafficGraphClient"')
         self.assertContains(page, 'id="financeGraphClient"')
-        self.assertContains(page, 'aria-label="Traffic graph time range"')
-        self.assertContains(page, 'aria-label="Finance graph time range"')
+        self.assertNotContains(page, 'aria-label="Traffic graph time range"')
+        self.assertNotContains(page, 'aria-label="Finance graph time range"')
         self.assertContains(page, 'id="clientShareChart"')
         self.assertContains(page, 'data-dashboard-range="24h"')
         self.assertContains(page, 'data-dashboard-range="48h"')
-        self.assertContains(page, 'data-dashboard-range="72h"')
+        self.assertContains(page, 'data-dashboard-range="7d"')
         self.assertContains(page, 'data-dashboard-range="month"')
         self.assertContains(page, 'data-dashboard-range="3m"')
         self.assertContains(page, 'data-dashboard-range="6m"')
@@ -2126,7 +2127,11 @@ class DashboardAnalyticsTests(TestCase):
         self.assertNotContains(page, 'data-dashboard-filter="branch"')
         self.assertNotContains(page, "Recent activity")
         self.assertContains(page, 'id="dashboardIR"')
-        self.assertContains(page, "Historical hit-time CPI")
+        self.assertNotContains(page, 'id="dashboardActiveUsers"')
+        self.assertContains(page, "<small>RPC</small>", html=True)
+        self.assertNotContains(page, "Historical hit-time CPI")
+        self.assertNotContains(page, 'id="trafficChartInsights"')
+        self.assertNotContains(page, 'id="financeChartInsights"')
 
     def test_dashboard_api_returns_overall_kpis_client_share_and_time_series(self):
         response = self.api.get(reverse("dashboard-api"))
@@ -2136,6 +2141,7 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["range"]["bucket_label"], "2-hour intervals")
         self.assertEqual(response.data["summary"]["hits"], 2)
         self.assertEqual(response.data["summary"]["completes"], 1)
+        self.assertEqual(response.data["summary"]["last_hour_completes"], 1)
         self.assertEqual(response.data["summary"]["conversion_rate"], 50.0)
         self.assertEqual(response.data["summary"]["incidence_rate"], 50.0)
         self.assertEqual(response.data["summary"]["active_users"], 2)
@@ -2158,8 +2164,9 @@ class DashboardAnalyticsTests(TestCase):
             {item["name"] for item in response.data["graph_clients"]},
             {"Client Alpha", "Client Beta"},
         )
-        self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
-        self.assertEqual(response.data["top_users"][0]["contribution_percent"], 100.0)
+        self.assertEqual(response.data["top_suppliers"][0]["name"], "Direct traffic")
+        self.assertEqual(response.data["top_suppliers"][0]["branch_name"], "Unassigned branch")
+        self.assertEqual(response.data["top_suppliers"][0]["contribution_percent"], 100.0)
         self.assertIsNotNone(response.data["comparison"])
         self.assertTrue(response.data["financial_years"])
         self.assertNotIn("recent_activity", response.data)
@@ -2171,7 +2178,7 @@ class DashboardAnalyticsTests(TestCase):
         expected = {
             "24h": (12, "2-hour intervals"),
             "48h": (12, "4-hour intervals"),
-            "72h": (12, "6-hour intervals"),
+            "7d": (7, "Daily intervals"),
             "month": (local_now.day, "Daily intervals"),
             "3m": (13, "Weekly intervals"),
             "6m": (6, "Monthly intervals"),
@@ -2216,7 +2223,7 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(quarterly.data["summary"]["completes"], 2)
         self.assertEqual(str(quarterly.data["summary"]["revenue"]), "14.00")
 
-    def test_graph_filters_change_only_their_graph_not_dashboard_cards(self):
+    def test_graph_client_filters_use_the_global_range_without_changing_cards(self):
         response = self.api.get(reverse("dashboard-api"), {
             "range": "24h",
             "traffic_range": "48h",
@@ -2228,16 +2235,53 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["range"]["key"], "24h")
         self.assertEqual(response.data["summary"]["hits"], 2)
-        self.assertEqual(response.data["traffic_chart"]["range"]["key"], "48h")
+        self.assertEqual(response.data["traffic_chart"]["range"]["key"], "24h")
         self.assertEqual(response.data["traffic_chart"]["client_id"], self.client_b.pk)
         self.assertEqual(
             sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 1
         )
-        self.assertEqual(response.data["finance_chart"]["range"]["key"], "6m")
+        self.assertEqual(response.data["finance_chart"]["range"]["key"], "24h")
         self.assertEqual(response.data["finance_chart"]["client_id"], self.client_a.pk)
         self.assertEqual(
             sum(point["completes"] for point in response.data["finance_chart"]["points"]), 1
         )
+
+    def test_current_month_uses_previous_month_to_date_comparison(self):
+        response = self.api.get(reverse("dashboard-api"), {"range": "month"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["comparison"]["label"], "Previous month to date")
+
+        fixed_now = datetime(2026, 9, 5, 13, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
+        comparison = dashboard_comparison_window(
+            dashboard_range_window("month", now=fixed_now)
+        )
+        self.assertEqual(timezone.localtime(comparison["start"]).date().isoformat(), "2026-08-01")
+        self.assertEqual(timezone.localtime(comparison["end"]).date().isoformat(), "2026-08-05")
+
+    def test_top_supplier_uses_supplier_company_and_employee_branch(self):
+        branch = OrganizationUnit.objects.create(
+            workspace_owner=self.owner,
+            unit_type=OrganizationUnit.UnitType.BRANCH,
+            name="Noida",
+            code="dashboard-noida",
+        )
+        employee_profile = self.employee.employee_profile
+        employee_profile.organization_unit = branch
+        employee_profile.save(update_fields=["organization_unit"])
+        supplier = get_user_model().objects.create_user(username="dashboard-supplier")
+        supplier_profile = supplier.employee_profile
+        supplier_profile.account_type = EmployeeProfile.AccountType.EXTERNAL_VENDOR
+        supplier_profile.company_name = "Supplier One"
+        supplier_profile.save(update_fields=["account_type", "company_name"])
+        self.complete.vendor = supplier
+        self.complete.save(update_fields=["vendor"])
+
+        response = self.api.get(reverse("dashboard-api"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["top_suppliers"][0]["name"], "Supplier One")
+        self.assertEqual(response.data["top_suppliers"][0]["branch_name"], "Noida")
 
     def test_dashboard_is_unfiltered_for_owner_and_rejects_employee(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})

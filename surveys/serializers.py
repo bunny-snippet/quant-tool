@@ -711,6 +711,7 @@ class UserHitsResponseSerializer(serializers.Serializer):
 class DashboardSummarySerializer(serializers.Serializer):
     hits = serializers.IntegerField(min_value=0, allow_null=True)
     completes = serializers.IntegerField(min_value=0, allow_null=True)
+    last_hour_completes = serializers.IntegerField(min_value=0, allow_null=True)
     conversion_rate = serializers.FloatField(min_value=0, allow_null=True)
     incidence_rate = serializers.FloatField(min_value=0, allow_null=True)
     active_users = serializers.IntegerField(min_value=0, allow_null=True)
@@ -805,9 +806,10 @@ class DashboardDevicePerformanceSerializer(serializers.Serializer):
     unclassified = DashboardDeviceMetricSerializer()
 
 
-class DashboardTopUserSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField()
+class DashboardTopSupplierSerializer(serializers.Serializer):
+    supplier_id = serializers.IntegerField(allow_null=True)
     name = serializers.CharField()
+    branch_name = serializers.CharField()
     hits = serializers.IntegerField(min_value=0)
     completes = serializers.IntegerField(min_value=0)
     conversion_rate = serializers.FloatField(min_value=0)
@@ -848,7 +850,7 @@ class DashboardResponseSerializer(serializers.Serializer):
     status_breakdown = DashboardStatusBreakdownSerializer(allow_null=True)
     device_breakdown = DashboardDeviceBreakdownSerializer(allow_null=True)
     device_performance = DashboardDevicePerformanceSerializer(allow_null=True)
-    top_users = DashboardTopUserSerializer(many=True, allow_null=True)
+    top_suppliers = DashboardTopSupplierSerializer(many=True, allow_null=True)
     generated_at = serializers.DateTimeField()
 
 

@@ -1,5 +1,32 @@
 /* Shared authenticated-shell behavior: responsive sidebar and mobile dismissal. */
 
+/* Persistent light/dark appearance for every page using the shared shell. */
+(() => {
+  const root = document.documentElement;
+  const toggle = document.getElementById('themeToggle');
+  if (!toggle) return;
+
+  const syncToggle = () => {
+    const isDark = root.dataset.theme === 'dark';
+    toggle.setAttribute('aria-pressed', String(isDark));
+    toggle.setAttribute('aria-label', isDark ? 'Switch to light theme' : 'Switch to dark theme');
+    toggle.title = isDark ? 'Light theme' : 'Dark theme';
+  };
+
+  toggle.addEventListener('click', () => {
+    const nextTheme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = nextTheme;
+    try {
+      window.localStorage.setItem('exchange-hub-theme', nextTheme);
+    } catch (_error) {
+      // The theme still applies for this page if browser storage is unavailable.
+    }
+    syncToggle();
+  });
+
+  syncToggle();
+})();
+
 (() => {
   const shell = document.querySelector('.app-shell');
   const menu = document.getElementById('menuButton');

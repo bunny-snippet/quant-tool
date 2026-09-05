@@ -2,18 +2,12 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
-  const ranges = new Set(['24h', '48h', '72h', 'month', '3m', '6m', 'fy']);
+  const ranges = new Set(['24h', '48h', '7d', 'month', '3m', '6m', 'fy']);
   const initialQuery = new URLSearchParams(location.search);
   const initialMainRange = ranges.has(initialQuery.get('range')) ? initialQuery.get('range') : '24h';
   const state = {
     range: initialMainRange,
     financialYear: initialQuery.get('financial_year') || '',
-    trafficRange: ranges.has(initialQuery.get('traffic_range'))
-      ? initialQuery.get('traffic_range') : initialMainRange,
-    trafficFinancialYear: initialQuery.get('traffic_financial_year') || initialQuery.get('financial_year') || '',
-    financeRange: ranges.has(initialQuery.get('finance_range'))
-      ? initialQuery.get('finance_range') : initialMainRange,
-    financeFinancialYear: initialQuery.get('finance_financial_year') || initialQuery.get('financial_year') || '',
     trafficClient: initialQuery.get('traffic_client') || '',
     financeClient: initialQuery.get('finance_client') || '',
     controller: null,
@@ -75,17 +69,16 @@
     animateNumber(byId('dashboardAverageCpi'), summary.average_cpi, (value) => formatCurrency(value, currency));
     animateNumber(byId('dashboardRpc'), summary.rpc, (value) => formatCurrency(value, currency));
     animateNumber(byId('dashboardAverageLoi'), summary.average_loi_seconds, formatLoi);
-    animateNumber(byId('dashboardActiveUsers'), summary.active_users);
     animateNumber(byId('dashboardIR'), summary.incidence_rate, (value) => `${value.toFixed(1)}%`);
     document.querySelectorAll('[data-dashboard-trend]').forEach((element) => {
       const delta = comparison?.deltas?.[element.dataset.dashboardTrend];
       if (delta === null || delta === undefined) {
-        element.textContent = 'No prior-period baseline';
+        element.textContent = '—';
         element.className = 'bi-kpi-trend neutral';
         return;
       }
       const numeric = Number(delta);
-      element.textContent = `${numeric > 0 ? '↑' : numeric < 0 ? '↓' : '→'} ${Math.abs(numeric).toFixed(1)}% vs prior`;
+      element.textContent = `${numeric > 0 ? '↑' : numeric < 0 ? '↓' : '→'} ${Math.abs(numeric).toFixed(1)}%`;
       element.className = `bi-kpi-trend ${numeric > 0 ? 'up' : numeric < 0 ? 'down' : 'neutral'}`;
     });
     document.querySelectorAll('.bi-kpi').forEach((card, index) => {
@@ -124,11 +117,6 @@
     });
   }
 
-  function renderChartInsights(hostId, items) {
-    const host = byId(hostId); if (!host) return;
-    host.innerHTML = items.map((item) => `<span><small>${escapeHtml(item.label)}</small><strong>${escapeHtml(item.value)}</strong></span>`).join('');
-  }
-
   function axisGrid({ width, height, left, right, top, bottom, maximum, formatter = number }) {
     const plotHeight = height - top - bottom;
     return [0, .25, .5, .75, 1].map((ratio) => {
@@ -160,13 +148,6 @@
     const totalHits = rows.reduce((sum, row) => sum + Number(row.hits || 0), 0);
     const totalCompletes = rows.reduce((sum, row) => sum + Number(row.completes || 0), 0);
     const weightedConversion = totalHits ? totalCompletes / totalHits * 100 : 0;
-    const peak = rows.reduce((best, row) => Number(row.hits || 0) > Number(best.hits || 0) ? row : best, rows[0]);
-    renderChartInsights('trafficChartInsights', [
-      { label: 'Period entrants', value: number(totalHits) },
-      { label: 'Period completes', value: number(totalCompletes) },
-      { label: 'Weighted conversion', value: `${weightedConversion.toFixed(1)}%` },
-      { label: 'Peak traffic', value: `${peak.short_label} · ${number(peak.hits)}` },
-    ]);
     const width = 860; const height = 300; const left = 52; const right = 48; const top = 24; const bottom = 42;
     const plotWidth = width - left - right; const plotHeight = height - top - bottom;
     const maximum = Math.max(1, ...rows.flatMap((row) => [Number(row.hits), Number(row.completes)]));
@@ -197,17 +178,6 @@
     const lineKey = rows.some((row) => row.rpc != null) ? 'rpc' : 'average_cpi';
     const lineLabel = lineKey === 'rpc' ? 'RPC' : 'Average CPI';
     const hasLine = rows.some((row) => row[lineKey] != null);
-    const totalRevenue = rows.reduce((sum, row) => sum + Number(row.revenue || 0), 0);
-    const totalHits = rows.reduce((sum, row) => sum + Number(row.hits || 0), 0);
-    const totalCompletes = rows.reduce((sum, row) => sum + Number(row.completes || 0), 0);
-    const blendedRpc = totalHits ? totalRevenue / totalHits : 0;
-    const peak = rows.reduce((best, row) => Number(row.revenue || 0) > Number(best.revenue || 0) ? row : best, rows[0]);
-    renderChartInsights('financeChartInsights', [
-      { label: 'Period revenue', value: formatCurrency(totalRevenue, currency) },
-      { label: 'Blended RPC', value: formatCurrency(blendedRpc, currency) },
-      { label: 'Paid completes', value: number(totalCompletes) },
-      { label: 'Peak revenue', value: `${peak.short_label} · ${formatCurrency(peak.revenue, currency)}` },
-    ]);
     byId('financeBarLegend')?.toggleAttribute('hidden', !hasRevenue);
     const lineLegend = byId('financeLineLegend');
     if (lineLegend) {
@@ -285,42 +255,34 @@
     host.innerHTML = `<div class="bi-device-ring" style="--segments:${segments.join(',')}"><span><b>${number(total)}</b><small>Completes</small></span></div><div class="bi-device-list">${rows.map(([key, label, color], index) => { const metric = performance?.[key] || {}; return `<div style="--index:${index}"><i style="--series:${color}"></i><span>${label}<small>${number(metric.hits)} entrants</small></span><strong>${number(data[key])}</strong><small>${Number(metric.conversion_rate || 0).toFixed(1)}% CVR</small></div>`; }).join('')}</div>`;
   }
 
-  function renderTopUsers(rows) {
-    const host = byId('dashboardTopUsers'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No user activity matches this range.</div>'; return; }
+  function renderTopSuppliers(rows) {
+    const host = byId('dashboardTopSuppliers'); if (!host) return;
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No supplier activity matches this range.</div>'; return; }
     const maximum = Math.max(1, ...rows.map((row) => Number(row.completes || 0)));
-    host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b><small>${number(row.hits)} hits · ${Number(row.conversion_rate || 0).toFixed(1)}% conversion · ${Number(row.contribution_percent || 0).toFixed(1)}% share</small><span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
+    host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.branch_name || 'Unassigned branch')}</small><span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
   }
 
   function populateFinancialYears(data) {
     const years = data.financial_years || [];
     const fallback = String(years[0]?.start_year || '');
     if (!state.financialYear || !years.some((year) => String(year.start_year) === String(state.financialYear))) state.financialYear = fallback;
-    if (!state.trafficFinancialYear || !years.some((year) => String(year.start_year) === String(state.trafficFinancialYear))) state.trafficFinancialYear = state.financialYear;
-    if (!state.financeFinancialYear || !years.some((year) => String(year.start_year) === String(state.financeFinancialYear))) state.financeFinancialYear = state.financialYear;
-    [['dashboardFinancialYear', 'financialYear'], ['trafficGraphFinancialYear', 'trafficFinancialYear'], ['financeGraphFinancialYear', 'financeFinancialYear']].forEach(([id, key]) => {
-      const select = byId(id); if (!select) return;
-      select.innerHTML = `<option value="">Financial year</option>${years.map((year) => `<option value="${year.start_year}">${escapeHtml(year.label)}</option>`).join('')}`;
-      select.value = String(state[key] || '');
-      select.closest('label')?.classList.toggle('active', (id === 'dashboardFinancialYear' ? state.range : id.startsWith('traffic') ? state.trafficRange : state.financeRange) === 'fy');
-    });
+    const select = byId('dashboardFinancialYear'); if (!select) return;
+    select.innerHTML = `<option value="">Financial year</option>${years.map((year) => `<option value="${year.start_year}">${escapeHtml(year.label)}</option>`).join('')}`;
+    select.value = String(state.financialYear || '');
+    select.closest('label')?.classList.toggle('active', state.range === 'fy');
   }
 
   function renderOperationalInsights(data) {
     const host = byId('dashboardInsightStrip'); if (!host) return;
     const summary = data.summary || {};
     const points = data.traffic_chart?.points || [];
-    const clients = data.client_distribution || [];
     const durationHours = Math.max(1, (new Date(data.range.end) - new Date(data.range.start)) / 3600000);
     const hourlyCompletes = Number(summary.completes || 0) / durationHours;
+    const lastHourCompletes = Number(summary.last_hour_completes || 0);
     const peak = points.length ? points.reduce((best, row) => Number(row.completes || 0) > Number(best.completes || 0) ? row : best, points[0]) : null;
-    const leader = clients[0];
-    const conversion = Number(summary.conversion_rate || 0);
     const cards = [
-      ['Completion velocity', `${hourlyCompletes < 1 ? hourlyCompletes.toFixed(2) : hourlyCompletes.toFixed(1)} / hr`, `${number(summary.completes)} across ${data.range.label}`],
+      ['Average completes', `${hourlyCompletes < 1 ? hourlyCompletes.toFixed(2) : hourlyCompletes.toFixed(1)} / hr`, `Last hour · ${number(lastHourCompletes)} completes`],
       ['Peak completion window', peak ? peak.short_label : 'No activity', peak ? `${number(peak.completes)} completes · ${Number(peak.conversion_rate || 0).toFixed(1)}% CVR` : 'No selected-range traffic'],
-      ['Portfolio leader', leader?.name || 'No completed client', leader ? `${Number(leader.share_percent || 0).toFixed(1)}% of completes · ${Number(leader.conversion_rate || 0).toFixed(1)}% CVR` : 'No client contribution yet'],
-      ['Efficiency signal', `${conversion.toFixed(1)}% conversion`, conversion >= 20 ? 'Strong selected-range yield' : conversion >= 10 ? 'Moderate selected-range yield' : 'Conversion needs attention'],
     ];
     host.innerHTML = cards.map(([label, value, detail], index) => `<article style="--index:${index}"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong><span>${escapeHtml(detail)}</span></article>`).join('');
   }
@@ -334,19 +296,15 @@
       select.innerHTML = `<option value="">All clients</option>${clients.map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}</option>`).join('')}`;
       select.value = selected;
     });
-    document.querySelectorAll('[data-graph-range]').forEach((button) => {
-      const graph = button.dataset.graph;
-      const active = button.dataset.graphRange === state[`${graph}Range`];
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
   }
+
+  const dashboardUpdatedFormatter = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
 
   function render(data) {
     state.data = data;
     if (data.range?.financial_year) state.financialYear = String(data.range.financial_year);
-    if (data.traffic_chart?.range?.financial_year) state.trafficFinancialYear = String(data.traffic_chart.range.financial_year);
-    if (data.finance_chart?.range?.financial_year) state.financeFinancialYear = String(data.finance_chart.range.financial_year);
     updateSummary(data.summary || {}, data.comparison);
     const caption = byId('dashboardRangeCaption'); if (caption) caption.textContent = data.range.label;
     if (byId('trafficBucketLabel') && data.traffic_chart) byId('trafficBucketLabel').textContent = data.traffic_chart.range.bucket_label;
@@ -358,9 +316,9 @@
     renderClients(data.client_distribution);
     renderStatus(data.status_breakdown);
     renderDevices(data.device_breakdown, data.device_performance);
-    renderTopUsers(data.top_users);
+    renderTopSuppliers(data.top_suppliers);
     const updated = byId('dashboardUpdatedAt');
-    if (updated) updated.textContent = `${new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(data.generated_at))} IST`;
+    if (updated) updated.textContent = `${dashboardUpdatedFormatter.format(new Date(data.generated_at))} IST`;
   }
 
   function showError(message) {
@@ -378,13 +336,9 @@
       const query = new URLSearchParams({ range: state.range });
       if (state.range === 'fy' && state.financialYear) query.set('financial_year', state.financialYear);
       if (document.querySelector('[data-graph-toolbar="traffic"]')) {
-        query.set('traffic_range', state.trafficRange);
-        if (state.trafficRange === 'fy' && state.trafficFinancialYear) query.set('traffic_financial_year', state.trafficFinancialYear);
         if (state.trafficClient) query.set('traffic_client', state.trafficClient);
       }
       if (document.querySelector('[data-graph-toolbar="finance"]')) {
-        query.set('finance_range', state.financeRange);
-        if (state.financeRange === 'fy' && state.financeFinancialYear) query.set('finance_financial_year', state.financeFinancialYear);
         if (state.financeClient) query.set('finance_client', state.financeClient);
       }
       const response = await fetch(`/api/v1/dashboard/?${query.toString()}`, {
@@ -407,38 +361,19 @@
     button.addEventListener('click', () => {
       if (button.dataset.dashboardRange === state.range) return;
       state.range = button.dataset.dashboardRange;
-      state.trafficRange = state.range;
-      state.financeRange = state.range;
       document.querySelectorAll('[data-dashboard-range]').forEach((item) => {
         const active = item === button;
         item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));
       });
       const url = new URL(location.href);
       url.searchParams.set('range', state.range);
-      url.searchParams.set('traffic_range', state.range);
-      url.searchParams.set('finance_range', state.range);
+      url.searchParams.delete('traffic_range');
+      url.searchParams.delete('finance_range');
+      url.searchParams.delete('traffic_financial_year');
+      url.searchParams.delete('finance_financial_year');
       if (state.range !== 'fy') {
         url.searchParams.delete('financial_year');
-        url.searchParams.delete('traffic_financial_year');
-        url.searchParams.delete('finance_financial_year');
       }
-      history.replaceState({}, '', url);
-      loadDashboard();
-    });
-  });
-
-  document.querySelectorAll('[data-graph-range]').forEach((button) => {
-    const graph = button.dataset.graph;
-    const selected = button.dataset.graphRange === state[`${graph}Range`];
-    button.classList.toggle('active', selected);
-    button.setAttribute('aria-pressed', String(selected));
-    button.addEventListener('click', () => {
-      const nextRange = button.dataset.graphRange;
-      if (nextRange === state[`${graph}Range`]) return;
-      state[`${graph}Range`] = nextRange;
-      const url = new URL(location.href);
-      url.searchParams.set(`${graph}_range`, nextRange);
-      if (nextRange !== 'fy') url.searchParams.delete(`${graph}_financial_year`);
       history.replaceState({}, '', url);
       loadDashboard();
     });
@@ -448,27 +383,12 @@
     if (!event.target.value) return;
     state.range = 'fy';
     state.financialYear = event.target.value;
-    state.trafficRange = 'fy'; state.financeRange = 'fy';
-    state.trafficFinancialYear = event.target.value; state.financeFinancialYear = event.target.value;
     const url = new URL(location.href);
     url.searchParams.set('range', 'fy'); url.searchParams.set('financial_year', event.target.value);
-    url.searchParams.set('traffic_range', 'fy'); url.searchParams.set('traffic_financial_year', event.target.value);
-    url.searchParams.set('finance_range', 'fy'); url.searchParams.set('finance_financial_year', event.target.value);
+    url.searchParams.delete('traffic_range'); url.searchParams.delete('traffic_financial_year');
+    url.searchParams.delete('finance_range'); url.searchParams.delete('finance_financial_year');
     history.replaceState({}, '', url);
     loadDashboard();
-  });
-
-  [['traffic', 'trafficGraphFinancialYear'], ['finance', 'financeGraphFinancialYear']].forEach(([graph, id]) => {
-    byId(id)?.addEventListener('change', (event) => {
-      if (!event.target.value) return;
-      state[`${graph}Range`] = 'fy';
-      state[`${graph}FinancialYear`] = event.target.value;
-      const url = new URL(location.href);
-      url.searchParams.set(`${graph}_range`, 'fy');
-      url.searchParams.set(`${graph}_financial_year`, event.target.value);
-      history.replaceState({}, '', url);
-      loadDashboard();
-    });
   });
 
   [['traffic', 'trafficGraphClient'], ['finance', 'financeGraphClient']].forEach(([graph, id]) => {

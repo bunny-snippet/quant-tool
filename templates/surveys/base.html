@@ -6,12 +6,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Survey inventory workspace">
   <title>{% block title %}Survey Workspace{% endblock %}</title>
+  <script>
+    (() => {
+      try {
+        const savedTheme = window.localStorage.getItem('exchange-hub-theme');
+        document.documentElement.dataset.theme = savedTheme === 'dark' ? 'dark' : 'light';
+      } catch (_error) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   {% include 'includes/favicon_links.html' %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=44">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=46">
   {% block extra_head %}{% endblock %}
+  <link rel="stylesheet" href="{% static 'surveys/theme.css' %}?v=5">
 </head>
 <body class="page-{{ active_page|default:'workspace' }}">
   <div class="app-shell" data-sidebar="open">
@@ -24,17 +35,17 @@
         {% if 'dashboard.view' in access_codes %}<a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
           <span class="nav-icon">⌁</span><span>Dashboard</span>
         </a>{% endif %}
-        {% if 'projects.view' in access_codes %}<a class="nav-item {% if active_page == 'projects' %}active{% endif %}" href="{% url 'projects' %}">
-          <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret">⌃</span>
+        {% if 'projects.view' in access_codes %}<a class="nav-item {% if active_page == 'projects' %}active{% endif %}" href="{% url 'projects' %}" aria-expanded="{% if active_page == 'projects' %}true{% else %}false{% endif %}" aria-controls="projectsNavChildren">
+          <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret" aria-hidden="true">⌄</span>
         </a>
-        {% if active_page == 'projects' %}<span class="nav-child"><i></i>All surveys</span>{% endif %}{% endif %}
+        {% if active_page == 'projects' %}<span class="nav-child" id="projectsNavChildren"><i></i>All surveys</span>{% endif %}{% endif %}
         {% if 'attempts.view' in access_codes %}<a class="nav-item {% if active_page == 'studies' %}active{% endif %}" href="{% url 'traffic-reports' %}">
           <span class="nav-icon">◎</span><span>Traffic Reports</span>
         </a>{% endif %}
-        {% if 'termination_reasons.view' in access_codes %}<a class="nav-item {% if active_page == 'termination-reasons' %}active{% endif %}" href="{% url 'termination-reasons' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg></span><span>Term Reports</span><span class="nav-caret">⌃</span>
+        {% if 'termination_reasons.view' in access_codes %}<a class="nav-item {% if active_page == 'termination-reasons' %}active{% endif %}" href="{% url 'termination-reasons' %}" aria-expanded="{% if active_page == 'termination-reasons' %}true{% else %}false{% endif %}" aria-controls="termReportsNavChildren">
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 19h18.4L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg></span><span>Term Reports</span><span class="nav-caret" aria-hidden="true">⌄</span>
         </a>
-        {% if active_page == 'termination-reasons' %}<div class="nav-submenu" aria-label="Term reports by provider">
+        {% if active_page == 'termination-reasons' %}<div class="nav-submenu" id="termReportsNavChildren" aria-label="Term reports by provider">
           {% if reason_filters.provider and term_providers %}<span class="nav-submenu-label">Providers</span>{% for provider in term_providers %}<a class="nav-child-link {% if provider.value in selected.provider %}active{% endif %}" href="{% url 'termination-reasons' %}?provider={{ provider.value|urlencode }}"><i></i>{{ provider.name }}</a>{% endfor %}{% endif %}
         </div>{% endif %}{% endif %}
         {% if 'toluna_notifications.view' in access_codes %}<a class="nav-item {% if active_page == 'toluna-notifications' %}active{% endif %}" href="{% url 'toluna-notifications' %}">
@@ -44,10 +55,7 @@
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Panelist Data</span>
         </a>{% endif %}
         {% if 'user_hits.view' in access_codes %}<a class="nav-item {% if active_page == 'user-hits' %}active{% endif %}" href="{% url 'user-hits' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>User Hits</span>
-        </a>{% endif %}
-        {% if 'user_dashboard.view' in access_codes %}<a class="nav-item {% if active_page == 'user-dashboard' %}active{% endif %}" href="{% url 'user-dashboard' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20v-7h4v7M10 20V8h4v12m2 0V4h4v16"/><path d="M3 20h18"/></svg></span><span>User Dashboard</span>
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>User Activity</span>
         </a>{% endif %}
         {% if 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}
         <a class="nav-item {% if active_page == 'vendors' %}active{% endif %}" href="{% url 'vendor-management' %}">
@@ -62,7 +70,7 @@
         </a>{% endif %}
         {% if 'access.manage' in access_codes or 'users.view' in access_codes or 'users.create' in access_codes or 'roles.view' in access_codes or 'roles.create' in access_codes or 'respondents.create' in access_codes %}
         <a class="nav-item {% if active_page == 'access-control' %}active{% endif %}" href="{% url 'access-control' %}">
-          <span class="nav-icon">âš™</span><span>Access control</span>
+          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .72V21h-4v-.88a1.7 1.7 0 0 0-1-.72 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.72-1H3v-4h.88a1.7 1.7 0 0 0 .72-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.72V3h4v.88a1.7 1.7 0 0 0 1 .72 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .72 1H21v4h-.88a1.7 1.7 0 0 0-.72 1Z"/></svg></span><span>Access control</span>
         </a>
         {% endif %}
       </nav>
@@ -72,6 +80,10 @@
           <span>{{ request.user.username|first|upper }}</span>
           <div><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{% if current_employee_profile.role %}{{ current_employee_profile.role.name }}{% else %}Employee{% endif %}</small></div>
           <div class="workspace-actions">
+            <button class="sidebar-theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark theme" aria-pressed="false" title="Dark theme">
+              <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.1A8.5 8.5 0 0 1 8.9 4a8.5 8.5 0 1 0 11.1 11.1Z"/></svg>
+              <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            </button>
             {% if 'api_docs.view' in access_codes %}<a class="sidebar-docs" href="{% url 'swagger-ui' %}" aria-label="API documentation" title="API docs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z"/><path d="M8 20a3 3 0 0 1 0-6h11M9 8h6"/></svg></a>{% endif %}
             <form method="post" action="{% url 'logout' %}" class="sidebar-logout">{% csrf_token %}<button type="submit" aria-label="Logout" title="Logout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg></button></form>
           </div>
@@ -87,7 +99,7 @@
     </main>
   </div>
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-  <script src="{% static 'surveys/app.js' %}?v=9" defer></script>
+  <script src="{% static 'surveys/app.js' %}?v=10" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

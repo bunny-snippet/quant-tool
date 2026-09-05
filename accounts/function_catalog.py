@@ -31,7 +31,7 @@ FUNCTION_CATALOG = (
     ("dashboard.chart.client_share", "Show Client contribution chart", "Dashboard - Charts", "Display each client's share of filtered completes.", SUPER_ADMIN_ROLES),
     ("dashboard.chart.status", "Show Outcome mix chart", "Dashboard - Charts", "Display initiated, complete, terminated, quota and security outcomes.", SUPER_ADMIN_ROLES),
     ("dashboard.chart.device", "Show Device performance chart", "Dashboard - Charts", "Display completed outcomes by Desktop, Mobile and Tablet.", SUPER_ADMIN_ROLES),
-    ("dashboard.chart.top_users", "Show Top performers chart", "Dashboard - Charts", "Display visible users ranked by filtered completes.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.top_users", "Show Top suppliers chart", "Dashboard - Charts", "Display visible suppliers and their branches ranked by filtered completes.", SUPER_ADMIN_ROLES),
     ("dashboard.graph.traffic_filters", "Filter Traffic dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Entrants, Completes and Conversion graph.", SUPER_ADMIN_ROLES),
     ("dashboard.graph.finance_filters", "Filter Revenue dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Revenue and RPC graph.", SUPER_ADMIN_ROLES),
 

@@ -1,0 +1,101 @@
+{{ hit_columns|json_script:"hitColumnAccess" }}
+<section class="page-intro user-hits-intro">
+  <div>
+    <p class="eyebrow">Team performance</p>
+    <h1>User Hits</h1>
+    <p>Date-wise survey traffic and completes, split by respondent device.</p>
+  </div>
+</section>
+
+{% if hit_cards %}<section class="hit-overview" aria-label="Filtered user hit totals">
+  {% if 'total_hits' in hit_cards %}<article><span class="overview-icon hits" aria-hidden="true">↗</span><div><small>Total hits</small><strong id="totalHitCount">—</strong><em id="hitDayCount">Across selected dates</em></div></article>{% endif %}
+  {% if 'completes' in hit_cards %}<article><span class="overview-icon completes" aria-hidden="true">✓</span><div><small>Completes</small><strong id="totalCompleteCount">—</strong><em>Successful survey outcomes</em></div></article>{% endif %}
+  {% if 'conversion' in hit_cards %}<article><span class="overview-icon conversion" aria-hidden="true">%</span><div><small>Conversion</small><strong id="conversionRate">—</strong><em>Completes divided by hits</em></div></article>{% endif %}
+  {% if 'active_users' in hit_cards %}<article><span class="overview-icon users" aria-hidden="true">◎</span><div><small>Active users</small><strong id="activeUserCount">—</strong><em>Users matching filters</em></div></article>{% endif %}
+  {% if 'ir' in hit_cards %}<article class="hit-ir-card"><span class="overview-icon ir" aria-hidden="true">IR</span><div><small>Incidence rate</small><strong id="hitIncidenceRate">—</strong><em>Actual survey outcomes only</em></div></article>{% endif %}
+  {% if 'devices' in hit_cards %}<article class="hit-devices-card"><span class="overview-icon devices" aria-hidden="true">▣</span><div><small>Completed devices</small><strong class="hit-device-values"><b>D <i id="hitCompleteDesktop">—</i></b><b>M <i id="hitCompleteMobile">—</i></b><b>T <i id="hitCompleteTablet">—</i></b></strong><em>Desktop · Mobile · Tablet</em></div></article>{% endif %}
+</section>{% endif %}
+
+<section class="filter-panel user-hits-filters" aria-label="User hit filters">
+  {% if hit_filters.search %}<div class="field search-field">
+    <label for="hitSearch">Search user</label>
+    <div class="field-control"><span aria-hidden="true">⌕</span><input id="hitSearch" type="search" placeholder="Name, email or branch…" autocomplete="off"></div>
+  </div>{% endif %}
+  {% if hit_filters.branch %}<div class="field multi-field">
+    <label id="hitBranchLabel">Branch</label>
+    <div class="multi-select" data-hit-filter="branch">
+      <button class="multi-trigger" type="button" aria-labelledby="hitBranchLabel" aria-expanded="false"><span>All branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search branch…" aria-label="Search branches" autocomplete="off"></div><div class="multi-options">{% for branch in branches %}<label><input type="checkbox" value="{{ branch.value }}"><span>{{ branch.name }}</span></label>{% empty %}<span class="filter-empty">No branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching branch</p></div>
+    </div>
+  </div>{% endif %}
+  {% if hit_filters.sub_branch %}<div class="field multi-field">
+    <label id="hitSubBranchLabel">Sub-branch</label>
+    <div class="multi-select" data-hit-filter="sub_branch">
+      <button class="multi-trigger" type="button" aria-labelledby="hitSubBranchLabel" aria-expanded="false"><span>All sub-branches</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search sub-branch…" aria-label="Search sub-branches" autocomplete="off"></div><div class="multi-options">{% for sub_branch in sub_branches %}<label data-branch-value="{{ sub_branch.branch_value }}"><input type="checkbox" value="{{ sub_branch.value }}"><span>{{ sub_branch.name }}</span></label>{% empty %}<span class="filter-empty">No sub-branches available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching sub-branch</p></div>
+    </div>
+  </div>{% endif %}
+  {% if hit_filters.shift %}<div class="field multi-field">
+    <label id="hitShiftLabel">Shift</label>
+    <div class="multi-select" data-hit-filter="shift">
+      <button class="multi-trigger" type="button" aria-labelledby="hitShiftLabel" aria-expanded="false"><span>All shifts</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search shift…" aria-label="Search shifts" autocomplete="off"></div><div class="multi-options">{% for shift in shifts %}<label data-branch-value="{{ shift.branch_value }}" data-sub-branch-value="{{ shift.sub_branch_value }}"><input type="checkbox" value="{{ shift.value }}"><span>{{ shift.name }}</span></label>{% empty %}<span class="filter-empty">No shifts available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching shift</p></div>
+    </div>
+  </div>{% endif %}
+  {% if hit_filters.user %}<div class="field multi-field">
+    <label id="hitUserLabel">Users</label>
+    <div class="multi-select" data-hit-filter="user">
+      <button class="multi-trigger" type="button" aria-labelledby="hitUserLabel" aria-expanded="false"><span>All users</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search user…" aria-label="Search users" autocomplete="off"></div><div class="multi-options">{% for tracked_user in users %}<label data-branch-value="{{ tracked_user.branch_value }}" data-sub-branch-value="{{ tracked_user.sub_branch_value }}" data-shift-value="{{ tracked_user.shift_value }}"><input type="checkbox" value="{{ tracked_user.user_id }}"><span>{{ tracked_user.user_name }}</span></label>{% empty %}<span class="filter-empty">No authorized users available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching user</p></div>
+    </div>
+  </div>{% endif %}
+  {% if hit_filters.supplier %}<div class="field multi-field">
+    <label id="hitSupplierLabel">Supplier</label>
+    <div class="multi-select" data-hit-filter="supplier">
+      <button class="multi-trigger" type="button" aria-labelledby="hitSupplierLabel" aria-expanded="false"><span>All suppliers</span><i>⌄</i></button>
+      <div class="multi-menu" hidden><div class="multi-menu-search"><span aria-hidden="true">⌕</span><input type="search" data-multi-search placeholder="Search supplier…" aria-label="Search suppliers" autocomplete="off"></div><div class="multi-options">{% for supplier in suppliers %}<label><input type="checkbox" value="{{ supplier.value }}"><span>{{ supplier.name }}{% if supplier.email %} · {{ supplier.email }}{% endif %}</span></label>{% empty %}<span class="filter-empty">No supplier activity available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching supplier</p></div>
+    </div>
+  </div>{% endif %}
+  {% if hit_filters.date %}<div class="field datetime-field">
+    <label for="hitFromDateTime">From date &amp; time</label>
+    <div class="datetime-control"><input id="hitFromDateTime" type="datetime-local" step="60" aria-label="From date and time in IST"></div>
+  </div>
+  <div class="field datetime-field">
+    <label for="hitToDateTime">To date &amp; time</label>
+    <div class="datetime-control"><input id="hitToDateTime" type="datetime-local" step="60" aria-label="To date and time in IST"></div>
+  </div>{% endif %}
+  {% if hit_filters.clear %}<button class="clear-button" id="clearHitFilters" type="button">Clear filters</button>{% endif %}
+</section>
+
+<section class="survey-panel user-hits-panel">
+  <div class="panel-head">
+    <div><h2>User activity</h2><p id="hitSummary">Loading user activity…</p></div>
+    <div class="panel-tools">{% if can_change_hit_page_size %}<label class="compact-select">Rows<select id="hitPageSize"><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label>{% endif %}</div>
+  </div>
+  <div class="table-wrap user-hits-table-wrap">
+    <table class="survey-table user-hits-table">
+      <thead><tr>
+        {% if 'branch' in hit_columns %}<th>Branch</th>{% endif %}
+        {% if 'sub_branch' in hit_columns %}<th>Sub-branch</th>{% endif %}
+        {% if 'shift' in hit_columns %}<th>Shift</th>{% endif %}
+        {% if 'user' in hit_columns %}<th>User</th>{% endif %}
+        {% if 'date' in hit_columns %}<th>Date</th>{% endif %}
+        {% if 'hits' in hit_columns %}<th>Hits</th>{% endif %}
+        {% if 'completes' in hit_columns %}<th>Completes</th>{% endif %}
+      </tr></thead>
+      <tbody id="hitRows"><tr><td colspan="{{ hit_column_count }}"><div class="table-loader"><i></i><span>Building device-wise totals…</span></div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="mobile-cards user-hit-cards" id="hitCards"></div>
+  <div class="panel-foot">
+    <span id="hitPageStatus">Page 1</span>
+    {% if can_paginate_hits %}<nav class="pagination" aria-label="User hit pages">
+      <button id="hitFirstPage" type="button" aria-label="First page">«</button><button id="hitPrevPage" type="button" aria-label="Previous page">‹</button>
+      <label><span class="sr-only">Current page</span><input id="hitPageInput" type="number" min="1" value="1"></label>
+      <span id="hitTotalPages">of 1</span>
+      <button id="hitNextPage" type="button" aria-label="Next page">›</button><button id="hitLastPage" type="button" aria-label="Last page">»</button>
+    </nav>{% endif %}
+  </div>
+</section>
+
+
