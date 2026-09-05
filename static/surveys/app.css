@@ -257,6 +257,14 @@ html,body,.app-shell{max-width:100%;overflow-x:clip}.main-area{width:calc(100% -
 .studies-table td.study-col-status{width:8.5%!important}
 .studies-table th.study-col-final-status,
 .studies-table td.study-col-final-status{width:8.5%!important;text-align:center}
+.studies-table td.study-col-ip,
+.studies-table td.study-col-loi,
+.studies-table td.study-col-status,
+.studies-table td.study-col-final-status{text-align:center}
+.studies-table td.study-col-ip .ip-pair,
+.studies-table td.study-col-status .attempt-outcome,
+.studies-table td.study-col-final-status .attempt-outcome{margin-inline:auto;align-items:center}
+.studies-table td.study-col-ip .ip-pair span{justify-content:center}
 .studies-table th.study-col-start,
 .studies-table td.study-col-start,
 .studies-table th.study-col-end,
