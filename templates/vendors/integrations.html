@@ -264,7 +264,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       el('detailBatch').value='3';el('supplierCode').value='1000';
       if(isRfg){el('rfgApidEnv').value='RFG_APID';el('rfgSecretEnv').value='RFG_SECRET';el('rfgCountry').value='';el('rfgCategory').value='';el('rfgRecontacts').checked=false;el('rfgStrictTargeting').checked=true}
       else if(isToluna){el('tolunaEnvironment').value='production';el('tolunaApiAuthEnv').value='TOLUNA_API_AUTH_KEY';el('tolunaPartnerAuthEnv').value='TOLUNA_PARTNER_AUTH_KEY';el('tolunaHmacEnv').value='TOLUNA_HMAC_KEY';el('tolunaPartnerGuidEnv').value='';el('tolunaPanelEnCa').value='TOLUNA_PANEL_EN_CA';el('tolunaPanelEnGb').value='TOLUNA_PANEL_EN_GB';el('tolunaPanelEnIn').value='TOLUNA_PANEL_EN_IN';el('tolunaPanelEnSg').value='TOLUNA_PANEL_EN_SG';el('tolunaPanelEnUs').value='TOLUNA_PANEL_EN_US';el('tolunaRequireHash').checked=true;el('tolunaTestMember').checked=false}
-      else if(isManagedSupply){el('managedSupplierEnv').value=code==='acuity'?'ACUITY_SUPPLIER_ID':'';el('managedTokenEnv').value=code==='track_opinion'?'TRACK_OPINION_API_KEY':code==='acuity'?'ACUITY_API_TOKEN':'UNIMARKET_API_KEY';el('detailBatch').value='20'}
+      else if(isManagedSupply){el('managedSupplierEnv').value=code==='acuity'?'ACUITY_SUPPLIER_ID':'';el('managedTokenEnv').value=code==='track_opinion'?'TRACK_OPINION_API_KEY':code==='acuity'?'ACUITY_API_TOKEN':'UNIMARKET_X_ACCESS_KEY';el('detailBatch').value='20'}
       else{Object.entries(presets[code]||presets.custom).forEach(([id,value])=>el(id).value=value);el('tokenEnv').value='';el('apiToken').value='';el('authPrefix').value='';el('fieldMapping').value=''}
     }
     updateScheduleState();
