@@ -483,7 +483,7 @@ class SurveyListSerializer(serializers.ModelSerializer):
             "id", "local_id", "client", "client_name", "display_company_name", "source_id", "display_source_id", "survey_id", "provider_code", "company_name", "name", "status", "sample_size", "completes", "remaining",
             "starts", "cpi", "cpi_cut_percent", "vendor_pricing", "loi", "incidence_rate", "country", "country_code", "country_label",
             "language", "language_code", "group_type", "buyer_id", "survey_type", "device_type", "entry_link", "start_link", "has_quota",
-            "source_created_at", "source_modified_at", "source_created_display", "source_modified_display",
+            "source_created_at", "source_modified_at", "source_created_display", "source_modified_display", "last_seen_at",
             "detail_synced_at", "quota_synced_at", "targeting_synced_at", "created_at", "updated_at",
             "progress_percent",
         ]

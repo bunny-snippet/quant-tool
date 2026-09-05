@@ -437,7 +437,7 @@
     if (projectColumns.has('cpi')) cells.push(`<td><strong class="cpi">${money(survey.cpi)}</strong></td>`);
     if (projectColumns.has('loi_ir')) cells.push(`<td><div class="metric-pair"><span><b>${survey.loi ?? '—'}</b> min</span><span><b>${survey.incidence_rate ?? '—'}</b>%</span></div><small class="survey-type-tag">${escapeHtml(survey.survey_type || survey.group_type || 'Type unavailable')}</small></td>`);
     if (projectColumns.has('entry_link')) cells.push(`<td>${entryLinkControl(survey)}</td>`);
-    if (projectColumns.has('modified')) cells.push(`<td><div class="source-timestamp">${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}</div><small class="created-date">Created ${escapeHtml(survey.source_created_display || formatDate(survey.source_created_at))}</small><small class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</small></td>`);
+    if (projectColumns.has('modified')) cells.push(`<td><div class="source-timestamp">${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}</div><small class="created-date">Fetched ${escapeHtml(formatDate(survey.last_seen_at))}</small><small class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</small></td>`);
     if (projectColumns.has('actions')) cells.push(`<td><button class="eye-button" data-action="${escapeHtml(survey.local_id)}" aria-label="View details for ${escapeHtml(survey.name)}">◉</button></td>`);
     return `<tr>${cells.length ? cells.join('') : '<td><div class="column-denied">No project columns are assigned to your account.</div></td>'}</tr>`;
   }
@@ -451,7 +451,7 @@
     if (projectColumns.has('completes')) metrics.push(`<span><small>Completes</small><b>${survey.completes} / ${survey.sample_size}</b></span>`);
     if (projectColumns.has('cpi')) metrics.push(`<span><small>CPI</small><b>${money(survey.cpi)}</b></span>`);
     if (projectColumns.has('loi_ir')) metrics.push(`<span><small>LOI / IR · Type</small><b>${survey.loi ?? '—'}m · ${survey.incidence_rate ?? '—'}% · ${escapeHtml(survey.survey_type || survey.group_type || '—')}</b></span>`);
-    const bottom = `${projectColumns.has('modified') ? `<div class="source-timestamp"><small>Updated</small>${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}</div>` : ''}${projectColumns.has('entry_link') ? entryLinkControl(survey) : ''}`;
+    const bottom = `${projectColumns.has('modified') ? `<div class="source-timestamp"><small>Provider modified</small>${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}<small>Fetched ${escapeHtml(formatDate(survey.last_seen_at))}</small></div>` : ''}${projectColumns.has('entry_link') ? entryLinkControl(survey) : ''}`;
     return `<article class="survey-card"><div class="card-top"><div>${top}</div>${projectColumns.has('actions') ? `<button class="eye-button" data-action="${escapeHtml(survey.local_id)}" aria-label="View survey details">◉</button>` : ''}</div>${projectColumns.has('survey') ? `<h3>${escapeHtml(survey.display_source_id ?? survey.source_id ?? '—')}</h3><p>${survey.buyer_id ? escapeHtml(survey.buyer_id) : 'Buyer ID unavailable'}</p>` : ''}${metrics.length ? `<div class="card-grid">${metrics.join('')}</div>` : ''}${bottom ? `<div class="card-bottom">${bottom}</div>` : ''}</article>`;
   }
 
