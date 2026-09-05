@@ -383,7 +383,10 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
             allowed_hosts = {
                 "track_opinion": {"stagingsupply.opinionest.com", "supply.opinionest.com"},
                 "acuity": {"api.acuitykp.online"},
-                "unimarket": {"stg-api.supplier.unimrktresponse.net"},
+                "unimarket": {
+                    "api.supplier.unimrktresponse.net",
+                    "stg-api.supplier.unimrktresponse.net",
+                },
             }[provider]
             parsed_url = urlsplit(base_url)
             if parsed_url.scheme != "https" or parsed_url.hostname not in allowed_hosts:

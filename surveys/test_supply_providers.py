@@ -127,7 +127,7 @@ class SupplyProviderContractTests(TestCase):
     def test_unimarket_catalog_decodes_ids_and_comma_separated_postal_values(self):
         integration = self.integration(
             "unimarket",
-            "https://stg-api.supplier.unimrktresponse.net",
+            "https://api.supplier.unimrktresponse.net",
             {"token": "UNIMARKET_TEST_TOKEN"},
         )
         survey = Survey.objects.create(

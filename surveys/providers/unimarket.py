@@ -31,7 +31,7 @@ from .supply_common import (
 class UniMarketProvider(SurveyProvider):
     code = "unimarket"
     label = "UniMarket"
-    default_base_url = "https://stg-api.supplier.unimrktresponse.net"
+    default_base_url = "https://api.supplier.unimrktresponse.net"
     minimum_sync_interval_seconds = 300
     credential_fields = (("token", "X-access-key environment key"),)
     supported_countries = ("US", "CA", "GB", "AU", "DE", "FR", "ES", "MX", "CN", "NL", "BR", "IT", "IN")
@@ -44,7 +44,10 @@ class UniMarketProvider(SurveyProvider):
         self.token = environment_value(token_reference, "UniMarket access key")
         self.base_url = (integration.base_url or self.default_base_url).rstrip("/")
         parsed = urlsplit(self.base_url)
-        if parsed.scheme != "https" or parsed.hostname != "stg-api.supplier.unimrktresponse.net" or parsed.query or parsed.fragment:
+        if parsed.scheme != "https" or parsed.hostname not in {
+            "api.supplier.unimrktresponse.net",
+            "stg-api.supplier.unimrktresponse.net",
+        } or parsed.query or parsed.fragment:
             raise ProviderConfigurationError("UniMarket base URL must use its official HTTPS supplier host.")
         self.timeout = max(5, min(integer((integration.config or {}).get("timeout_seconds"), 30), 60))
 
