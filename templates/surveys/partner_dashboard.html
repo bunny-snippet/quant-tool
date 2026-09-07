@@ -1,0 +1,52 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}{{ partner_label }} Dashboard · Exchange Hub{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/partner_dashboard.css' %}?v=2">{% endblock %}
+{% block content %}
+<div class="partner-dashboard" id="partnerDashboard" data-section="{{ dashboard_section }}" data-endpoint="{{ request.path }}">
+  <header class="pd-heading">
+    <div><p class="pd-breadcrumb"><a href="{% url 'dashboard' %}">Dashboard</a><span>/</span>{{ partner_label }}s</p><h1>{{ partner_label }} Dashboard</h1></div>
+    <span class="pd-preview"><i></i><span id="pdFreshness">Loading report…</span></span>
+  </header>
+  <form class="pd-toolbar" id="pdFilters">
+    {% if partner_access.date %}<div class="pd-ranges" role="group" aria-label="Dashboard time range">
+      <button type="button" data-range="24h" aria-pressed="false">24 hours</button>
+      <button type="button" data-range="7d" aria-pressed="true" class="active">7 days</button>
+      <button type="button" data-range="month" aria-pressed="false">Current month</button>
+    </div>{% endif %}
+    {% if partner_access.partner %}<label class="pd-select"><span>{{ partner_label }}</span><select id="pdPartner" aria-label="{{ partner_label }}"><option value="">All {{ partner_label|lower }}s</option></select></label>{% endif %}
+    {% if partner_access.segment %}<label class="pd-select"><span>{% if dashboard_section == 'client' %}Country{% else %}Branch{% endif %}</span><select id="pdSegment" aria-label="{% if dashboard_section == 'client' %}Country{% else %}Branch{% endif %}"><option value="">All {% if dashboard_section == 'client' %}countries{% else %}branches{% endif %}</option></select></label>{% endif %}
+    <button class="pd-reset" id="pdReset" type="reset">Reset</button>
+  </form>
+  <div class="pd-context"><span id="pdPeriod">Last 7 days</span><span><span id="pdDefinition">Latest final decisions · entry-period journeys</span></span></div>
+  <p id="pdError" class="pd-empty" role="alert" hidden></p>
+  <section class="pd-kpis" id="pdKpis" aria-label="Performance summary" aria-live="polite"></section>
+  <section class="pd-main-grid">
+    {% if partner_access.trend %}<article class="pd-panel pd-trend-panel">
+      <header class="pd-panel-head"><div><p class="pd-kicker">{% if dashboard_section == 'client' %}Demand &amp; delivery{% else %}Delivery trend{% endif %}</p><h2>{% if dashboard_section == 'client' %}Traffic that turns into completes{% else %}Supplier delivery, over time{% endif %}</h2></div><div class="pd-chart-key"><span><i class="pd-key-hits"></i>Entrants</span><span><i class="pd-key-completes"></i>Completes</span></div></header>
+      <div class="pd-chart" id="pdTrend" aria-label="Entrants and completes trend"></div>
+      <footer class="pd-chart-foot"><span>Conversion <strong id="pdConversion">—</strong></span><span id="pdTrendScope">All {{ partner_label|lower }}s</span></footer>
+    </article>{% endif %}
+    {% if partner_access.review %}<article class="pd-panel pd-quality-panel">
+      <header class="pd-panel-head"><div><p class="pd-kicker">{% if dashboard_section == 'client' %}Final ID reconciliation{% else %}Delivery quality{% endif %}</p><h2>{% if dashboard_section == 'client' %}What clients have reviewed{% else %}From complete to accepted{% endif %}</h2></div></header>
+      <div id="pdReview" class="pd-review"></div>
+      <p class="pd-footnote">Accepted + rejected + pending = completes entered in this period. Latest client decisions are used, regardless of invoice month.</p>
+    </article>{% endif %}
+  </section>
+  {% if partner_access.table %}<section class="pd-panel pd-table-panel">
+    <header class="pd-panel-head"><div><p class="pd-kicker">{% if dashboard_section == 'client' %}Client portfolio{% else %}Supplier network{% endif %}</p><h2>{% if dashboard_section == 'client' %}Where the business is moving{% else %}Who is delivering{% endif %}</h2><p class="pd-table-caption" id="pdTableCaption"></p></div><label class="pd-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input type="search" id="pdSearch" placeholder="Search {{ partner_label|lower }}s" aria-label="Search {{ partner_label|lower }}s"></label></header>
+    <div class="pd-table-scroll"><table class="pd-table"><caption class="sr-only">{{ partner_label }} performance. Column buttons sort the table.</caption><thead><tr>
+      <th scope="col">{{ partner_label }}</th><th scope="col">{% if dashboard_section == 'client' %}Surveys with traffic{% else %}Branch{% endif %}</th>
+      <th scope="col" data-metric="hits" data-sort-header="hits"><button type="button" data-sort="hits">Entrants <span aria-hidden="true">↕</span></button></th>
+      <th scope="col" data-metric="completes" data-sort-header="completes" aria-sort="descending"><button type="button" data-sort="completes">Completes <span aria-hidden="true">↓</span></button></th>
+      <th scope="col" data-metric="conversion" data-sort-header="conversion"><button type="button" data-sort="conversion">Conversion <span aria-hidden="true">↕</span></button></th>
+      <th scope="col" data-metric="accepted">Accepted</th><th scope="col" data-metric="rejected">Rejected</th>
+      <th scope="col" data-metric="{% if dashboard_section == 'client' %}revenue{% else %}pending{% endif %}" data-sort-header="{% if dashboard_section == 'client' %}revenue{% else %}pending{% endif %}"><button type="button" data-sort="{% if dashboard_section == 'client' %}revenue{% else %}pending{% endif %}">{% if dashboard_section == 'client' %}Source revenue{% else %}Pending{% endif %} <span aria-hidden="true">↕</span></button></th>
+      <th scope="col" data-metric="share">Complete share</th><th scope="col"><span class="sr-only">Focus dashboard</span></th>
+    </tr></thead><tbody id="pdRows"></tbody></table></div>
+    <footer class="pd-table-foot"><span id="pdResultCount" aria-live="polite"></span><span><button type="button" class="pd-focus" id="pdPrev" aria-label="Previous page">‹</button> <span id="pdPage"></span> <button type="button" class="pd-focus" id="pdNext" aria-label="Next page">›</button></span></footer>
+  </section>{% endif %}
+  <noscript><p class="pd-empty">Enable JavaScript to load this report.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/partner_dashboard.js' %}?v=2" defer></script>{% endblock %}

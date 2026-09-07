@@ -1,5 +1,6 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+from .partner_dashboard import partner_dashboard
 
 from .webhook_views import (
     TolunaEnhancedTerminationNotificationAPIView,
@@ -81,6 +82,8 @@ urlpatterns = [
     path("survey", survey_status, name="survey-status"),
     path("", workspace_home, name="home"),
     path("dashboard/", dashboard_page, name="dashboard"),
+    path("dashboard/client/", partner_dashboard, {"section": "client"}, name="client-dashboard"),
+    path("dashboard/supplier/", partner_dashboard, {"section": "supplier"}, name="supplier-dashboard"),
     path("projects/", projects_page, name="projects"),
     path("studies/", studies_page, name="studies"),
     path("traffic-reports/", studies_page, name="traffic-reports"),

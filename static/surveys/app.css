@@ -56,8 +56,17 @@ html{overflow-x:clip}body{overflow-x:visible}.app-shell{overflow-x:clip}
 [hidden]{display:none!important}
 html,body{max-width:100%;overflow-x:hidden}
 
-/* Keep long navigation usable without exposing a visual scrollbar. */
+/* Keep the sidebar chrome fixed while only the navigation list scrolls. */
 .sidebar{
+  overflow:hidden;
+}
+.sidebar>.brand,
+.sidebar>.sidebar-foot{
+  flex:0 0 auto;
+}
+.sidebar>.nav-list{
+  flex:1 1 auto;
+  min-height:0;
   overflow-x:hidden;
   overflow-y:auto;
   overscroll-behavior-y:contain;
@@ -66,8 +75,7 @@ html,body{max-width:100%;overflow-x:hidden}
   -ms-overflow-style:none;
   -webkit-overflow-scrolling:touch;
 }
-.sidebar::-webkit-scrollbar{width:0;height:0;display:none}
-.sidebar>.brand,.sidebar>.nav-list,.sidebar>.sidebar-foot{flex-shrink:0}
+.sidebar>.nav-list::-webkit-scrollbar{width:0;height:0;display:none}
 
 /* CPI sort and range share one dropdown */
 .cpi-filter-select{position:relative}.cpi-filter-select.open>.multi-trigger i{transform:rotate(180deg)}.cpi-filter-menu{position:absolute;z-index:75;top:calc(100% + 7px);right:0;width:max(100%,330px);padding:8px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 42px rgba(24,39,67,.18)}.cpi-filter-menu:not([hidden]){animation:cpi-menu-in .18s ease-out}.cpi-sort-options{display:flex;flex-direction:column;gap:2px}.cpi-sort-options label{display:flex;align-items:center;gap:10px;margin:0;padding:9px;border-radius:9px;color:#53617a;font-size:11px;font-weight:700;cursor:pointer}.cpi-sort-options label:hover{background:#f4f8fa;color:var(--navy)}.cpi-sort-options input{appearance:none;width:17px;height:17px;flex:0 0 17px;margin:0;padding:0;border:1.5px solid #cbd4e0;border-radius:50%;display:grid;place-items:center;box-shadow:none}.cpi-sort-options input:checked{border:5px solid var(--cyan);background:#fff}.cpi-menu-range{margin-top:7px;padding:12px 10px 9px;border-top:1px solid var(--line);background:#f8fafc;border-radius:10px}.cpi-menu-range>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:10px}.cpi-menu-range strong{color:var(--navy);font-size:10px}.cpi-menu-range output{color:var(--cyan-dark);font-size:9px;font-weight:800;white-space:nowrap}.cpi-range-control{position:relative;height:36px;margin-top:5px}.cpi-range-track{position:absolute;left:7px;right:7px;top:16px;height:4px;border-radius:99px;background:#dfe7ef}.cpi-range-track i{position:absolute;top:0;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),#1688aa)}.cpi-range-control input[type="range"]{appearance:none;position:absolute;inset:0;width:100%;height:36px;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none;outline:0}.cpi-range-control input[type="range"]::-webkit-slider-runnable-track{height:4px;background:transparent}.cpi-range-control input[type="range"]::-webkit-slider-thumb{appearance:none;width:17px;height:17px;margin-top:-6.5px;border:3px solid #fff;border-radius:50%;background:var(--cyan-dark);box-shadow:0 1px 5px rgba(28,65,91,.35);pointer-events:auto;cursor:grab}.cpi-range-control input[type="range"]::-moz-range-track{height:4px;background:transparent}.cpi-range-control input[type="range"]::-moz-range-thumb{width:12px;height:12px;border:3px solid #fff;border-radius:50%;background:var(--cyan-dark);box-shadow:0 1px 5px rgba(28,65,91,.35);pointer-events:auto;cursor:grab}.cpi-filter-reset{width:100%;height:34px;margin-top:7px;border:0;border-radius:9px;background:#eef3f7;color:#66758e;font-size:10px;font-weight:800;cursor:pointer}.cpi-filter-reset:hover{background:var(--cyan-soft);color:var(--cyan-dark)}@keyframes cpi-menu-in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}

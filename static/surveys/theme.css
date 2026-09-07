@@ -45,6 +45,11 @@ html[data-theme="dark"] .theme-icon-sun { display: block; }
   transition: transform .18s ease;
 }
 .nav-item[aria-expanded="true"] .nav-caret { transform: rotate(180deg); }
+.dashboard-nav-group > summary { list-style: none; cursor: pointer; }
+.dashboard-nav-group > summary::-webkit-details-marker { display: none; }
+.dashboard-nav-group[open] > summary .nav-caret { transform: rotate(180deg); }
+.dashboard-nav-group .nav-child-link { font-size: 12px; min-height: 35px; }
+.dashboard-nav-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -532,5 +537,4 @@ html[data-theme="dark"] .vendor-pill.external_vendor {
 @media (prefers-reduced-motion: reduce) {
   .sidebar-theme-toggle { transition: none; }
 }
-
 

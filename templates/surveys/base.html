@@ -20,9 +20,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=46">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=47">
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{% static 'surveys/theme.css' %}?v=5">
+  <link rel="stylesheet" href="{% static 'surveys/theme.css' %}?v=6">
 </head>
 <body class="page-{{ active_page|default:'workspace' }}">
   <div class="app-shell" data-sidebar="open">
@@ -32,9 +32,18 @@
         <span class="brand-copy"><strong>Exchange Hub</strong><small>Inventory workspace</small></span>
       </a>
       <nav class="nav-list">
-        {% if 'dashboard.view' in access_codes %}<a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
-          <span class="nav-icon">⌁</span><span>Dashboard</span>
-        </a>{% endif %}
+        {% if 'dashboard.view' in access_codes %}
+        <details class="dashboard-nav-group" {% if active_page == 'dashboard' %}open{% endif %}>
+          <summary class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+            <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg></span><span>Dashboard</span><span class="nav-caret" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="nav-submenu" aria-label="Dashboards">
+            <a class="nav-child-link {% if active_page == 'dashboard' and not dashboard_section %}active{% endif %}" {% if active_page == 'dashboard' and not dashboard_section %}aria-current="page"{% endif %} href="{% url 'dashboard' %}"><i></i>Overview</a>
+            <a class="nav-child-link {% if dashboard_section == 'client' %}active{% endif %}" {% if dashboard_section == 'client' %}aria-current="page"{% endif %} href="{% url 'client-dashboard' %}"><i></i>Client Dashboard</a>
+            <a class="nav-child-link {% if dashboard_section == 'supplier' %}active{% endif %}" {% if dashboard_section == 'supplier' %}aria-current="page"{% endif %} href="{% url 'supplier-dashboard' %}"><i></i>Supplier Dashboard</a>
+          </div>
+        </details>
+        {% endif %}
         {% if 'projects.view' in access_codes %}<a class="nav-item {% if active_page == 'projects' %}active{% endif %}" href="{% url 'projects' %}" aria-expanded="{% if active_page == 'projects' %}true{% else %}false{% endif %}" aria-controls="projectsNavChildren">
           <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret" aria-hidden="true">⌄</span>
         </a>
