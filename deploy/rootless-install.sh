@@ -73,9 +73,14 @@ fi
 .venv/bin/python manage.py check --deploy
 
 public_static_dir="${PUBLIC_STATIC_DIR:-$HOME/htdocs/api.exchange-ip.com/static}"
+# Quant can collect directly into the public root. Never overwrite its fresh
+# manifest with a stale checkout/staticfiles directory from an earlier deploy.
+collected_static_dir="$(.venv/bin/python -c 'import os; os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings"); import django; django.setup(); from django.conf import settings; print(settings.STATIC_ROOT)')"
 if test -d "$(dirname "$public_static_dir")"; then
   mkdir -p "$public_static_dir"
-  cp -a staticfiles/. "$public_static_dir/"
+  if [[ "$(realpath "$collected_static_dir")" != "$(realpath "$public_static_dir")" ]]; then
+    cp -a "$collected_static_dir/." "$public_static_dir/"
+  fi
   chmod -R u=rwX,g=rX,o= "$public_static_dir"
 fi
 
