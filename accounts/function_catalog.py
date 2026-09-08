@@ -17,6 +17,11 @@ SUPER_ADMIN_ROLES = ("super-admin",)
 
 # code, name, page-wise group, description, default system roles
 FUNCTION_CATALOG = (
+    ("dashboard.client.view", "View Client Dashboard", "Dashboard - Page & navigation", "Open the client dashboard and its scoped API independently of the main dashboard.", SUPER_ADMIN_ROLES),
+    ("dashboard.supplier.view", "View Supplier Dashboard", "Dashboard - Page & navigation", "Open the supplier dashboard and its scoped API independently of the main dashboard.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.world_map", "Show country completion map", "Dashboard - Charts", "Show visible country/client completion aggregates on Client Dashboard.", SUPER_ADMIN_ROLES),
+    ("dashboard.filter.date", "Change partner dashboard period", "Dashboard - Partner dashboard filters", "Change Today, rolling days, month and financial year on client/supplier dashboards.", SUPER_ADMIN_ROLES),
+    ("dashboard.filter.client", "Select client or supplier", "Dashboard - Partner dashboard filters", "Select a visible client/supplier on its dashboard.", SUPER_ADMIN_ROLES),
     ("dashboard.view", "View dashboard page and sidebar item", "Dashboard - Page & navigation", "Open the dashboard and display its sidebar navigation item.", SUPER_ADMIN_ROLES),
     ("dashboard.card.hits", "Show Total hits card", "Dashboard - Summary cards", "Display the filtered respondent journey count.", SUPER_ADMIN_ROLES),
     ("dashboard.card.completes", "Show Completes card", "Dashboard - Summary cards", "Display successful survey outcomes.", SUPER_ADMIN_ROLES),
@@ -31,7 +36,7 @@ FUNCTION_CATALOG = (
     ("dashboard.chart.client_share", "Show Client contribution chart", "Dashboard - Charts", "Display each client's share of filtered completes.", SUPER_ADMIN_ROLES),
     ("dashboard.chart.status", "Show Outcome mix chart", "Dashboard - Charts", "Display initiated, complete, terminated, quota and security outcomes.", SUPER_ADMIN_ROLES),
     ("dashboard.chart.device", "Show Device performance chart", "Dashboard - Charts", "Display completed outcomes by Desktop, Mobile and Tablet.", SUPER_ADMIN_ROLES),
-    ("dashboard.chart.top_users", "Show Top suppliers chart", "Dashboard - Charts", "Display visible suppliers and their branches ranked by filtered completes.", SUPER_ADMIN_ROLES),
+    ("dashboard.chart.top_users", "Show Top performers chart", "Dashboard - Charts", "Display ranking using the role's performer policy: suppliers, branches, users or own team.", SUPER_ADMIN_ROLES),
     ("dashboard.graph.traffic_filters", "Filter Traffic dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Entrants, Completes and Conversion graph.", SUPER_ADMIN_ROLES),
     ("dashboard.graph.finance_filters", "Filter Revenue dashboard graph", "Dashboard - Graph filters", "Use an independent client and time-range filter on the Revenue and RPC graph.", SUPER_ADMIN_ROLES),
 

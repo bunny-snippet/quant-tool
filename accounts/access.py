@@ -107,6 +107,11 @@ def function_permission_required(code: str):
     return decorator
 
 
+def workspace_landing_route(user):
+    """Stable post-login/default landing; never a remembered partner dashboard."""
+    return "dashboard" if has_function_access(user, "dashboard.view") else "projects"
+
+
 def any_function_permission_required(*codes: str):
     def decorator(view_func):
         @wraps(view_func)

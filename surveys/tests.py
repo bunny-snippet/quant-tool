@@ -2164,8 +2164,8 @@ class DashboardAnalyticsTests(TestCase):
             {item["name"] for item in response.data["graph_clients"]},
             {"Client Alpha", "Client Beta"},
         )
-        self.assertEqual(response.data["top_suppliers"][0]["name"], "Direct traffic")
-        self.assertEqual(response.data["top_suppliers"][0]["branch_name"], "Unassigned branch")
+        self.assertEqual(response.data["top_suppliers"][0]["name"], "Dash Employee")
+        self.assertEqual(response.data["top_suppliers"][0]["branch_name"], "")
         self.assertEqual(response.data["top_suppliers"][0]["contribution_percent"], 100.0)
         self.assertIsNotNone(response.data["comparison"])
         self.assertTrue(response.data["financial_years"])

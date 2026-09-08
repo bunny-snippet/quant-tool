@@ -168,6 +168,13 @@
       const data = await api(`/api/v1/access/roles/${encodeURIComponent(roleSlug)}/`);
       roleForm.elements.name.value = data.name; roleForm.elements.slug.value = data.slug; roleForm.elements.rank.value = data.rank; roleForm.elements.cpi_visibility_percent.value = data.cpi_visibility_percent ?? 100; roleForm.elements.description.value = data.description || ''; roleForm.elements.is_active.checked = data.is_active;
       (data.effective_permission_codes || []).forEach((code) => { const input = $(`input[name="permission_codes"][value="${CSS.escape(code)}"]`, roleModal); if (input) input.checked = true; });
+      if (roleForm.elements.performer_mode) {
+        const policy = data.dashboard_performers || {};
+        roleForm.elements.performer_mode.value = policy.mode || 'mixed';
+        for (const [field,key] of [['performer_suppliers','supplier_ids'],['performer_branches','branch_ids']]) {
+          Array.from(roleForm.elements[field].options).forEach(option => { option.selected = (policy[key] || []).includes(Number(option.value)); });
+        }
+      }
       syncAllPermissionGroups();
       $('#roleModalTitle').textContent = 'Edit role'; $('[data-role-submit]').textContent = 'Save role'; showModal(roleModal);
     } catch (error) { toast(error.message, true); }
@@ -176,6 +183,7 @@
     event.preventDefault(); const errorBox = $('[data-role-error]'); errorBox.hidden = true;
     const payload = { name: roleForm.elements.name.value.trim(), slug: roleForm.elements.slug.value.trim(), rank: Number(roleForm.elements.rank.value), cpi_visibility_percent: Number(roleForm.elements.cpi_visibility_percent.value), description: roleForm.elements.description.value.trim(), is_active: roleForm.elements.is_active.checked, permission_codes: $$('input[name="permission_codes"]:checked', roleModal).map((input) => input.value) };
     try {
+      if (roleForm.elements.performer_mode) payload.dashboard_performers = {mode:roleForm.elements.performer_mode.value, supplier_ids:Array.from(roleForm.elements.performer_suppliers.selectedOptions, o=>Number(o.value)), branch_ids:Array.from(roleForm.elements.performer_branches.selectedOptions, o=>Number(o.value))};
       await api(roleSlug ? `/api/v1/access/roles/${encodeURIComponent(roleSlug)}/` : '/api/v1/access/roles/', { method: roleSlug ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       toast(roleSlug ? 'Role updated.' : 'Role created.'); closeModals(); setTimeout(() => location.reload(), 450);
     } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }

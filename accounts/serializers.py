@@ -29,7 +29,7 @@ class RoleSerializer(serializers.ModelSerializer):
         model = Role
         fields = [
             "id", "name", "slug", "description", "rank", "cpi_visibility_percent", "is_system", "is_active", "employee_count",
-            "permission_codes", "effective_permission_codes", "created_by", "created_at", "updated_at",
+            "permission_codes", "effective_permission_codes", "created_by", "created_at", "updated_at", "dashboard_performers",
         ]
         read_only_fields = ["is_system", "created_at", "updated_at"]
 
@@ -74,6 +74,30 @@ class RoleSerializer(serializers.ModelSerializer):
         getattr(role, "_prefetched_objects_cache", {}).pop("function_assignments", None)
         if hasattr(role, "_access_function_assignments"):
             delattr(role, "_access_function_assignments")
+
+    def validate_dashboard_performers(self, value):
+        request = self.context.get("request")
+        if not request or not request.user.is_superuser:
+            if self.instance and value == self.instance.dashboard_performers:
+                return value
+            raise serializers.ValidationError("Only the owner can configure performer visibility.")
+        if not isinstance(value, dict) or set(value) - {"mode", "supplier_ids", "branch_ids"}:
+            raise serializers.ValidationError("Invalid performer policy.")
+        mode = value.get("mode", "mixed")
+        if mode not in {"mixed", "suppliers", "users", "team"}:
+            raise serializers.ValidationError("Select suppliers/branches, suppliers, users or own team.")
+        result = {"mode": mode}
+        for key, queryset in (
+            ("supplier_ids", get_user_model().objects.filter(employee_profile__account_type__in=["internal_vendor", "external_vendor"])),
+            ("branch_ids", OrganizationUnit.objects.filter(unit_type="branch")),
+        ):
+            ids = value.get(key, [])
+            if not isinstance(ids, list) or len(ids) > 500 or any(type(n) is not int or n <= 0 for n in ids):
+                raise serializers.ValidationError("Selections must be valid IDs.")
+            if queryset.filter(pk__in=ids).count() != len(set(ids)):
+                raise serializers.ValidationError("A selected supplier/branch is unavailable.")
+            result[key] = sorted(set(ids))
+        return result
 
     @transaction.atomic
     def create(self, validated_data):

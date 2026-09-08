@@ -1484,26 +1484,8 @@ def workspace_home(request):
     if not request.user.is_authenticated:
         from django.contrib.auth.views import redirect_to_login
         return redirect_to_login(request.get_full_path())
-    if has_function_access(request.user, "projects.view"):
-        return HttpResponseRedirect(reverse("projects"))
-    if has_function_access(request.user, "dashboard.view"):
-        return HttpResponseRedirect(reverse("dashboard"))
-    if has_function_access(request.user, "attempts.view"):
-        return HttpResponseRedirect(reverse("traffic-reports"))
-    if has_function_access(request.user, "termination_reasons.view"):
-        return HttpResponseRedirect(reverse("termination-reasons"))
-    if has_function_access(request.user, "toluna_notifications.view"):
-        return HttpResponseRedirect(reverse("toluna-notifications"))
-    if has_function_access(request.user, "user_hits.view"):
-        return HttpResponseRedirect(reverse("user-hits"))
-    if has_function_access(request.user, "prescreener_data.view"):
-        return HttpResponseRedirect(reverse("prescreened-data"))
-    if any(has_function_access(request.user, code) for code in ("vendors.view", "vendors.manage", "allocations.view", "allocations.manage")):
-        return HttpResponseRedirect(reverse("vendor-management"))
-    if any(has_function_access(request.user, code) for code in ("access.manage", "users.view", "users.create", "roles.view", "roles.create")):
-        return HttpResponseRedirect(reverse("access-control"))
-    from django.core.exceptions import PermissionDenied
-    raise PermissionDenied("No workspace page is assigned to this account.")
+    from accounts.access import workspace_landing_route
+    return HttpResponseRedirect(reverse(workspace_landing_route(request.user)))
 
 
 def _qualifying_option_values(question):

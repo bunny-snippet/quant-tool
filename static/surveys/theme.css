@@ -50,6 +50,9 @@ html[data-theme="dark"] .theme-icon-sun { display: block; }
 .dashboard-nav-group[open] > summary .nav-caret { transform: rotate(180deg); }
 .dashboard-nav-group .nav-child-link { font-size: 12px; min-height: 35px; }
 .dashboard-nav-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.dashboard-home-link { display: flex; flex: 1; min-width: 0; gap: 11px; align-items: center; align-self: stretch; color: inherit; text-decoration: none; }
+.dashboard-home-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 5px; }
+.dashboard-nav-group > summary .nav-caret { min-width: 26px; min-height: 32px; }
 
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -278,7 +281,10 @@ html[data-theme="dark"] .bi-graph-fy.active select { background: #1b3948 !import
 html[data-theme="dark"] .bi-kpi-trend { background: #202d40; color: #a1afc3; }
 html[data-theme="dark"] .bi-kpi-trend.up { background: #15392f; color: #69d2aa; }
 html[data-theme="dark"] .bi-kpi-trend.down { background: #3b2029; color: #f28c99; }
-html[data-theme="dark"] :is(.bi-client-donut:before, .bi-device-ring:before) { background: var(--surface); }
+/* Pseudo-elements must be outside :is(), otherwise the centre rule never matches. */
+html[data-theme="dark"] :is(.bi-client-donut, .bi-device-ring)::before { background: var(--surface); }
+html[data-theme="dark"] :is(.bi-client-donut, .bi-device-ring) b { color: var(--navy); }
+html[data-theme="dark"] :is(.bi-client-donut, .bi-device-ring) small { color: var(--muted); }
 html[data-theme="dark"] :is(.bi-client-list li, .bi-device-list > div, .bi-performer-row, .activity-row) { border-color: var(--line); }
 html[data-theme="dark"] :is(.bi-client-list li > span > em, .bi-status-row > div, .bi-performer-row > div > span) { background: #29374a; }
 html[data-theme="dark"] :is(.bi-kpi-icon, .dashboard-kpi .kpi-icon, .device-dashboard-card > span) { background: #173746; color: #60cce1; }
@@ -538,3 +544,21 @@ html[data-theme="dark"] .vendor-pill.external_vendor {
   .sidebar-theme-toggle { transition: none; }
 }
 
+/* Main dashboard: aligned volume/rate plots share time, not measurement units. */
+:is(#volumeChart, #financeChart).bi-chart-stage { height: 360px; min-width: 0; }
+.bi-clean-chart .bi-chart-grid line { stroke: var(--line); stroke-width: 1; opacity: .65; }
+.bi-clean-chart .bi-chart-grid text,
+.bi-clean-chart .bi-x-label { fill: var(--muted); font-size: 11px; font-weight: 500; }
+.bi-clean-chart .bi-axis-caption { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.bi-clean-chart .bi-chart-line { fill: none; stroke-width: 2; }
+.bi-clean-chart :is(.bi-volume-hit, .bi-volume-complete, .bi-finance-bar) { animation: none; }
+.bi-clean-chart .bi-chart-hitbox:is(:hover, :focus) { fill: rgba(21, 184, 216, .07); outline: none; }
+.bi-clean-chart .bi-chart-hitbox:focus-visible { stroke: var(--cyan); stroke-width: 1; }
+:is(#volumeChart, #financeChart) .bi-chart-tooltip { display: none !important; width: 208px; max-width: calc(100% - 8px); font-size: 12px; }
+:is(#volumeChart, #financeChart) .bi-chart-tooltip.show { display: flex !important; }
+:is(#volumeChart, #financeChart) .bi-chart-tooltip strong { font-size: 12px; }
+:is(#volumeChart, #financeChart) .bi-chart-tooltip span { font-size: 11px; }
+.bi-performer-row > div b { font-size: 12px; }
+.bi-performer-row > div small { font-size: 10px; }
+html[data-theme="dark"] .bi-performer-avatar { background: #173746; color: #6ed7ee; border: 1px solid #285164; }
+html[data-theme="dark"] .bi-clean-chart :is(.bi-rpc-dot, .bi-rate-dot) { stroke: var(--surface); }

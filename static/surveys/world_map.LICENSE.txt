@@ -1,0 +1,4 @@
+Made with Natural Earth. Public-domain map data.
+https://www.naturalearthdata.com/about/terms-of-use/
+Source: https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson
+Retrieved 2026-09-08. Geometry rounded and projected to a 720 x 300 equirectangular SVG coordinate space; Antarctica excluded. Small territories remain in the dashboard's complete country list even where geometry is not available at this scale. No survey data is part of this static asset.

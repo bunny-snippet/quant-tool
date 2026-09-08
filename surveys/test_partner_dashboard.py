@@ -84,18 +84,18 @@ class PartnerDashboardTests(TestCase):
         SurveyAttempt.objects.filter(pk=self.attempts[0].pk).update(source_cpi_snapshot=None)
         self.assertIsNone(self.payload()["summary"]["revenue"])
 
-    def test_current_month_comparison_uses_same_previous_month_elapsed_time(self):
+    def test_current_month_comparison_uses_full_previous_month(self):
         self.attempt(5, status="1", initiated_at=datetime(2026,8,3,12,tzinfo=dt_timezone.utc))
         self.attempt(6, status="1", initiated_at=datetime(2026,8,20,12,tzinfo=dt_timezone.utc))
         p = self.payload(params={"range":"month"})
-        self.assertEqual(p["previous"]["hits"],1)
-        self.assertEqual(p["comparison_label"],"Previous month to date")
+        self.assertEqual(p["previous"]["hits"],2)
+        self.assertEqual(p["comparison_label"],"Previous month · full calendar month")
 
     def test_half_open_window_no_duplicate_boundary(self):
         self.attempt(5, status="1", initiated_at=self.now)
         self.attempt(6, status="1", initiated_at=self.now-timedelta(days=7))
-        self.assertEqual(self.payload()["summary"]["hits"],5)
-        self.assertEqual(self.payload()["previous"]["hits"],0)
+        self.assertEqual(self.payload(params={"range":"7d"})["summary"]["hits"],5)
+        self.assertEqual(self.payload(params={"range":"7d"})["previous"]["hits"],0)
 
     def test_empty_and_bad_filters(self):
         p = self.payload(params={"partner":"999999"})
@@ -113,6 +113,29 @@ class PartnerDashboardTests(TestCase):
         with self.assertNumQueries(5):
             self.payload(params={"range":"month"})
 
+    def test_main_ranking_direct_branch_and_unassigned_user_names(self):
+        from .dashboard import _top_suppliers
+        SurveyAttempt.objects.all().update(vendor=None)
+        other_user = get_user_model().objects.create_user(username="no-branch", first_name="Yoginder", last_name="Chauhan")
+        self.attempt(10, vendor=None, platform_user=other_user, status="1")
+        self.attempt(11, vendor=None, platform_user=self.admin, status="1")
+        with self.assertNumQueries(1):
+            rows = _top_suppliers(SurveyAttempt.objects.all(), self.admin, {"revenue":False}, 5)
+        self.assertEqual([(r["name"],r["completes"]) for r in rows], [("Branch one",3),("partner-admin",1),("Yoginder Chauhan",1)])
+        self.assertTrue(all(r["branch_name"] == "" for r in rows))
+        self.assertTrue(all(r["revenue"] is None for r in rows))
+
+    def test_main_ranking_keeps_supplier_and_branch_identity(self):
+        from .dashboard import _top_suppliers
+        rows = _top_suppliers(SurveyAttempt.objects.all(), self.admin, {"revenue":False}, 3)
+        self.assertEqual([(r["name"],r["branch_name"],r["completes"]) for r in rows], [("Supplier One","Branch one",3)])
+        branch2 = OrganizationUnit.objects.create(workspace_owner=self.admin, name="Branch one", code="b2", unit_type="branch", created_by=self.admin)
+        EmployeeProfile.objects.filter(user=self.admin).update(organization_unit=branch2)
+        SurveyAttempt.objects.all().update(vendor=None)
+        self.attempt(12, vendor=None, platform_user=self.admin, status="1")
+        rows = _top_suppliers(SurveyAttempt.objects.all(), self.admin, {"revenue":False}, 4)
+        self.assertEqual([r["completes"] for r in rows], [3,1])
+
     @override_settings(DEBUG=False, STORAGES={"default":{"BACKEND":"django.core.files.storage.FileSystemStorage"},"staticfiles":{"BACKEND":"django.contrib.staticfiles.storage.StaticFilesStorage"}})
     def test_production_pages_authenticated_and_no_sample_values(self):
         for section in ("client","supplier"):
@@ -124,6 +147,9 @@ class PartnerDashboardTests(TestCase):
             self.assertNotIn(b'Sample data',response.content)
             self.assertIn(b'Client Dashboard',response.content)
             self.assertIn(b'Supplier Dashboard',response.content)
+            self.assertIn(b'class="dashboard-home-link" href="/dashboard/"',response.content)
+            self.assertNotIn(b'>Overview</a>',response.content)
+            self.assertIn(b'id="pdLoading"',response.content)
 
     def test_page_permission_and_anonymous_redirect(self):
         from django.contrib.auth.models import AnonymousUser

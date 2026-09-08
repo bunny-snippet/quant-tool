@@ -91,126 +91,127 @@
     return points.map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
   }
 
-  function svgArea(points, bottom) {
-    if (!points.length) return '';
-    return `${svgLine(points)} L${points[points.length - 1].x.toFixed(1)},${bottom} L${points[0].x.toFixed(1)},${bottom} Z`;
-  }
-
   function bindChartTooltip(host, rows, formatter) {
     const tooltip = document.createElement('div');
     tooltip.className = 'bi-chart-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
     host.appendChild(tooltip);
-    host.querySelectorAll('[data-chart-index]').forEach((target) => {
-      const show = (event) => {
-        const row = rows[Number(target.dataset.chartIndex)];
-        if (!row) return;
+    const targets = [...host.querySelectorAll('[data-chart-index]')];
+    targets.forEach((target, index) => {
+      const show = (event = {}) => {
+        const row = rows[index]; if (!row) return;
         tooltip.innerHTML = formatter(row);
         tooltip.classList.add('show');
-        const box = host.getBoundingClientRect();
-        const left = Math.max(10, Math.min(box.width - 190, event.clientX - box.left + 12));
-        const top = Math.max(8, event.clientY - box.top - 92);
-        tooltip.style.left = `${left}px`; tooltip.style.top = `${top}px`;
+        const box = host.getBoundingClientRect(), targetBox = target.getBoundingClientRect();
+        const px = Number.isFinite(event.clientX) ? event.clientX : targetBox.left + targetBox.width / 2;
+        const py = Number.isFinite(event.clientY) ? event.clientY : targetBox.top + 36;
+        const tipWidth = tooltip.offsetWidth || 208, tipHeight = tooltip.offsetHeight || 120;
+        tooltip.style.left = Math.max(4, Math.min(box.width - tipWidth - 4, px - box.left + 12)) + 'px';
+        tooltip.style.top = Math.max(4, Math.min(box.height - tipHeight - 4, py - box.top - tipHeight - 12)) + 'px';
       };
+      const hide = () => tooltip.classList.remove('show');
       target.addEventListener('pointerenter', show);
       target.addEventListener('pointermove', show);
-      target.addEventListener('pointerleave', () => tooltip.classList.remove('show'));
-    });
-  }
-
-  function axisGrid({ width, height, left, right, top, bottom, maximum, formatter = number }) {
-    const plotHeight = height - top - bottom;
-    return [0, .25, .5, .75, 1].map((ratio) => {
-      const y = top + plotHeight - ratio * plotHeight;
-      return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"/><text x="${left - 9}" y="${y + 4}" text-anchor="end">${escapeHtml(formatter(maximum * ratio))}</text>`;
-    }).join('');
-  }
-
-  function labelStride(rows, host) {
-    const target = host.clientWidth < 520 ? 4 : host.clientWidth < 760 ? 6 : 8;
-    return Math.max(1, Math.ceil(rows.length / target));
-  }
-
-  function animateChart(host) {
-    if (reducedMotion) return;
-    requestAnimationFrame(() => {
-      host.querySelectorAll('.bi-chart-line').forEach((path) => {
-        const length = path.getTotalLength();
-        path.style.strokeDasharray = length;
-        path.style.strokeDashoffset = length;
-        requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
+      target.addEventListener('pointerleave', hide);
+      target.addEventListener('focus', show);
+      target.addEventListener('blur', hide);
+      target.addEventListener('click', show);
+      target.addEventListener('keydown', event => {
+        if (event.key === 'Escape') hide();
+        if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+          event.preventDefault();
+          targets[Math.max(0, Math.min(targets.length - 1, index + (event.key === 'ArrowRight' ? 1 : -1)))].focus();
+        }
       });
     });
   }
 
+  function chartScale(maximum, minimumStep = 1) {
+    const value = Math.max(minimumStep, maximum);
+    const rawStep = value / 4, power = 10 ** Math.floor(Math.log10(rawStep));
+    const step = Math.max(minimumStep, [1, 2, 2.5, 5, 10].find(n => n * power >= rawStep) * power);
+    const count = Math.ceil(value / step);
+    return {maximum: count * step, ticks: Array.from({length: count + 1}, (_, i) => i * step)};
+  }
+
+  function renderTimeline(host, rows, options) {
+    if (!host) return;
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No data is available for this range.</div>'; return; }
+    if (!rows.some(row => Number(row.hits || 0) || Number(row.completes || 0) || Number(row.revenue || 0))) {
+      host.innerHTML = '<div class="dashboard-empty">No activity in this period for the selected client.</div>'; return;
+    }
+    const width = Math.max(320, Math.round(host.clientWidth || 700)), height = 360;
+    const left = options.finance ? 76 : 56, right = 20, plotWidth = width - left - right;
+    const keys = options.bars.filter(key => rows.some(row => row[key] != null));
+    if (!keys.length && !options.hasLine) {
+      host.innerHTML = '<div class="dashboard-empty">Financial metrics are not available for this view.</div>'; return;
+    }
+    const top = 32, mainHeight = options.hasLine ? 150 : 266;
+    const rateTop = keys.length ? 240 : 48, rateHeight = keys.length ? 66 : 258;
+    const group = plotWidth / rows.length;
+    const x = index => left + group * (index + .5);
+    const scale = chartScale(Math.max(0, ...rows.flatMap(row => keys.map(key => Number(row[key] || 0)))), options.finance ? .01 : 1);
+    const rateScale = options.finance ? chartScale(Math.max(0, ...rows.map(row => Number(row[options.lineKey] || 0))), .01) : {maximum:100,ticks:[0,50,100]};
+    const y = value => top + mainHeight - Number(value || 0) / scale.maximum * mainHeight;
+    const rateY = value => rateTop + rateHeight - Math.min(rateScale.maximum, Math.max(0, Number(value || 0))) / rateScale.maximum * rateHeight;
+    const title = escapeHtml(options.title + ' · ' + options.rangeLabel);
+    let svg = '<svg class="bi-chart-svg bi-clean-chart" viewBox="0 0 '+width+' '+height+'" role="group" aria-label="'+title+'">';
+    if (keys.length) {
+      svg += '<text class="bi-axis-caption" x="'+left+'" y="16">'+(options.finance ? 'Revenue' : 'Entrants / completes')+'</text><g class="bi-chart-grid">';
+      for (const tick of scale.ticks) svg += '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+y(tick)+'" y2="'+y(tick)+'"/><text x="'+(left-10)+'" y="'+(y(tick)+4)+'" text-anchor="end">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : number(tick))+'</text>';
+      svg += '</g>';
+      const barWidth = Math.max(.5, Math.min(options.finance ? 24 : 16, group * .65 / keys.length));
+      rows.forEach((row,index) => keys.forEach((key,k) => {
+        if (row[key] == null) return;
+        const cls = key === 'revenue' ? 'bi-finance-bar' : key === 'hits' ? 'bi-volume-hit' : 'bi-volume-complete';
+        const barX = x(index) - (keys.length * barWidth + (keys.length-1)*2)/2 + k*(barWidth+2);
+        svg += '<rect class="'+cls+'" x="'+barX+'" y="'+y(row[key])+'" width="'+barWidth+'" height="'+Math.max(0,top+mainHeight-y(row[key]))+'" rx="2"/>';
+      }));
+    }
+    if (options.hasLine) {
+      svg += '<text class="bi-axis-caption bi-rate-caption" x="'+left+'" y="'+(rateTop-16)+'">'+escapeHtml(options.lineLabel)+(options.finance ? (options.lineKey === 'average_cpi' ? ' · per complete' : ' · per entrant') : ' · completes ÷ entrants')+'</text><g class="bi-chart-grid bi-rate-grid">';
+      for (const tick of rateScale.ticks) svg += '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+rateY(tick)+'" y2="'+rateY(tick)+'"/><text x="'+(left-10)+'" y="'+(rateY(tick)+4)+'" text-anchor="end">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : tick+'%')+'</text>';
+      svg += '</g>';
+      let points = [];
+      const flush = () => {if(points.length) svg += '<path class="bi-chart-line '+(options.finance?'bi-rpc-line':'bi-conversion-line')+'" d="'+svgLine(points)+'"/>'; points=[];};
+      rows.forEach((row,index) => {
+        // No entrants means no meaningful rate, not an artificial zero/drop.
+        if (row[options.lineKey] == null || !Number(row[options.lineKey === 'average_cpi' ? 'completes' : 'hits'])) {flush(); return;}
+        const point = {x:x(index),y:rateY(row[options.lineKey])}; points.push(point);
+        svg += '<circle class="'+(options.finance?'bi-rpc-dot':'bi-rate-dot')+'" cx="'+point.x+'" cy="'+point.y+'" r="3"/>';
+      });
+      flush();
+    }
+    const stride = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor(plotWidth / 80))));
+    rows.forEach((row,index) => {
+      if (index % stride === 0 && (index === rows.length-1 || rows.length-1-index >= stride) || index === rows.length-1) svg += '<text class="bi-x-label" x="'+x(index)+'" y="344" text-anchor="middle">'+escapeHtml(row.short_label)+'</text>';
+      const label = options.tooltipText(row);
+      svg += '<rect class="bi-chart-hitbox" data-chart-index="'+index+'" tabindex="0" aria-label="'+escapeHtml(label)+'" x="'+(left+group*index)+'" y="'+top+'" width="'+group+'" height="282"><title>'+escapeHtml(label)+'</title></rect>';
+    });
+    host.innerHTML = svg + '</svg>';
+    bindChartTooltip(host, rows, row => '<strong>'+escapeHtml(row.label)+'</strong>'+options.details(row).map(([label,value])=>'<span>'+escapeHtml(label)+'<b>'+escapeHtml(value)+'</b></span>').join(''));
+  }
+
   function renderVolume(rows, rangeLabel = '') {
-    const host = byId('volumeChart'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No traffic data is available for this range.</div>'; return; }
-    const totalHits = rows.reduce((sum, row) => sum + Number(row.hits || 0), 0);
-    const totalCompletes = rows.reduce((sum, row) => sum + Number(row.completes || 0), 0);
-    const weightedConversion = totalHits ? totalCompletes / totalHits * 100 : 0;
-    const width = 860; const height = 300; const left = 52; const right = 48; const top = 24; const bottom = 42;
-    const plotWidth = width - left - right; const plotHeight = height - top - bottom;
-    const maximum = Math.max(1, ...rows.flatMap((row) => [Number(row.hits), Number(row.completes)]));
-    const group = plotWidth / rows.length; const barWidth = Math.max(4, Math.min(18, group * .28));
-    const x = (index) => left + group * index + group / 2;
-    const y = (value) => top + plotHeight - Number(value || 0) / maximum * plotHeight;
-    const rateY = (value) => top + plotHeight - Math.min(100, Number(value || 0)) / 100 * plotHeight;
-    const stride = labelStride(rows, host);
-    const bars = rows.map((row, index) => {
-      const hitY = y(row.hits); const completeY = y(row.completes);
-      return `<g class="bi-bar-group" data-chart-index="${index}" style="--delay:${index * 40}ms"><rect class="bi-volume-hit" x="${x(index) - barWidth - 1}" y="${hitY}" width="${barWidth}" height="${top + plotHeight - hitY}"><title>${escapeHtml(row.label)} · Entrants ${number(row.hits)}</title></rect><rect class="bi-volume-complete" x="${x(index) + 1}" y="${completeY}" width="${barWidth}" height="${top + plotHeight - completeY}"><title>${escapeHtml(row.label)} · Completes ${number(row.completes)}</title></rect><rect class="bi-chart-hitbox" x="${left + group * index}" y="${top}" width="${group}" height="${plotHeight}"/></g>`;
-    }).join('');
-    const ratePoints = rows.map((row, index) => ({ x: x(index), y: rateY(row.conversion_rate), value: row.conversion_rate }));
-    const rateDots = ratePoints.map((point, index) => `<circle class="bi-rate-dot" cx="${point.x}" cy="${point.y}" r="3.5"><title>${escapeHtml(rows[index].label)} · Conversion ${Number(point.value).toFixed(1)}%</title></circle>`).join('');
-    const labels = rows.map((row, index) => index % stride === 0 || index === rows.length - 1
-      ? `<text class="bi-x-label" x="${x(index)}" y="${height - 15}" text-anchor="middle">${escapeHtml(row.short_label)}</text>` : '').join('');
-    const rightAxis = [0, 50, 100].map((value) => `<text class="bi-right-axis" x="${width - right + 9}" y="${rateY(value) + 4}">${value}%</text>`).join('');
-    const averageY = rateY(weightedConversion);
-    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Entrants, completes and conversion over ${escapeHtml(rangeLabel)}"><defs><linearGradient id="trafficArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e7a038" stop-opacity=".22"/><stop offset="1" stop-color="#e7a038" stop-opacity="0"/></linearGradient></defs><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum })}</g>${rightAxis}<line class="bi-average-line" x1="${left}" x2="${width - right}" y1="${averageY}" y2="${averageY}"/><path class="bi-chart-area" fill="url(#trafficArea)" d="${svgArea(ratePoints, top + plotHeight)}"/>${bars}<path class="bi-chart-line bi-conversion-line" d="${svgLine(ratePoints)}"/>${rateDots}${labels}</svg>`;
-    bindChartTooltip(host, rows, (row) => `<strong>${escapeHtml(row.label)}</strong><span>Entrants <b>${number(row.hits)}</b></span><span>Completes <b>${number(row.completes)}</b></span><span>Conversion <b>${Number(row.conversion_rate || 0).toFixed(1)}%</b></span><span>IR <b>${Number(row.incidence_rate || 0).toFixed(1)}%</b></span>`);
-    animateChart(host);
+    const details = row => [['Entrants',number(row.hits)],['Completes',number(row.completes)],['Conversion',row.hits ? Number(row.conversion_rate || 0).toFixed(1)+'%' : '—'],['IR',row.hits ? Number(row.incidence_rate || 0).toFixed(1)+'%' : '—']];
+    renderTimeline(byId('volumeChart'), rows, {bars:['hits','completes'],hasLine:true,lineKey:'conversion_rate',lineLabel:'Conversion',title:'Entrants, completes and conversion',rangeLabel,
+      details,tooltipText:row=>row.label+' · '+details(row).map(pair=>pair.join(' ')).join(' · ')});
   }
 
   function renderFinance(rows, currency, rangeLabel = '') {
-    const host = byId('financeChart'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No financial data is available for this range.</div>'; return; }
-    const hasRevenue = rows.some((row) => row.revenue != null);
-    const lineKey = rows.some((row) => row.rpc != null) ? 'rpc' : 'average_cpi';
+    const hasRevenue = !!rows?.some(row=>row.revenue != null);
+    const lineKey = rows?.some(row=>row.rpc != null) ? 'rpc' : 'average_cpi';
     const lineLabel = lineKey === 'rpc' ? 'RPC' : 'Average CPI';
-    const hasLine = rows.some((row) => row[lineKey] != null);
+    const hasLine = !!rows?.some(row=>row[lineKey] != null);
     byId('financeBarLegend')?.toggleAttribute('hidden', !hasRevenue);
-    const lineLegend = byId('financeLineLegend');
-    if (lineLegend) {
-      lineLegend.hidden = !hasLine;
-      lineLegend.lastChild.textContent = lineLabel;
-    }
-    const width = 620; const height = 300; const left = 58; const right = 48; const top = 24; const bottom = 42;
-    const plotWidth = width - left - right; const plotHeight = height - top - bottom;
-    const maxRevenue = Math.max(1, ...rows.map((row) => Number(row.revenue || 0)));
-    const maxLine = Math.max(1, ...rows.map((row) => Number(row[lineKey] || 0)));
-    const group = plotWidth / rows.length; const barWidth = Math.max(5, Math.min(25, group * .5));
-    const x = (index) => left + group * index + group / 2;
-    const revenueY = (value) => top + plotHeight - Number(value || 0) / maxRevenue * plotHeight;
-    const lineY = (value) => top + plotHeight - Number(value || 0) / maxLine * plotHeight;
-    const stride = labelStride(rows, host);
-    const bars = hasRevenue ? rows.map((row, index) => {
-      const y = revenueY(row.revenue);
-      return `<g data-chart-index="${index}"><rect class="bi-finance-bar" style="--delay:${index * 40}ms" x="${x(index) - barWidth / 2}" y="${y}" width="${barWidth}" height="${top + plotHeight - y}"><title>${escapeHtml(row.label)} · Revenue ${escapeHtml(formatCurrency(row.revenue, currency))}</title></rect><rect class="bi-chart-hitbox" x="${left + group * index}" y="${top}" width="${group}" height="${plotHeight}"/></g>`;
-    }).join('') : '';
-    const linePoints = hasLine
-      ? rows.map((row, index) => ({ x: x(index), y: lineY(row[lineKey]), value: row[lineKey] }))
-      : [];
-    const dots = linePoints.map((point, index) => `<circle class="bi-rpc-dot" cx="${point.x}" cy="${point.y}" r="3.5"><title>${escapeHtml(rows[index].label)} · ${lineLabel} ${escapeHtml(formatCurrency(point.value, currency))}</title></circle>`).join('');
-    const labels = rows.map((row, index) => index % stride === 0 || index === rows.length - 1
-      ? `<text class="bi-x-label" x="${x(index)}" y="${height - 15}" text-anchor="middle">${escapeHtml(row.short_label)}</text>` : '').join('');
-    const rightAxis = hasLine
-      ? [0, .5, 1].map((ratio) => `<text class="bi-right-axis" x="${width - right + 8}" y="${lineY(maxLine * ratio) + 4}">${escapeHtml(formatCurrency(maxLine * ratio, currency, true))}</text>`).join('')
-      : '';
-    const line = hasLine ? `<path class="bi-chart-area" fill="url(#financeArea)" d="${svgArea(linePoints, top + plotHeight)}"/><path class="bi-chart-line bi-rpc-line" d="${svgLine(linePoints)}"/>${dots}` : '';
-    const accessibleLabel = hasLine ? `Revenue and ${lineLabel}` : 'Revenue';
-    host.innerHTML = `<svg class="bi-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${accessibleLabel} over ${escapeHtml(rangeLabel)}"><defs><linearGradient id="financeArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e7a038" stop-opacity=".2"/><stop offset="1" stop-color="#e7a038" stop-opacity="0"/></linearGradient></defs><g class="bi-chart-grid">${axisGrid({ width, height, left, right, top, bottom, maximum: maxRevenue, formatter: (value) => formatCurrency(value, currency, true) })}</g>${rightAxis}${bars}${line}${labels}</svg>`;
-    bindChartTooltip(host, rows, (row) => `<strong>${escapeHtml(row.label)}</strong><span>Revenue <b>${escapeHtml(formatCurrency(row.revenue, currency))}</b></span><span>${escapeHtml(lineLabel)} <b>${escapeHtml(formatCurrency(row[lineKey], currency))}</b></span><span>Completes <b>${number(row.completes)}</b></span><span>Entrants <b>${number(row.hits)}</b></span>`);
-    animateChart(host);
+    const legend = byId('financeLineLegend'); if(legend){legend.hidden=!hasLine;legend.lastChild.textContent=lineLabel;}
+    const details = row => [
+      ...(hasRevenue ? [['Revenue',row.revenue == null ? '—' : formatCurrency(row.revenue,currency)]] : []),
+      ...(hasLine ? [[lineLabel,row[lineKey] == null || !Number(row[lineKey === 'average_cpi' ? 'completes' : 'hits']) ? '—' : formatCurrency(row[lineKey],currency)]] : []),
+      ['Completes',number(row.completes)],['Entrants',number(row.hits)],
+    ];
+    renderTimeline(byId('financeChart'),rows,{bars:hasRevenue?['revenue']:[],hasLine,lineKey,lineLabel,finance:true,currency,title:'Revenue and '+lineLabel,rangeLabel,
+      details,tooltipText:row=>row.label+' · '+details(row).map(pair=>pair.join(' ')).join(' · ')});
   }
 
   function renderClients(rows) {
@@ -257,9 +258,9 @@
 
   function renderTopSuppliers(rows) {
     const host = byId('dashboardTopSuppliers'); if (!host) return;
-    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No supplier activity matches this range.</div>'; return; }
+    if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No performer activity matches this range.</div>'; return; }
     const maximum = Math.max(1, ...rows.map((row) => Number(row.completes || 0)));
-    host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.branch_name || 'Unassigned branch')}</small><span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
+    host.innerHTML = rows.map((row, index) => `<div class="bi-performer-row" style="--index:${index}"><span class="bi-performer-rank">${String(index + 1).padStart(2, '0')}</span><span class="bi-performer-avatar">${escapeHtml(String(row.name || '?').charAt(0).toUpperCase())}</span><div><b>${escapeHtml(row.name)}</b>${row.branch_name && row.branch_name !== row.name ? `<small>${escapeHtml(row.branch_name)}</small>` : ''}<span><i style="--progress:${Number(row.completes || 0) / maximum * 100}%"></i></span></div><strong>${number(row.completes)}<small>completes</small></strong></div>`).join('');
   }
 
   function populateFinancialYears(data) {

@@ -20,6 +20,7 @@ class AccessFunction(models.Model):
 
 
 class Role(models.Model):
+    dashboard_performers = models.JSONField(default=dict, blank=True)
     name = models.CharField(max_length=80)
     slug = models.SlugField(max_length=80, unique=True)
     description = models.TextField(blank=True)

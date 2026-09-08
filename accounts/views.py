@@ -5,13 +5,13 @@ from django.db.models import Count, Prefetch
 from django.http import Http404
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import filters, viewsets
 
 from .access import (
     EXTERNAL_VENDOR_FORBIDDEN_CODES, HasFunctionPermission, any_function_permission_required, assignable_functions, assignable_roles,
-    can_manage_role, has_function_access, manageable_user_ids,
+    can_manage_role, has_function_access, manageable_user_ids, workspace_landing_route,
 )
 from .forms import FirstAdminSetupForm, WorkspaceAuthenticationForm
 from .models import AccessFunction, EmployeeProfile, Role, RoleFunctionPermission, UserFunctionOverride
@@ -24,6 +24,10 @@ class WorkspaceLoginView(LoginView):
     template_name = "accounts/login.html"
     authentication_form = WorkspaceAuthenticationForm
     redirect_authenticated_user = True
+
+    def get_success_url(self):
+        # Workspace policy deliberately supersedes stale ?next= partner routes.
+        return reverse(workspace_landing_route(self.request.user))
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -94,6 +98,7 @@ def access_control_page(request):
         ),
         "can_create_roles": has_function_access(request.user, "roles.create"),
         "organization_units": organization_units,
+        "performer_suppliers": get_user_model().objects.filter(employee_profile__account_type__in=["internal_vendor", "external_vendor"]).select_related("employee_profile").order_by("username") if request.user.is_superuser else [],
     })
 
 

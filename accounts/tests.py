@@ -179,7 +179,9 @@ class FunctionAccessTests(TestCase):
         self.assertTrue(has_function_access(self.user, "attempts.view"))
         self.assertFalse(has_function_access(self.user, "projects.view"))
         self.assertEqual(self.client.get(reverse("projects")).status_code, 403)
-        self.assertRedirects(self.client.get(reverse("home")), reverse("traffic-reports"), fetch_redirect_response=False)
+        # Default landing is Projects without dashboard access; this does not
+        # bypass the explicit Projects permission denial checked above.
+        self.assertRedirects(self.client.get(reverse("home")), reverse("projects"), fetch_redirect_response=False)
 
     def test_dashboard_access_follows_role_or_user_function_permission(self):
         dashboard = AccessFunction.objects.get(code="dashboard.view")

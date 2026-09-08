@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Avg, Count, Max, Min, Q, Sum
+from django.db.models import Avg, Case, CharField, Count, F, IntegerField, Max, Min, Q, Sum, Value, When
 from django.utils import timezone
 
 from accounts.access import activity_visible_user_ids
@@ -13,11 +13,14 @@ from accounts.models import EmployeeProfile
 
 from .filters import SurveyAttemptFilter
 from .models import SurveyAttempt
+from .performer_policy import configured_performers
 
 
 COMPLETED = SurveyAttempt.Status.COMPLETED
 INITIATED = (SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED)
 DASHBOARD_RANGE_LABELS = {
+    "today": "Today",
+    "15d": "Last 15 days", "21d": "Last 21 days", "28d": "Last 28 days",
     "24h": "Last 24 hours",
     "48h": "Last 48 hours",
     "7d": "Last 7 days",
@@ -125,7 +128,15 @@ def dashboard_range_window(range_key, now=None, financial_year=None):
     buckets = []
     bucket_label = ""
 
-    if key in {"24h", "48h"}:
+    if key == "today":
+        start = local_end.replace(hour=0, minute=0, second=0, microsecond=0)
+        lower = start
+        while lower < end:
+            upper = min(end, lower + timedelta(hours=2))
+            buckets.append({"key": lower.isoformat(), "label": lower.strftime("%d %b %I %p"), "short_label": lower.strftime("%I %p").lstrip("0"), "lower": lower, "upper": upper})
+            lower = upper
+        bucket_label = "2-hour intervals"
+    elif key in {"24h", "48h"}:
         hours = int(key[:-1])
         bucket_hours = hours // 12
         start = end - timedelta(hours=hours)
@@ -140,9 +151,10 @@ def dashboard_range_window(range_key, now=None, financial_year=None):
                 "upper": upper,
             })
         bucket_label = f"{bucket_hours}-hour intervals"
-    elif key == "7d":
-        start = end - timedelta(days=7)
-        for index in range(7):
+    elif key in {"7d", "15d", "21d", "28d"}:
+        days = int(key[:-1])
+        start = end - timedelta(days=days)
+        for index in range(days):
             lower = start + timedelta(days=index)
             upper = min(end, lower + timedelta(days=1))
             buckets.append({
@@ -348,7 +360,24 @@ def _client_distribution(queryset, user, card_access):
 
 
 def _top_suppliers(queryset, user, card_access, total_completes):
+    unit = "platform_user__employee_profile__organization_unit"
+    queryset = queryset.annotate(
+        ranking_branch_id=Case(
+            When(**{unit + "__unit_type": "branch"}, then=F(unit + "__id")),
+            When(**{unit + "__unit_type": "sub_branch"}, then=F(unit + "__parent_id")),
+            When(**{unit + "__unit_type": "shift"}, then=F(unit + "__parent__parent_id")),
+            output_field=IntegerField(),
+        ),
+    ).annotate(**{
+        "ranking_" + key: Case(
+            When(ranking_branch_id__isnull=True, then=F("platform_user__" + field)),
+            default=Value(None if key == "user_id" else ""),
+            output_field=IntegerField() if key == "user_id" else CharField(),
+        )
+        for key, field in (("user_id", "id"), ("first_name", "first_name"), ("last_name", "last_name"), ("username", "username"))
+    })
     rows = queryset.values(
+        "ranking_branch_id", "ranking_user_id", "ranking_first_name", "ranking_last_name", "ranking_username",
         "vendor_id", "vendor__first_name", "vendor__last_name", "vendor__username",
         "vendor__employee_profile__company_name",
         "platform_user__employee_profile__organization_unit__unit_type",
@@ -368,7 +397,7 @@ def _top_suppliers(queryset, user, card_access, total_completes):
     for row in rows:
         supplier_name = row["vendor__employee_profile__company_name"] or " ".join(filter(None, [
             row["vendor__first_name"], row["vendor__last_name"],
-        ])).strip() or row["vendor__username"] or "Direct traffic"
+        ])).strip() or row["vendor__username"] or ""
         unit_type = row["platform_user__employee_profile__organization_unit__unit_type"]
         if unit_type == "branch":
             branch_name = row["platform_user__employee_profile__organization_unit__name"]
@@ -378,12 +407,14 @@ def _top_suppliers(queryset, user, card_access, total_completes):
             branch_name = row["platform_user__employee_profile__organization_unit__parent__parent__name"]
         else:
             branch_name = None
-        branch_name = branch_name or "Unassigned branch"
-        key = (row["vendor_id"], supplier_name, branch_name)
+        user_name = " ".join(filter(None, [row["ranking_first_name"], row["ranking_last_name"]])).strip() or row["ranking_username"] or "Deleted user"
+        display_name = (supplier_name or branch_name) if branch_name else user_name
+        subtitle = branch_name if branch_name and supplier_name else ""
+        key = (row["vendor_id"], row["ranking_branch_id"], row["ranking_user_id"])
         item = merged.setdefault(key, {
             "supplier_id": row["vendor_id"],
-            "name": supplier_name,
-            "branch_name": branch_name,
+            "name": display_name,
+            "branch_name": subtitle,
             "hits": 0,
             "completes": 0,
             "revenue": Decimal("0.00"),
@@ -685,7 +716,7 @@ def build_dashboard_payload(
             )
         } if chart_access.get("device") else None,
         "top_suppliers": (
-            _top_suppliers(queryset, user, card_access, totals["completes"])
+            configured_performers(queryset, user, card_access, totals["completes"], range_window)
             if chart_access.get("top_users") else None
         ),
         "generated_at": timezone.now(),
