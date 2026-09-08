@@ -19,6 +19,7 @@ from .performer_policy import configured_performers
 COMPLETED = SurveyAttempt.Status.COMPLETED
 INITIATED = (SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED)
 DASHBOARD_RANGE_LABELS = {
+    "custom": "Selected dates",
     "date": "Selected date",
     "today": "Today",
     "15d": "Last 15 days", "21d": "Last 21 days", "28d": "Last 28 days",
@@ -116,7 +117,7 @@ def dashboard_financial_year_options(queryset, now=None):
     ]
 
 
-def dashboard_range_window(range_key, now=None, financial_year=None, selected_date=None):
+def dashboard_range_window(range_key, now=None, financial_year=None, selected_date=None, date_from=None, date_to=None):
     """Return one analytics window and its chart buckets in the active timezone."""
 
     key = str(range_key or "24h").strip().lower()
@@ -129,7 +130,28 @@ def dashboard_range_window(range_key, now=None, financial_year=None, selected_da
     buckets = []
     bucket_label = ""
 
-    if key == "date":
+    if key == "custom":
+        try:
+            first, last = date.fromisoformat(str(date_from)), date.fromisoformat(str(date_to))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Select valid From and To dates (YYYY-MM-DD).") from exc
+        if first > last:
+            raise ValueError("From date must be on or before To date.")
+        if last > local_end.date():
+            raise ValueError("Select today or earlier dates.")
+        if (last - first).days > 366 * 5:
+            raise ValueError("Select a date range of up to five years.")
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(datetime.combine(first, time.min), tz)
+        end = min(end, timezone.make_aware(datetime.combine(last + timedelta(days=1), time.min), tz))
+        days = (last - first).days + 1
+        lower = start
+        while lower < end:
+            upper = min(end, lower + timedelta(hours=2) if days == 1 else lower + timedelta(days=1) if days <= 62 else _month_shift(lower, 1))
+            buckets.append({"key": lower.isoformat(), "label": lower.strftime("%d %b %Y %I %p"), "short_label": lower.strftime("%I %p").lstrip("0") if days == 1 else lower.strftime("%d %b") if days <= 62 else lower.strftime("%b %Y"), "lower": lower, "upper": upper})
+            lower = upper
+        bucket_label = "2-hour intervals" if days == 1 else "Daily intervals" if days <= 62 else "Monthly intervals"
+    elif key == "date":
         try:
             chosen = date.fromisoformat(str(selected_date))
         except (TypeError, ValueError) as exc:
@@ -254,7 +276,7 @@ def dashboard_range_window(range_key, now=None, financial_year=None, selected_da
         "key": key,
         "label": (
             f"Financial year {selected_year}-{str(selected_year + 1)[-2:]}"
-            if key == "fy" else chosen.strftime("%d %b %Y") if key == "date" else DASHBOARD_RANGE_LABELS[key]
+            if key == "fy" else f"{first:%d %b %Y} – {last:%d %b %Y}" if key == "custom" else chosen.strftime("%d %b %Y") if key == "date" else DASHBOARD_RANGE_LABELS[key]
         ),
         "bucket_label": bucket_label,
         "start": start,

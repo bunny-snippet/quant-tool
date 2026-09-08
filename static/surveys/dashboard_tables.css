@@ -40,3 +40,8 @@
 .bi-command-secondary .dashboard-live{margin:0;justify-self:end}
 @media(max-width:640px){.bi-command-secondary{gap:8px}.bi-command-secondary .dashboard-live{max-width:165px;justify-content:center}.bi-command-secondary .dashboard-live small{border:0;margin:0;padding:0}}
 .bi-date-select input{max-width:155px;font-size:12px}
+.bi-custom-dates{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;margin:0}
+.bi-custom-dates .bi-date-select{display:flex;align-items:center;gap:5px;font-size:11px;color:inherit}
+.bi-command-actions .bi-range-switch{flex-wrap:wrap;justify-content:flex-end}
+.bi-custom-dates input{min-width:125px;padding:8px}
+@media(max-width:640px){.bi-custom-dates{flex-basis:100%;display:grid;grid-template-columns:1fr 1fr auto}.bi-custom-dates .bi-date-select{display:grid;gap:4px;min-width:0}.bi-custom-dates input{width:100%;min-width:0;box-sizing:border-box}.bi-custom-dates button{align-self:end}}

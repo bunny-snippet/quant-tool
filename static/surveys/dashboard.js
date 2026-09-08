@@ -2,13 +2,15 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
-  const ranges = new Set(['24h', '48h', 'date', 'month', 'fy']);
+  const ranges = new Set(['24h', '48h', 'date', 'custom', 'month', 'fy']);
   const initialQuery = new URLSearchParams(location.search);
   const initialMainRange = ranges.has(initialQuery.get('range')) ? initialQuery.get('range') : '24h';
   const state = {
     range: initialMainRange,
     financialYear: initialQuery.get('financial_year') || '',
     date: initialQuery.get('date') || '',
+    dateFrom: initialQuery.get('date_from') || initialQuery.get('date') || '',
+    dateTo: initialQuery.get('date_to') || initialQuery.get('date') || '',
     client: initialQuery.get('client') || '',
     trafficClient: initialQuery.get('traffic_client') || '',
     financeClient: initialQuery.get('finance_client') || '',
@@ -360,7 +362,8 @@
       clientSelect.innerHTML = '<option value="">All clients</option>' + (data.graph_clients || []).map(row => `<option value="${Number(row.id)}">${escapeHtml(row.name)}</option>`).join('');
       clientSelect.value = state.client;
     }
-    if (byId('dashboardDate')) byId('dashboardDate').value = state.range === 'date' ? state.date : '';
+    if (byId('dashboardDateFrom')) byId('dashboardDateFrom').value = ['custom','date'].includes(state.range) ? state.dateFrom : '';
+    if (byId('dashboardDateTo')) byId('dashboardDateTo').value = ['custom','date'].includes(state.range) ? state.dateTo : '';
     renderOperationalInsights(data);
     renderVolume(data.traffic_chart?.points, data.traffic_chart?.range?.label || data.range.label);
     renderFinance(data.finance_chart?.points, data.summary?.revenue_currency || 'USD', data.finance_chart?.range?.label || data.range.label);
@@ -393,6 +396,7 @@
       const query = new URLSearchParams({ range: state.range });
       if (state.range === 'fy' && state.financialYear) query.set('financial_year', state.financialYear);
       if (state.range === 'date' && state.date) query.set('date', state.date);
+      if (state.range === 'custom') { query.set('date_from',state.dateFrom); query.set('date_to',state.dateTo); }
       if (state.client) query.set('client', state.client);
       if (document.querySelector('[data-graph-toolbar="traffic"]')) {
         if (state.trafficClient) query.set('traffic_client', state.trafficClient);
@@ -429,6 +433,7 @@
       const url = new URL(location.href);
       url.searchParams.set('range', state.range);
       if (state.range !== 'date') url.searchParams.delete('date');
+      url.searchParams.delete('date_from'); url.searchParams.delete('date_to');
       url.searchParams.delete('traffic_range');
       url.searchParams.delete('finance_range');
       url.searchParams.delete('traffic_financial_year');
@@ -448,19 +453,25 @@
     const url = new URL(location.href);
     url.searchParams.set('range', 'fy'); url.searchParams.set('financial_year', event.target.value);
     url.searchParams.delete('date');
+    url.searchParams.delete('date_from'); url.searchParams.delete('date_to');
     url.searchParams.delete('traffic_range'); url.searchParams.delete('traffic_financial_year');
     url.searchParams.delete('finance_range'); url.searchParams.delete('finance_financial_year');
     history.replaceState({}, '', url);
     loadDashboard();
   });
 
-  byId('dashboardDate')?.addEventListener('change', (event) => {
-    if (!event.target.value) return;
-    state.range = 'date'; state.date = event.target.value;
+  byId('dashboardDates')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const from = byId('dashboardDateFrom'), to = byId('dashboardDateTo');
+    to.setCustomValidity(from.value > to.value ? 'To date must be on or after From date.' : '');
+    if (!event.target.reportValidity()) return;
+    state.range = 'custom'; state.dateFrom = from.value; state.dateTo = to.value;
     const url = new URL(location.href);
-    url.searchParams.set('range', 'date'); url.searchParams.set('date', state.date);
+    url.searchParams.set('range', 'custom'); url.searchParams.set('date_from', state.dateFrom); url.searchParams.set('date_to', state.dateTo);
+    url.searchParams.delete('date'); url.searchParams.delete('financial_year');
     history.replaceState({}, '', url); loadDashboard();
   });
+  ['dashboardDateFrom','dashboardDateTo'].forEach(id => byId(id)?.addEventListener('input',()=>byId('dashboardDateTo').setCustomValidity('')));
   byId('dashboardClient')?.addEventListener('change', (event) => {
     state.client = event.target.value;
     const url = new URL(location.href);

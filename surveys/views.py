@@ -3955,6 +3955,8 @@ class DashboardAPIView(APIView):
                     now=dashboard_now,
                     financial_year=selected_year,
                     selected_date=request.query_params.get("date"),
+                    date_from=request.query_params.get("date_from"),
+                    date_to=request.query_params.get("date_to"),
                 )
 
             range_window = selected_window("range", "financial_year")
@@ -4015,7 +4017,7 @@ class DashboardAPIView(APIView):
 
         try:
             from .partner_report_cache import cached_report_payload
-            payload = cached_report_payload("dashboard-v4", request, load_dashboard)
+            payload = cached_report_payload("dashboard-v5", request, load_dashboard)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)

@@ -14,7 +14,7 @@
       <button type="button" class="active" data-dashboard-range="24h" aria-pressed="true">24 hr</button>
       <button type="button" data-dashboard-range="48h" aria-pressed="false">48 hr</button>
       <button type="button" data-dashboard-range="month" aria-pressed="false">Current month</button>
-      <label class="bi-date-select"><span class="sr-only">Calendar date</span><input id="dashboardDate" type="date" aria-label="Calendar date"></label>
+      <form id="dashboardDates" class="bi-custom-dates"><label class="bi-date-select"><span>From</span><input id="dashboardDateFrom" type="date" aria-label="From date" required></label><label class="bi-date-select"><span>To</span><input id="dashboardDateTo" type="date" aria-label="To date" required></label><button type="submit">Apply</button></form>
       <label class="bi-fy-select" data-dashboard-fy-control><span class="sr-only">Financial year</span><select id="dashboardFinancialYear" aria-label="Financial year"><option value="">Financial year</option></select></label>
     </div>
     <div class="bi-command-secondary">

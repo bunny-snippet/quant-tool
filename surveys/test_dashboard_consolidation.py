@@ -67,6 +67,21 @@ class DashboardConsolidationTests(TestCase):
         for invalid in ['invalid','2026-09-40','2027-01-01',None]:
             with self.assertRaises(ValueError): dashboard_range_window('date',now=self.now,selected_date=invalid)
 
+    def test_custom_dates_inclusive_end_and_bounded_buckets(self):
+        window = dashboard_range_window('custom', now=self.now, date_from='2026-08-01', date_to='2026-08-31')
+        self.assertEqual(window['start'].date(),date(2026,8,1))
+        self.assertEqual(window['end'].date(),date(2026,9,1))
+        self.assertEqual(len(window['buckets']),31)
+        today = dashboard_range_window('custom', now=self.now, date_from='2026-09-07', date_to='2026-09-07')
+        self.assertEqual(today['end'], self.now)
+        for first,last in [('2026-09-08','2026-09-07'),('invalid','2026-09-07'),('2026-08-01',None),('2026-08-01','2028-01-01')]:
+            with self.assertRaises(ValueError): dashboard_range_window('custom', now=self.now, date_from=first, date_to=last)
+        api=APIClient(); api.force_authenticate(self.admin)
+        with patch('surveys.views.timezone.now',return_value=self.now):
+            response=api.get(reverse('dashboard-api'),{'range':'custom','date_from':'2026-09-07','date_to':'2026-09-07'})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.data['summary']['hits'],4)
+
     def test_reports_permission_routing_and_card_removal(self):
         self.client.force_login(self.admin)
         self.assertRedirects(self.client.get(reverse('reports')),reverse('reports-traffic'),fetch_redirect_response=False)

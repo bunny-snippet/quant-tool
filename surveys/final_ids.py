@@ -195,6 +195,8 @@ def import_final_ids(
     now = timezone.now()
 
     with transaction.atomic():
+        # Serialize final decisions and historical repairs per client.
+        Client.objects.select_for_update().get(pk=client.pk)
         upload = FinalIDUpload.objects.create(
             client=client,
             accounting_month=accounting_month,
@@ -225,7 +227,7 @@ def import_final_ids(
             and attempt.status in final_lifecycle_statuses
         }
         auto_rejected_attempts = []
-        if decision == FinalIDUpload.Decision.ACCEPTED:
+        if decision == FinalIDUpload.Decision.ACCEPTED and eligible_attempts:
             lower, upper = _accounting_month_bounds(accounting_month)
             auto_rejected_attempts = list(
                 SurveyAttempt.objects.select_for_update().select_related(
@@ -235,7 +237,7 @@ def import_final_ids(
                     status=SurveyAttempt.Status.COMPLETED,
                     initiated_at__gte=lower,
                     initiated_at__lt=upper,
-                ).exclude(rid__in=rids)
+                ).exclude(rid__in=rids).filter(final_id_status__isnull=True)
             )
         all_eligible_attempts = [*eligible_attempts.values(), *auto_rejected_attempts]
         existing_statuses = {

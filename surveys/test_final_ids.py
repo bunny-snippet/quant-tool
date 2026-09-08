@@ -3,6 +3,8 @@ from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command, CommandError
+from io import StringIO
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -157,6 +159,48 @@ class FinalIDImportTests(TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(FinalIDStatus.objects.get(attempt=terminated).status, "accepted")
+
+    def test_omission_preserves_previously_accepted_and_rejected_can_later_accept(self):
+        SurveyAttempt.objects.filter(pk=self.completed.pk).update(initiated_at=timezone.make_aware(datetime(2026,8,10)))
+        params={'client':self.client_record.pk,'month':8,'year':2026,'status':'accepted'}
+        self.client.post(reverse('final-ids-import'),{**params,'file':self.upload('RID\nFinalRID01\n')})
+        other=SurveyAttempt.objects.create(rid='FinalRID03',survey=self.survey,user_id='1',status='1',initiated_at=timezone.make_aware(datetime(2026,8,12)))
+        omitted=SurveyAttempt.objects.create(rid='FinalRID04',survey=self.survey,user_id='1',status='1',initiated_at=timezone.make_aware(datetime(2026,8,13)))
+        response=self.client.post(reverse('final-ids-import'),{**params,'file':self.upload('RID\nFinalRID03\n')})
+        self.assertEqual(response.json()['result']['auto_rejected'],1)
+        self.assertEqual(FinalIDStatus.objects.get(attempt=self.completed).status,'accepted')
+        self.assertEqual(FinalIDStatus.objects.get(attempt=omitted).status,'rejected')
+        response=self.client.post(reverse('final-ids-import'),{**params,'month':10,'file':self.upload('RID\nFinalRID04\n')})
+        self.assertEqual(response.status_code,200)
+        final=FinalIDStatus.objects.get(attempt=omitted)
+        self.assertEqual((final.status,final.accounting_month),('accepted',date(2026,10,1)))
+        self.assertEqual(final.upload.items.get().previous_status,'rejected')
+        self.assertEqual(FinalIDStatus.objects.get(attempt=other).status,'accepted')
+
+    def test_unmatched_accepted_file_does_not_reject_a_month(self):
+        SurveyAttempt.objects.filter(pk=self.completed.pk).update(initiated_at=timezone.make_aware(datetime(2026,8,10)))
+        response=self.client.post(reverse('final-ids-import'),{'client':self.client_record.pk,'month':8,'year':2026,'status':'accepted','file':self.upload('RID\nMissing001\n')})
+        self.assertEqual(response.json()['result']['auto_rejected'],0)
+        self.assertFalse(FinalIDStatus.objects.exists())
+
+    def test_historical_repair_dry_run_expected_count_and_idempotence(self):
+        SurveyAttempt.objects.filter(pk=self.completed.pk).update(initiated_at=timezone.make_aware(datetime(2026,8,10)))
+        response=self.client.post(reverse('final-ids-import'),{'client':self.client_record.pk,'month':8,'year':2026,'status':'accepted','file':self.upload('RID\nFinalRID01\n')})
+        source_id=response.json()['result']['upload_id']
+        omitted=SurveyAttempt.objects.create(rid='FinalRID03',survey=self.survey,user_id='1',status='1',initiated_at=timezone.make_aware(datetime(2026,8,12)))
+        before=omitted.initiated_at
+        call_command('reconcile_pending_final_ids',upload_id=source_id,stdout=StringIO())
+        self.assertFalse(FinalIDStatus.objects.filter(attempt=omitted).exists())
+        with self.assertRaises(CommandError): call_command('reconcile_pending_final_ids',upload_id=source_id,apply=True,expected_count=2,stdout=StringIO())
+        call_command('reconcile_pending_final_ids',upload_id=source_id,apply=True,expected_count=1,stdout=StringIO())
+        final=FinalIDStatus.objects.get(attempt=omitted)
+        self.assertEqual(final.status,'rejected')
+        self.assertEqual(final.upload.items.get().previous_status,'')
+        self.assertEqual(FinalIDStatus.objects.get(attempt=self.completed).status,'accepted')
+        omitted.refresh_from_db(); self.assertEqual(omitted.initiated_at,before)
+        count=FinalIDUpload.objects.count()
+        call_command('reconcile_pending_final_ids',upload_id=source_id,apply=True,expected_count=0,stdout=StringIO())
+        self.assertEqual(FinalIDUpload.objects.count(),count)
 
     def test_import_does_not_update_wrong_client_or_noncompleted_rids(self):
         response = self.client.post(reverse("final-ids-import"), {
