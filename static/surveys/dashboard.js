@@ -2,12 +2,14 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
-  const ranges = new Set(['24h', '48h', '7d', 'month', '3m', '6m', 'fy']);
+  const ranges = new Set(['24h', '48h', 'date', 'month', 'fy']);
   const initialQuery = new URLSearchParams(location.search);
   const initialMainRange = ranges.has(initialQuery.get('range')) ? initialQuery.get('range') : '24h';
   const state = {
     range: initialMainRange,
     financialYear: initialQuery.get('financial_year') || '',
+    date: initialQuery.get('date') || '',
+    client: initialQuery.get('client') || '',
     trafficClient: initialQuery.get('traffic_client') || '',
     financeClient: initialQuery.get('finance_client') || '',
     controller: null,
@@ -63,6 +65,7 @@
   function updateSummary(summary, comparison) {
     const currency = summary.revenue_currency || 'USD';
     animateNumber(byId('dashboardRevenue'), summary.revenue, (value) => formatCurrency(value, currency));
+    animateNumber(byId('dashboardInvoicedRevenue'), summary.invoiced_revenue, (value) => formatCurrency(value, currency));
     animateNumber(byId('dashboardHits'), summary.hits);
     animateNumber(byId('dashboardCompletes'), summary.completes);
     animateNumber(byId('dashboardConversion'), summary.conversion_rate, (value) => `${value.toFixed(1)}%`);
@@ -137,48 +140,66 @@
   function renderTimeline(host, rows, options) {
     if (!host) return;
     if (!rows?.length) { host.innerHTML = '<div class="dashboard-empty">No data is available for this range.</div>'; return; }
-    if (!rows.some(row => Number(row.hits || 0) || Number(row.completes || 0) || Number(row.revenue || 0))) {
+    if (!rows.some(row => Number(row.hits || 0) || Number(row.completes || 0) || Number(row.revenue || 0) || Number(row.invoiced_revenue || 0))) {
       host.innerHTML = '<div class="dashboard-empty">No activity in this period for the selected client.</div>'; return;
     }
     const width = Math.max(320, Math.round(host.clientWidth || 700)), height = 360;
     const left = options.finance ? 76 : 56, right = 20, plotWidth = width - left - right;
     const keys = options.bars.filter(key => rows.some(row => row[key] != null));
-    if (!keys.length && !options.hasLine) {
+    if (!keys.length && !options.hasLine && !options.invoiceOverlay) {
       host.innerHTML = '<div class="dashboard-empty">Financial metrics are not available for this view.</div>'; return;
     }
-    const top = 32, mainHeight = options.hasLine ? 150 : 266;
+    const overlay = options.lineKey === 'invoiced_revenue';
+    const top = 32, mainHeight = options.hasLine && !overlay ? 150 : 266;
     const rateTop = keys.length ? 240 : 48, rateHeight = keys.length ? 66 : 258;
     const group = plotWidth / rows.length;
     const x = index => left + group * (index + .5);
-    const scale = chartScale(Math.max(0, ...rows.flatMap(row => keys.map(key => Number(row[key] || 0)))), options.finance ? .01 : 1);
+    const scale = chartScale(Math.max(0, ...rows.flatMap(row => [...keys, ...(overlay || options.invoiceOverlay ? ['invoiced_revenue'] : [])].map(key => Number(row[key] || 0)))), options.finance ? .01 : 1);
     const rateScale = options.finance ? chartScale(Math.max(0, ...rows.map(row => Number(row[options.lineKey] || 0))), .01) : {maximum:100,ticks:[0,50,100]};
     const y = value => top + mainHeight - Number(value || 0) / scale.maximum * mainHeight;
-    const rateY = value => rateTop + rateHeight - Math.min(rateScale.maximum, Math.max(0, Number(value || 0))) / rateScale.maximum * rateHeight;
+    const rateY = value => overlay ? y(value) : rateTop + rateHeight - Math.min(rateScale.maximum, Math.max(0, Number(value || 0))) / rateScale.maximum * rateHeight;
     const title = escapeHtml(options.title + ' · ' + options.rangeLabel);
     let svg = '<svg class="bi-chart-svg bi-clean-chart" viewBox="0 0 '+width+' '+height+'" role="group" aria-label="'+title+'">';
-    if (keys.length) {
+    if (keys.length || options.invoiceOverlay) {
       svg += '<text class="bi-axis-caption" x="'+left+'" y="16">'+(options.finance ? 'Revenue' : 'Entrants / completes')+'</text><g class="bi-chart-grid">';
       for (const tick of scale.ticks) svg += '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+y(tick)+'" y2="'+y(tick)+'"/><text x="'+(left-10)+'" y="'+(y(tick)+4)+'" text-anchor="end">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : number(tick))+'</text>';
       svg += '</g>';
       const barWidth = Math.max(.5, Math.min(options.finance ? 24 : 16, group * .65 / keys.length));
       rows.forEach((row,index) => keys.forEach((key,k) => {
         if (row[key] == null) return;
-        const cls = key === 'revenue' ? 'bi-finance-bar' : key === 'hits' ? 'bi-volume-hit' : 'bi-volume-complete';
+        const cls = key === 'revenue' ? 'bi-finance-bar' : key === 'hits' ? 'bi-volume-hit' : key === 'rejected' ? 'bi-volume-rejected' : 'bi-volume-complete';
         const barX = x(index) - (keys.length * barWidth + (keys.length-1)*2)/2 + k*(barWidth+2);
         svg += '<rect class="'+cls+'" x="'+barX+'" y="'+y(row[key])+'" width="'+barWidth+'" height="'+Math.max(0,top+mainHeight-y(row[key]))+'" rx="2"/>';
       }));
     }
+    if (options.invoiceOverlay) {
+      // Invoice totals use the revenue amount axis, never the per-entrant RPC axis.
+      let invoicePoints = [];
+      const flushInvoice = () => {
+        if (invoicePoints.length) svg += '<path class="bi-chart-line bi-invoiced-line" d="'+svgLine(invoicePoints)+'"/>';
+        invoicePoints = [];
+      };
+      rows.forEach((row, index) => {
+        if (row.invoiced_revenue == null) { flushInvoice(); return; }
+        const point = {x:x(index), y:y(row.invoiced_revenue)};
+        invoicePoints.push(point);
+        svg += '<circle class="bi-invoiced-dot" cx="'+point.x+'" cy="'+point.y+'" r="3"/>';
+      });
+      flushInvoice();
+    }
     if (options.hasLine) {
+      if (!overlay) {
       svg += '<text class="bi-axis-caption bi-rate-caption" x="'+left+'" y="'+(rateTop-16)+'">'+escapeHtml(options.lineLabel)+(options.finance ? (options.lineKey === 'average_cpi' ? ' · per complete' : ' · per entrant') : ' · completes ÷ entrants')+'</text><g class="bi-chart-grid bi-rate-grid">';
       for (const tick of rateScale.ticks) svg += '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+rateY(tick)+'" y2="'+rateY(tick)+'"/><text x="'+(left-10)+'" y="'+(rateY(tick)+4)+'" text-anchor="end">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : tick+'%')+'</text>';
       svg += '</g>';
+      }
       let points = [];
-      const flush = () => {if(points.length) svg += '<path class="bi-chart-line '+(options.finance?'bi-rpc-line':'bi-conversion-line')+'" d="'+svgLine(points)+'"/>'; points=[];};
+      const flush = () => {if(points.length) svg += '<path class="bi-chart-line '+(overlay?'bi-invoiced-line':options.finance?'bi-rpc-line':'bi-conversion-line')+'" d="'+svgLine(points)+'"/>'; points=[];};
       rows.forEach((row,index) => {
         // No entrants means no meaningful rate, not an artificial zero/drop.
-        if (row[options.lineKey] == null || !Number(row[options.lineKey === 'average_cpi' ? 'completes' : 'hits'])) {flush(); return;}
+        if (row[options.lineKey] == null || (!overlay && !Number(row[options.lineKey === 'average_cpi' ? 'completes' : 'hits']))) {flush(); return;}
         const point = {x:x(index),y:rateY(row[options.lineKey])}; points.push(point);
-        svg += '<circle class="'+(options.finance?'bi-rpc-dot':'bi-rate-dot')+'" cx="'+point.x+'" cy="'+point.y+'" r="3"/>';
+        svg += '<circle class="'+(overlay?'bi-invoiced-dot':options.finance?'bi-rpc-dot':'bi-rate-dot')+'" cx="'+point.x+'" cy="'+point.y+'" r="3"/>';
       });
       flush();
     }
@@ -193,24 +214,27 @@
   }
 
   function renderVolume(rows, rangeLabel = '') {
-    const details = row => [['Entrants',number(row.hits)],['Completes',number(row.completes)],['Conversion',row.hits ? Number(row.conversion_rate || 0).toFixed(1)+'%' : '—'],['IR',row.hits ? Number(row.incidence_rate || 0).toFixed(1)+'%' : '—']];
-    renderTimeline(byId('volumeChart'), rows, {bars:['hits','completes'],hasLine:true,lineKey:'conversion_rate',lineLabel:'Conversion',title:'Entrants, completes and conversion',rangeLabel,
+    const details = row => [['Entrants',number(row.hits)],['Completes',number(row.completes)],['Client rejected',number(row.rejected)],['Conversion',row.hits ? Number(row.conversion_rate || 0).toFixed(1)+'%' : '—'],['IR',row.hits ? Number(row.incidence_rate || 0).toFixed(1)+'%' : '—']];
+    renderTimeline(byId('volumeChart'), rows, {bars:['hits','completes','rejected'],hasLine:true,lineKey:'conversion_rate',lineLabel:'Conversion',title:'Entrants, completes and rejections',rangeLabel,
       details,tooltipText:row=>row.label+' · '+details(row).map(pair=>pair.join(' ')).join(' · ')});
   }
 
   function renderFinance(rows, currency, rangeLabel = '') {
     const hasRevenue = !!rows?.some(row=>row.revenue != null);
+    const hasInvoice = !!rows?.some(row=>row.invoiced_revenue != null);
     const lineKey = rows?.some(row=>row.rpc != null) ? 'rpc' : 'average_cpi';
     const lineLabel = lineKey === 'rpc' ? 'RPC' : 'Average CPI';
     const hasLine = !!rows?.some(row=>row[lineKey] != null);
     byId('financeBarLegend')?.toggleAttribute('hidden', !hasRevenue);
-    const legend = byId('financeLineLegend'); if(legend){legend.hidden=!hasLine;legend.lastChild.textContent=lineLabel;}
+    byId('financeInvoiceLegend')?.toggleAttribute('hidden', !hasInvoice);
+    const legend = byId('financeLineLegend'); if(legend){legend.hidden=!hasLine;legend.lastChild.textContent=lineLabel;legend.firstElementChild.className = lineKey === 'invoiced_revenue' ? 'legend-invoiced' : 'legend-rpc';}
     const details = row => [
       ...(hasRevenue ? [['Revenue',row.revenue == null ? '—' : formatCurrency(row.revenue,currency)]] : []),
-      ...(hasLine ? [[lineLabel,row[lineKey] == null || !Number(row[lineKey === 'average_cpi' ? 'completes' : 'hits']) ? '—' : formatCurrency(row[lineKey],currency)]] : []),
+      ...(hasInvoice ? [['Invoiced revenue',row.invoiced_revenue == null ? '—' : formatCurrency(row.invoiced_revenue,currency)]] : []),
+      ...(hasLine ? [[lineLabel,row[lineKey] == null || (lineKey !== 'invoiced_revenue' && !Number(row[lineKey === 'average_cpi' ? 'completes' : 'hits'])) ? '—' : formatCurrency(row[lineKey],currency)]] : []),
       ['Completes',number(row.completes)],['Entrants',number(row.hits)],
     ];
-    renderTimeline(byId('financeChart'),rows,{bars:hasRevenue?['revenue']:[],hasLine,lineKey,lineLabel,finance:true,currency,title:'Revenue and '+lineLabel,rangeLabel,
+    renderTimeline(byId('financeChart'),rows,{bars:hasRevenue?['revenue']:[],hasLine,lineKey,lineLabel,invoiceOverlay:hasInvoice,finance:true,currency,title:'Revenue'+(hasInvoice?', invoiced revenue':'')+(hasLine?' and '+lineLabel:''),rangeLabel,
       details,tooltipText:row=>row.label+' · '+details(row).map(pair=>pair.join(' ')).join(' · ')});
   }
 
@@ -235,7 +259,7 @@
       ['security', 'Quality / security', data.security],
     ];
     const total = Math.max(1, rows.reduce((sum, row) => sum + Number(row[2] || 0), 0));
-    const resolved = Math.max(0, total - Number(data.initiated || 0));
+    const resolved = rows.slice(1).reduce((sum, row) => sum + Number(row[2] || 0), 0);
     const yieldRate = resolved ? Number(data.completed || 0) / resolved * 100 : 0;
     host.innerHTML = `<div class="bi-status-headline"><span><small>Resolved outcomes</small><strong>${number(resolved)}</strong></span><span><small>Resolved yield</small><strong>${yieldRate.toFixed(1)}%</strong></span></div>${rows.map(([type, label, value], index) => `<div class="bi-status-row ${type}" style="--index:${index}"><span><i></i>${label}</span><div><b style="--progress:${Number(value || 0) / total * 100}%"></b></div><strong>${number(value)}</strong><em>${(Number(value || 0) / total * 100).toFixed(1)}%</em></div>`).join('')}`;
   }
@@ -269,27 +293,32 @@
     if (!state.financialYear || !years.some((year) => String(year.start_year) === String(state.financialYear))) state.financialYear = fallback;
     const select = byId('dashboardFinancialYear'); if (!select) return;
     select.innerHTML = `<option value="">Financial year</option>${years.map((year) => `<option value="${year.start_year}">${escapeHtml(year.label)}</option>`).join('')}`;
-    select.value = String(state.financialYear || '');
+    select.value = state.range === 'fy' ? String(state.financialYear || '') : '';
     select.closest('label')?.classList.toggle('active', state.range === 'fy');
   }
 
   function renderOperationalInsights(data) {
-    const host = byId('dashboardInsightStrip'); if (!host) return;
+    const host = byId('dashboardCompleteDetails'); if (!host) return;
     const summary = data.summary || {};
     const points = data.traffic_chart?.points || [];
     const durationHours = Math.max(1, (new Date(data.range.end) - new Date(data.range.start)) / 3600000);
     const hourlyCompletes = Number(summary.completes || 0) / durationHours;
     const lastHourCompletes = Number(summary.last_hour_completes || 0);
-    const peak = points.length ? points.reduce((best, row) => Number(row.completes || 0) > Number(best.completes || 0) ? row : best, points[0]) : null;
+    const completedPoints = points.filter(row => Number(row.completes || 0) > 0);
+    const peak = completedPoints.length ? completedPoints.reduce((best, row) => Number(row.completes || 0) > Number(best.completes || 0) ? row : best, completedPoints[0]) : null;
     const cards = [
-      ['Average completes', `${hourlyCompletes < 1 ? hourlyCompletes.toFixed(2) : hourlyCompletes.toFixed(1)} / hr`, `Last hour · ${number(lastHourCompletes)} completes`],
-      ['Peak completion window', peak ? peak.short_label : 'No activity', peak ? `${number(peak.completes)} completes · ${Number(peak.conversion_rate || 0).toFixed(1)}% CVR` : 'No selected-range traffic'],
+      ['Avg / hr', `${hourlyCompletes < 1 ? hourlyCompletes.toFixed(2) : hourlyCompletes.toFixed(1)}`, `Last hr: ${number(lastHourCompletes)}`],
+      ['Peak', peak ? number(peak.completes) : '—', peak ? peak.short_label : 'No completes'],
     ];
-    host.innerHTML = cards.map(([label, value, detail], index) => `<article style="--index:${index}"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong><span>${escapeHtml(detail)}</span></article>`).join('');
+    host.innerHTML = cards.map(([label, value, detail]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b><small>${escapeHtml(detail)}</small></span>`).join('');
   }
 
   function updateGraphControls(data) {
     populateFinancialYears(data);
+    document.querySelectorAll('[data-dashboard-range]').forEach(button => {
+      const active = button.dataset.dashboardRange === state.range;
+      button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+    });
     const clients = data.graph_clients || [];
     [['traffic', 'trafficGraphClient'], ['finance', 'financeGraphClient']].forEach(([graph, id]) => {
       const select = byId(id); if (!select) return;
@@ -303,6 +332,21 @@
     timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 
+  function renderPartnerTables(tables = {}) {
+    ['client', 'supplier'].forEach((section) => {
+      const panel = byId(`dashboardTable-${section}`);
+      const body = byId(`dashboardTableRows-${section}`);
+      if (!panel || !body) return;
+      const rows = tables[section];
+      panel.hidden = !Array.isArray(rows);
+      if (!Array.isArray(rows)) { body.innerHTML = ''; return; }
+      body.innerHTML = rows.length ? rows.map((row) => {
+        const rejection = Number(row.completes) > 0 ? Math.max(0, Math.min(100, Number(row.rejected) / Number(row.completes) * 100)) : 0;
+        return `<tr><td>${escapeHtml(row.name)}</td><td>${number(row.completes)}</td><td>${number(row.accepted)}</td><td>${number(row.rejected)}</td><td><span class="partner-share partner-rejection" title="Rejected ÷ completes"><span>${rejection.toFixed(1)}%</span><span class="partner-share-track" aria-hidden="true"><i style="width:${rejection}%"></i></span></span></td></tr>`;
+      }).join('') : '<tr><td colspan="5">No activity in this period</td></tr>';
+    });
+  }
+
   function render(data) {
     state.data = data;
     if (data.range?.financial_year) state.financialYear = String(data.range.financial_year);
@@ -311,6 +355,12 @@
     if (byId('trafficBucketLabel') && data.traffic_chart) byId('trafficBucketLabel').textContent = data.traffic_chart.range.bucket_label;
     if (byId('financeBucketLabel') && data.finance_chart) byId('financeBucketLabel').textContent = data.finance_chart.range.bucket_label;
     updateGraphControls(data);
+    const clientSelect = byId('dashboardClient');
+    if (clientSelect) {
+      clientSelect.innerHTML = '<option value="">All clients</option>' + (data.graph_clients || []).map(row => `<option value="${Number(row.id)}">${escapeHtml(row.name)}</option>`).join('');
+      clientSelect.value = state.client;
+    }
+    if (byId('dashboardDate')) byId('dashboardDate').value = state.range === 'date' ? state.date : '';
     renderOperationalInsights(data);
     renderVolume(data.traffic_chart?.points, data.traffic_chart?.range?.label || data.range.label);
     renderFinance(data.finance_chart?.points, data.summary?.revenue_currency || 'USD', data.finance_chart?.range?.label || data.range.label);
@@ -318,11 +368,16 @@
     renderStatus(data.status_breakdown);
     renderDevices(data.device_breakdown, data.device_performance);
     renderTopSuppliers(data.top_suppliers);
+    renderPartnerTables(data.partner_tables);
     const updated = byId('dashboardUpdatedAt');
     if (updated) updated.textContent = `${dashboardUpdatedFormatter.format(new Date(data.generated_at))} IST`;
   }
 
   function showError(message) {
+    ['client', 'supplier'].forEach((section) => {
+      const body = byId(`dashboardTableRows-${section}`);
+      if (body) body.innerHTML = `<tr><td colspan="5">Could not load data: ${escapeHtml(message)}</td></tr>`;
+    });
     document.querySelectorAll('.bi-chart-stage,.bi-client-body,.bi-status-list,.bi-device-body,.bi-performer-list').forEach((host) => {
       host.innerHTML = `<div class="dashboard-error"><strong>Could not load analytics</strong><span>${escapeHtml(message)}</span><button type="button" data-dashboard-retry>Try again</button></div>`;
     });
@@ -331,11 +386,14 @@
 
   async function loadDashboard() {
     state.controller?.abort(); state.controller = new AbortController();
+    const controller = state.controller;
     document.body.classList.add('dashboard-refreshing');
     document.querySelectorAll('[data-dashboard-range]').forEach((button) => { button.disabled = true; });
     try {
       const query = new URLSearchParams({ range: state.range });
       if (state.range === 'fy' && state.financialYear) query.set('financial_year', state.financialYear);
+      if (state.range === 'date' && state.date) query.set('date', state.date);
+      if (state.client) query.set('client', state.client);
       if (document.querySelector('[data-graph-toolbar="traffic"]')) {
         if (state.trafficClient) query.set('traffic_client', state.trafficClient);
       }
@@ -343,14 +401,16 @@
         if (state.financeClient) query.set('finance_client', state.financeClient);
       }
       const response = await fetch(`/api/v1/dashboard/?${query.toString()}`, {
-        signal: state.controller.signal, credentials: 'same-origin',
+        signal: controller.signal, credentials: 'same-origin',
       });
       const data = await response.json();
+      if (state.controller !== controller) return;
       if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
       render(data);
     } catch (error) {
-      if (error.name !== 'AbortError') showError(error.message);
+      if (state.controller === controller && error.name !== 'AbortError') showError(error.message);
     } finally {
+      if (state.controller !== controller) return;
       document.body.classList.remove('dashboard-refreshing');
       document.querySelectorAll('[data-dashboard-range]').forEach((button) => { button.disabled = false; });
     }
@@ -368,6 +428,7 @@
       });
       const url = new URL(location.href);
       url.searchParams.set('range', state.range);
+      if (state.range !== 'date') url.searchParams.delete('date');
       url.searchParams.delete('traffic_range');
       url.searchParams.delete('finance_range');
       url.searchParams.delete('traffic_financial_year');
@@ -386,10 +447,25 @@
     state.financialYear = event.target.value;
     const url = new URL(location.href);
     url.searchParams.set('range', 'fy'); url.searchParams.set('financial_year', event.target.value);
+    url.searchParams.delete('date');
     url.searchParams.delete('traffic_range'); url.searchParams.delete('traffic_financial_year');
     url.searchParams.delete('finance_range'); url.searchParams.delete('finance_financial_year');
     history.replaceState({}, '', url);
     loadDashboard();
+  });
+
+  byId('dashboardDate')?.addEventListener('change', (event) => {
+    if (!event.target.value) return;
+    state.range = 'date'; state.date = event.target.value;
+    const url = new URL(location.href);
+    url.searchParams.set('range', 'date'); url.searchParams.set('date', state.date);
+    history.replaceState({}, '', url); loadDashboard();
+  });
+  byId('dashboardClient')?.addEventListener('change', (event) => {
+    state.client = event.target.value;
+    const url = new URL(location.href);
+    if (state.client) url.searchParams.set('client', state.client); else url.searchParams.delete('client');
+    history.replaceState({}, '', url); loadDashboard();
   });
 
   [['traffic', 'trafficGraphClient'], ['finance', 'financeGraphClient']].forEach(([graph, id]) => {

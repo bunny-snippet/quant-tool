@@ -145,9 +145,11 @@ class PartnerDashboardTests(TestCase):
             self.assertEqual(response.status_code,200)
             self.assertIn(b'partner_dashboard.js',response.content)
             self.assertNotIn(b'Sample data',response.content)
-            self.assertIn(b'Client Dashboard',response.content)
-            self.assertIn(b'Supplier Dashboard',response.content)
-            self.assertIn(b'class="dashboard-home-link" href="/dashboard/"',response.content)
+            self.assertIn((section.title()+' Dashboard').encode(),response.content)
+            self.assertIn(b'href="/dashboard/"',response.content)
+            sidebar = response.content.split(b'<nav class="nav-list">')[1].split(b'</nav>')[0]
+            self.assertNotIn(b'/dashboard/client/',sidebar)
+            self.assertNotIn(b'/dashboard/supplier/',sidebar)
             self.assertNotIn(b'>Overview</a>',response.content)
             self.assertIn(b'id="pdLoading"',response.content)
 

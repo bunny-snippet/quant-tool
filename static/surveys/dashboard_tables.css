@@ -1,0 +1,42 @@
+.dashboard-partner-table{margin-top:20px;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:20px}
+.dashboard-partner-table>header{padding:20px 24px;border-bottom:1px solid var(--line)}
+.dashboard-partner-table h2{margin:0;font-size:18px;color:var(--navy)}
+.dashboard-partner-scroll{max-height:440px;overflow:auto}
+.dashboard-partner-table table{width:100%;min-width:620px;border-collapse:collapse;table-layout:fixed}
+.dashboard-partner-table th,.dashboard-partner-table td{padding:15px 20px;text-align:center;border-bottom:1px solid var(--line);color:var(--ink);font-variant-numeric:tabular-nums}
+.dashboard-partner-table th{position:sticky;top:0;z-index:1;background:var(--canvas);font-size:11px;color:var(--muted);font-weight:700}
+.dashboard-partner-table th:first-child,.dashboard-partner-table td:first-child{width:32%;text-align:left;overflow-wrap:anywhere}
+.dashboard-partner-table td:first-child{font-weight:700;color:var(--navy)}
+.dashboard-partner-table tbody tr:last-child td{border-bottom:0}
+.dashboard-partner-table tbody tr:hover{background:var(--cyan-soft)}
+.dashboard-partner-table .partner-share{display:flex;align-items:center;justify-content:center;gap:10px}
+.dashboard-partner-table .partner-share-track{width:64px;height:5px;border-radius:8px;background:var(--line);overflow:hidden}
+.dashboard-partner-table .partner-share-track i{display:block;height:100%;background:var(--cyan);border-radius:8px}
+.dashboard-partner-table .partner-rejection .partner-share-track i{background:#e45d70}
+
+.bi-volume-rejected{fill:#e45d70}
+.bi-invoiced-line{stroke:#29ad7b}
+.bi-invoiced-dot{fill:#29ad7b;stroke:var(--surface);stroke-width:2}
+.legend-rejected{background:#e45d70}
+.legend-invoiced{background:#29ad7b;width:12px!important;height:2px!important}
+.bi-kpi-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr))}
+.bi-kpi-grid>.bi-kpi{padding:12px;gap:8px}
+.bi-kpi-grid>.bi-kpi-completes{grid-column:span 2;display:flex;align-items:center;gap:8px}
+.bi-kpi-grid .bi-kpi-icon{width:32px;height:32px;flex-basis:32px}
+.bi-kpi-completes .complete-card-details{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-left:1px solid var(--line);padding-left:8px;margin-left:auto}
+.complete-card-details>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.bi-kpi-completes .complete-card-details small{font-size:9px;line-height:1.35;color:var(--muted);text-transform:none;letter-spacing:0;white-space:nowrap}
+.complete-card-details b{font-size:14px;color:var(--navy);font-variant-numeric:tabular-nums}
+@media(min-width:1600px) and (max-width:1850px){.bi-kpi-grid>.bi-kpi{padding:10px;gap:7px}.bi-kpi-grid .bi-kpi-icon{width:28px;height:28px;flex-basis:28px}.bi-kpi-grid strong{font-size:18px}.bi-kpi-grid small{font-size:7px}.bi-kpi-completes .complete-card-details small{font-size:8px}}
+@media(max-width:1599px){.bi-kpi-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(max-width:1050px){.bi-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.bi-kpi-grid>.bi-kpi:last-child:nth-child(odd){grid-column:auto}.bi-kpi-completes .bi-kpi-icon{margin-bottom:0}.bi-kpi-completes .complete-card-details small{font-size:8px}}
+.dashboard-global-client{display:flex;align-items:center;gap:12px;margin:0 0 18px;color:var(--muted)}
+.dashboard-global-client select,.bi-date-select input{color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font:inherit}
+.dashboard-global-client select{width:240px;max-width:75vw}
+.bi-command-secondary{display:grid;grid-template-columns:minmax(140px,1fr) auto;align-items:center;gap:12px;width:100%;min-width:0}
+.bi-command-actions .dashboard-global-client{margin:0;color:inherit;min-width:0;gap:8px}
+.bi-command-secondary .dashboard-global-client select{flex:1;min-width:0;width:180px;max-width:100%}
+.bi-command-secondary .dashboard-live{margin:0;justify-self:end}
+@media(max-width:640px){.bi-command-secondary{gap:8px}.bi-command-secondary .dashboard-live{max-width:165px;justify-content:center}.bi-command-secondary .dashboard-live small{border:0;margin:0;padding:0}}
+.bi-date-select input{max-width:155px;font-size:12px}

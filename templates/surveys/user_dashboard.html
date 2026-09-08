@@ -1,7 +1,11 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
 {% block title %}User Dashboard · Survey Workspace{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=5"><link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
 {% block content %}
+{% include 'surveys/_supplier_activity_tabs.html' %}
+<section class="user-activity-panel" id="userDataPanel" role="tabpanel" aria-labelledby="userDataTab" data-activity-panel="user-data">
 {% include 'surveys/_user_dashboard_content.html' %}
+</section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/user_dashboard.js' %}?v=3" defer></script>{% endblock %}
+{% block scripts %}<script data-activity-script="user-data" src="{% static 'surveys/user_dashboard.js' %}?v=3" defer></script><script src="{% static 'surveys/user_activity.js' %}?v=2" defer></script>{% endblock %}

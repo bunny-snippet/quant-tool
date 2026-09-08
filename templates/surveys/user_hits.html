@@ -1,28 +1,20 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
-{% block title %}User Activity · Survey Workspace{% endblock %}
-{% block header_title %}User Activity{% endblock %}
+{% block title %}Supplier Activity · Survey Workspace{% endblock %}
+{% block header_title %}Supplier Activity{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=5"><link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
 {% block content %}
-<section class="user-activity-switcher" data-user-activity-tabs>
-  <div class="user-activity-tabs" role="tablist" aria-label="User activity views">
-    <button class="user-activity-tab active" id="userHitsTab" type="button" role="tab" aria-selected="true" aria-controls="userHitsPanel" data-activity-tab="user-hits">
-      <strong>User Hits</strong>
-    </button>
-    {% if can_view_user_dashboard %}<button class="user-activity-tab" id="userDataTab" type="button" role="tab" aria-selected="false" aria-controls="userDataPanel" tabindex="-1" data-activity-tab="user-data">
-      <strong>User Data</strong>
-    </button>{% endif %}
-  </div>
-</section>
+{% include 'surveys/_supplier_activity_tabs.html' %}
 
-<section class="user-activity-panel" id="userHitsPanel" role="tabpanel" aria-labelledby="userHitsTab" data-activity-panel="user-hits">
+<section class="user-activity-panel" id="userHitsPanel" role="tabpanel" aria-labelledby="userHitsTab" data-activity-panel="user-hits"{% if activity_data_selected %} hidden{% endif %}>
   {% include 'surveys/_user_hits_content.html' %}
 </section>
-{% if can_view_user_dashboard %}<section class="user-activity-panel" id="userDataPanel" role="tabpanel" aria-labelledby="userDataTab" data-activity-panel="user-data" hidden>
+{% if can_view_user_dashboard %}<section class="user-activity-panel" id="userDataPanel" role="tabpanel" aria-labelledby="userDataTab" data-activity-panel="user-data"{% if not activity_data_selected %} hidden{% endif %}>
   {{ user_dashboard_panel|safe }}
 </section>{% endif %}
 {% endblock %}
 {% block scripts %}
-<script src="{% static 'surveys/user_activity.js' %}?v=1" defer></script>
-<script src="{% static 'surveys/user_hits.js' %}?v=10" defer></script>
-{% if can_view_user_dashboard %}<script src="{% static 'surveys/user_dashboard.js' %}?v=3" defer></script>{% endif %}
+<script data-activity-script="user-hits" src="{% static 'surveys/user_hits.js' %}?v=10" defer></script>
+{% if can_view_user_dashboard %}<script data-activity-script="user-data" src="{% static 'surveys/user_dashboard.js' %}?v=3" defer></script>{% endif %}
+<script src="{% static 'surveys/user_activity.js' %}?v=2" defer></script>
 {% endblock %}

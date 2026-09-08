@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Avg, Case, CharField, Count, F, IntegerField, Max, Min, Q, Sum, Value, When
@@ -19,6 +19,7 @@ from .performer_policy import configured_performers
 COMPLETED = SurveyAttempt.Status.COMPLETED
 INITIATED = (SurveyAttempt.Status.INITIATED, SurveyAttempt.Status.REDIRECTED)
 DASHBOARD_RANGE_LABELS = {
+    "date": "Selected date",
     "today": "Today",
     "15d": "Last 15 days", "21d": "Last 21 days", "28d": "Last 28 days",
     "24h": "Last 24 hours",
@@ -115,7 +116,7 @@ def dashboard_financial_year_options(queryset, now=None):
     ]
 
 
-def dashboard_range_window(range_key, now=None, financial_year=None):
+def dashboard_range_window(range_key, now=None, financial_year=None, selected_date=None):
     """Return one analytics window and its chart buckets in the active timezone."""
 
     key = str(range_key or "24h").strip().lower()
@@ -128,7 +129,22 @@ def dashboard_range_window(range_key, now=None, financial_year=None):
     buckets = []
     bucket_label = ""
 
-    if key == "today":
+    if key == "date":
+        try:
+            chosen = date.fromisoformat(str(selected_date))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Select a valid calendar date (YYYY-MM-DD).") from exc
+        if chosen > local_end.date():
+            raise ValueError("Select today or an earlier date.")
+        start = timezone.make_aware(datetime.combine(chosen, time.min), timezone.get_current_timezone())
+        end = min(end, start + timedelta(days=1))
+        lower = start
+        while lower < end:
+            upper = min(end, lower + timedelta(hours=2))
+            buckets.append({"key": lower.isoformat(), "label": lower.strftime("%d %b %I %p"), "short_label": lower.strftime("%I %p").lstrip("0"), "lower": lower, "upper": upper})
+            lower = upper
+        bucket_label = "2-hour intervals"
+    elif key == "today":
         start = local_end.replace(hour=0, minute=0, second=0, microsecond=0)
         lower = start
         while lower < end:
@@ -238,7 +254,7 @@ def dashboard_range_window(range_key, now=None, financial_year=None):
         "key": key,
         "label": (
             f"Financial year {selected_year}-{str(selected_year + 1)[-2:]}"
-            if key == "fy" else DASHBOARD_RANGE_LABELS[key]
+            if key == "fy" else chosen.strftime("%d %b %Y") if key == "date" else DASHBOARD_RANGE_LABELS[key]
         ),
         "bucket_label": bucket_label,
         "start": start,
@@ -280,6 +296,7 @@ def _performance_series(queryset, range_window):
         )
         expressions[f"hits_{index}"] = Count("id", filter=window)
         expressions[f"completes_{index}"] = Count("id", filter=completed)
+        expressions[f"rejected_{index}"] = Count("id", filter=window & Q(final_id_status__status="rejected"))
         expressions[f"terminated_{index}"] = Count("id", filter=survey_terminated)
         expressions[f"revenue_{index}"] = Sum(
             "source_cpi_snapshot", filter=completed, default=Decimal("0.00")
@@ -298,6 +315,7 @@ def _performance_series(queryset, range_window):
             "short_label": bucket["short_label"],
             "hits": hits,
             "completes": completes,
+            "rejected": totals[f"rejected_{index}"],
             "conversion_rate": round(completes / hits * 100, 2) if hits else 0.0,
             "incidence_rate": round(completes / ir_denominator * 100, 2) if ir_denominator else 0.0,
             "revenue": revenue,
@@ -491,6 +509,48 @@ def _permission_scoped_performance(queryset, range_window, user, card_access):
     return points
 
 
+def _invoice_totals(queryset, window, user):
+    if queryset is None:
+        return {}
+    first = timezone.localtime(window["start"]).date().replace(day=1)
+    last = timezone.localtime(window["end"] - timedelta(microseconds=1)).date().replace(day=1)
+    return {
+        row["final_id_status__accounting_month"].isoformat(): _visible_revenue(user, row["amount"])
+        for row in queryset.order_by().filter(
+            final_id_status__status="accepted",
+            final_id_status__accounting_month__gte=first,
+            final_id_status__accounting_month__lte=last,
+        ).values("final_id_status__accounting_month").annotate(
+            amount=Sum("source_cpi_snapshot", default=Decimal("0.00"))
+        )
+    }
+
+
+def _monthly_finance(queryset, invoices, window, user, card_access):
+    """Revenue follows the traffic window; invoicing follows whole accounting months.
+
+    Do not apply the traffic dates to invoices: a September invoice can include
+    an August journey. The supplied invoice queryset must retain viewer scope.
+    """
+    monthly = dict(window, buckets=[])
+    lower = timezone.localtime(window["start"]).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while lower < window["end"]:
+        upper = _month_shift(lower, 1)
+        monthly["buckets"].append({
+            "key": lower.date().isoformat(), "label": lower.strftime("%b %Y"),
+            "short_label": lower.strftime("%b %Y"), "lower": lower, "upper": upper,
+        })
+        lower = upper
+    monthly["bucket_label"] = "Monthly · revenue in selected range; invoices by full invoice month"
+    points = _permission_scoped_performance(queryset, monthly, user, card_access)
+    for point in points:
+        point["invoiced_revenue"] = (
+            invoices.get(point["key"], Decimal("0.00"))
+            if card_access.get("revenue") and invoices is not None else None
+        )
+    return {"range": _range_payload(monthly), "points": points}
+
+
 def _percent_change(current, previous):
     if current is None or previous is None:
         return None
@@ -567,11 +627,14 @@ def build_dashboard_payload(
     finance_queryset=None,
     finance_range_window=None,
     finance_client_id=None,
+    invoice_queryset=None,
     client_options=None,
     comparison_queryset=None,
     comparison_label="Previous equivalent period",
     financial_years=None,
 ):
+    from .partner_dashboard import main_dashboard_tables
+
     range_window = range_window or dashboard_range_window("24h")
     completed_filter = Q(status=COMPLETED)
     survey_termination_filter = Q(status=SurveyAttempt.Status.TERMINATED) & ~Q(
@@ -644,6 +707,8 @@ def build_dashboard_payload(
     finance_queryset = finance_queryset if finance_queryset is not None else queryset
     traffic_chart = None
     finance_chart = None
+    invoices = _invoice_totals(invoice_queryset, range_window, user) if card_access.get("revenue") else None
+    summary["invoiced_revenue"] = sum(invoices.values(), Decimal("0.00")) if invoices is not None else None
     if chart_access.get("performance"):
         traffic_points = _permission_scoped_performance(
             traffic_queryset, traffic_range_window, user, card_access
@@ -653,7 +718,12 @@ def build_dashboard_payload(
             "client_id": traffic_client_id,
             "points": traffic_points,
         }
-        if any(card_access.get(key) for key in ("revenue", "average_cpi", "rpc")):
+        if card_access.get("revenue"):
+            finance_chart = dict(
+                _monthly_finance(finance_queryset, invoices, finance_range_window, user, card_access),
+                client_id=finance_client_id,
+            )
+        elif any(card_access.get(key) for key in ("average_cpi", "rpc")):
             same_scope = (
                 traffic_client_id == finance_client_id
                 and traffic_range_window["start"] == finance_range_window["start"]
@@ -719,5 +789,6 @@ def build_dashboard_payload(
             configured_performers(queryset, user, card_access, totals["completes"], range_window)
             if chart_access.get("top_users") else None
         ),
+        "partner_tables": main_dashboard_tables(queryset, user, totals["completes"]),
         "generated_at": timezone.now(),
     }

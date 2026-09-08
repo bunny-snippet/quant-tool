@@ -2,8 +2,10 @@
 {% load static %}
 {% block title %}Supplier Management · Exchange Hub{% endblock %}
 {% block header_title %}Supplier Management{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=4">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=4"><link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
 {% block content %}
+{% include 'surveys/_supplier_activity_tabs.html' %}
+<section class="user-activity-panel" id="activitySuppliersPanel" role="tabpanel" aria-labelledby="activitySuppliersTab" data-activity-panel="suppliers">
 {{ vendor_columns|json_script:"vendorColumnAccess" }}
 {{ client_columns|json_script:"clientAllocationColumnAccess" }}
 {{ vendor_project_columns|json_script:"projectAllocationColumnAccess" }}
@@ -153,5 +155,6 @@
     <footer><button type="button" class="vendor-secondary" data-close-vendor-modal>Close</button><button class="primary-button" type="submit" data-vendor-submit>Generate secure key</button></footer>
   </form>
 </section>
+</section>
 {% endblock %}
-{% block scripts %}<script src="{% static 'vendors/management.js' %}?v=12" defer></script>{% endblock %}
+{% block scripts %}<script data-activity-script="suppliers" src="{% static 'vendors/management.js' %}?v=12" defer></script><script src="{% static 'surveys/user_activity.js' %}?v=2" defer></script>{% endblock %}

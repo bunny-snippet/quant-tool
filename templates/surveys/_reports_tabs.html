@@ -1,0 +1,7 @@
+<section class="user-activity-switcher">
+  <nav class="user-activity-tabs" aria-label="Reports" data-reports-tabs>
+    {% if 'attempts.view' in access_codes %}<a class="user-activity-tab {% if active_page == 'studies' %}active{% endif %}" href="{% url 'reports-traffic' %}" {% if active_page == 'studies' %}aria-current="page"{% endif %} style="text-decoration:none"><strong>Traffic</strong></a>{% endif %}
+    {% if 'termination_reasons.view' in access_codes %}<a class="user-activity-tab {% if active_page == 'termination-reasons' %}active{% endif %}" href="{% url 'reports-term' %}" {% if active_page == 'termination-reasons' %}aria-current="page"{% endif %} style="text-decoration:none"><strong>Term</strong></a>{% endif %}
+    {% if 'attempts.view' in access_codes or 'termination_reasons.view' in access_codes %}<a class="user-activity-tab {% if active_page == 'reconciliation' %}active{% endif %}" href="{% url 'reports-reconciliation' %}" {% if active_page == 'reconciliation' %}aria-current="page"{% endif %} style="text-decoration:none"><strong>Reconciliation</strong></a>{% endif %}
+  </nav>
+</section>

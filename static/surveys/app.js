@@ -47,9 +47,8 @@
    updates the original checkbox so page-specific fetch and hierarchy logic
    remains the single source of truth. */
 (() => {
-  const panels = [...document.querySelectorAll('.filter-panel')]
+  const panels = () => [...document.querySelectorAll('.filter-panel')]
     .filter((panel) => panel.querySelector('.multi-select input[type="checkbox"]'));
-  if (!panels.length) return;
   // A dropdown search hides labels only; it does not change the selected
   // filters. Remember selection by the actual checkbox node so chips cannot
   // disappear merely because their option is outside the current search.
@@ -123,7 +122,7 @@
   }
 
   function syncAll() {
-    panels.forEach(syncPanel);
+    panels().forEach(syncPanel);
   }
 
   document.addEventListener('change', (event) => {

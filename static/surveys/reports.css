@@ -1,0 +1,70 @@
+/* One stable report workspace at every browser zoom; each report keeps its controls. */
+.page-reports .content{padding:16px 22px 22px!important;min-width:0}
+.page-reports [data-report-panel][hidden]{display:none!important}
+.page-reports .user-activity-switcher{margin-bottom:12px}
+.page-reports [data-report-panel]>.page-intro{margin-bottom:11px;min-height:68px}
+.page-reports [data-report-panel]>.page-intro h1{font-size:27px}
+.page-reports [data-report-panel]>.page-intro .eyebrow{font-size:9px;margin-bottom:5px}
+.page-reports [data-report-panel]>.page-intro p:not(.eyebrow){font-size:12px;margin-top:4px}
+.page-reports [data-report-panel]>.page-intro .primary-button{height:40px;min-height:40px;font-size:11px;padding-inline:14px}
+.page-reports :is(.study-overview-compact,.reason-overview){grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:10px}
+.page-reports :is(.study-overview-compact,.reason-overview)>article{height:96px;min-height:96px;padding:10px 12px;box-sizing:border-box}
+.page-reports .reason-overview strong{font-size:20px}.page-reports .reason-overview small{font-size:8px}.page-reports .reason-overview em{font-size:7px}
+.page-reports :is(.studies-filters,.reason-list-filters){display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:10px;padding:12px;border-radius:16px;align-items:end}
+.page-reports :is(.studies-filters,.reason-list-filters) .search-field{grid-column:span 2}
+.page-reports .reason-list-filters .datetime-field{grid-column:auto}
+.page-reports :is(.studies-filters,.reason-list-filters) .field>label{margin-bottom:5px;font-size:10px}
+.page-reports :is(.studies-filters,.reason-list-filters) :is(.field input,.field select,.multi-trigger,.clear-button,.reason-filter-button){height:40px;min-height:40px;font-size:11px}
+.page-reports .report-filter-actions{display:flex;gap:6px;min-width:0}
+.page-reports .report-filter-actions>*{flex:1;min-width:0;padding:0 5px;justify-content:center}
+.page-reports :is(.studies-panel,.reason-list-panel) .panel-head{min-height:60px;padding:10px 16px;box-sizing:border-box}
+.page-reports :is(.studies-panel,.reason-list-panel) .panel-head h2{font-size:17px}
+.page-reports :is(.studies-panel,.reason-list-panel) .panel-head p{font-size:10px}
+.reports-load-status{position:fixed;bottom:22px;right:22px;z-index:100;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:var(--muted);font-size:12px;max-width:min(420px,90vw)}
+.reports-load-status:empty{display:none}
+.reports-load-status a{color:var(--cyan)}
+@media(max-width:1000px){.page-reports :is(.studies-filters,.reason-list-filters){grid-template-columns:repeat(3,minmax(0,1fr))}.page-reports :is(.study-overview-compact,.reason-overview){grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.page-reports .content{padding:14px!important}.page-reports :is(.studies-filters,.reason-list-filters){grid-template-columns:repeat(2,minmax(0,1fr))}.page-reports [data-report-panel]>.page-intro h1{font-size:23px}.page-reports [data-report-panel]>.page-intro{min-height:100px}}
+
+/* Activity and Panelist Data share report spacing without changing their tables or permissions. */
+[data-user-activity-tabs] .user-activity-tab{text-decoration:none}
+.page-user-hits .vendor-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:10px}
+.page-user-hits .vendor-overview>article{min-height:96px;padding:10px 12px;border-radius:16px;box-sizing:border-box}
+.page-user-hits .vendor-overview strong{font-size:20px}
+.page-user-hits .vendor-overview small{font-size:8px}
+.page-user-hits .vendor-overview em{font-size:8px}
+.page-user-hits .vendor-panel-head{padding:10px 16px;min-height:60px;box-sizing:border-box}
+.page-user-hits .vendor-panel-head h2{font-size:17px}
+.page-user-hits .vendor-panel-head p{font-size:10px}
+.page-user-hits .vendor-tab-panel{animation:none}
+@media(max-width:620px){.page-user-hits .vendor-overview{grid-template-columns:repeat(2,minmax(0,1fr))}[data-user-activity-tabs] .user-activity-tabs{max-width:100%;overflow-x:auto}}
+:is(.page-user-hits,.page-prescreened-data) .content{padding:16px 22px 22px!important;min-width:0}
+.page-user-hits .user-activity-panel{animation:none}
+:is(.page-user-hits,.page-prescreened-data) .page-intro{align-items:center;margin-bottom:11px;min-height:68px}
+:is(.page-user-hits,.page-prescreened-data) .page-intro h1{font-size:27px}
+:is(.page-user-hits,.page-prescreened-data) .page-intro .eyebrow{font-size:9px;margin-bottom:5px}
+:is(.page-user-hits,.page-prescreened-data) .page-intro p:not(.eyebrow){font-size:12px;margin-top:4px}
+:is(.page-user-hits,.page-prescreened-data) .page-intro .primary-button{height:40px;min-height:40px;font-size:11px;padding-inline:14px}
+.page-user-hits :is(.hit-overview,.user-performance-overview){display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:10px}
+.page-prescreened-data .vault-overview{grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:10px}
+:is(.page-user-hits,.page-prescreened-data) :is(.hit-overview,.user-performance-overview,.vault-overview)>article{min-width:0;min-height:96px;padding:10px 12px;box-sizing:border-box;border-radius:16px;gap:10px}
+:is(.page-user-hits,.page-prescreened-data) :is(.hit-overview,.user-performance-overview,.vault-overview) strong{font-size:20px}
+:is(.page-user-hits,.page-prescreened-data) :is(.hit-overview,.user-performance-overview,.vault-overview) small{font-size:8px}
+:is(.page-user-hits,.page-prescreened-data) :is(.hit-overview,.user-performance-overview,.vault-overview) em{font-size:8px}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;padding:12px;margin-bottom:10px;border-radius:16px;align-items:end}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel .search-field{grid-column:span 2!important}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel .field{min-width:0}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel .field>label{font-size:10px;margin-bottom:5px}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel :is(.field input,.field select,.multi-trigger,.clear-button,.primary-button){height:40px;min-height:40px;font-size:11px}
+:is(.page-user-hits,.page-prescreened-data) .filter-panel .clear-button{grid-column:auto}
+:is(.page-user-hits,.page-prescreened-data) .survey-panel>.panel-head{min-height:60px;padding:10px 16px;box-sizing:border-box}
+:is(.page-user-hits,.page-prescreened-data) .panel-head h2{font-size:17px}
+:is(.page-user-hits,.page-prescreened-data) .panel-head p{font-size:10px}
+:is(.page-user-hits,.page-prescreened-data) .panel-head select{height:36px;font-size:11px}
+:is(.page-user-hits,.page-prescreened-data) .survey-table th{font-size:9px}
+:is(.page-user-hits,.page-prescreened-data) .survey-table td{font-size:11px}
+:is(.page-reports,.page-user-hits,.page-prescreened-data) .datetime-control:has(input:only-child){grid-template-columns:minmax(0,1fr)}
+.page-user-hits :is(.hit-ir-card,.hit-devices-card){animation:none}
+@media(max-width:1500px){.page-user-hits :is(.hit-overview,.user-performance-overview){grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1000px){:is(.page-user-hits,.page-prescreened-data) .filter-panel{grid-template-columns:repeat(3,minmax(0,1fr))}.page-prescreened-data .vault-overview{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){:is(.page-user-hits,.page-prescreened-data) .content{padding:14px!important}:is(.page-user-hits,.page-prescreened-data) .filter-panel{grid-template-columns:repeat(2,minmax(0,1fr))}.page-user-hits :is(.hit-overview,.user-performance-overview){grid-template-columns:repeat(2,minmax(0,1fr))}:is(.page-user-hits,.page-prescreened-data) .page-intro h1{font-size:23px}:is(.page-user-hits,.page-prescreened-data) .page-intro{min-height:100px}}

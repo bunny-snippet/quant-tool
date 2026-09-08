@@ -10,6 +10,8 @@ from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_GET
 from django.core import signing
 from django.db import DatabaseError, transaction
 from django.db.models import Count, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value
@@ -410,15 +412,36 @@ def _enforce_query_permissions(request, permission_parameters):
 
 @function_permission_required("dashboard.view")
 def dashboard_page(request):
+    from .partner_dashboard import main_table_access
+
     codes = effective_permission_codes(request.user)
     return render(request, "surveys/dashboard.html", {
         "active_page": "dashboard",
+        "dashboard_tables": main_table_access(request.user),
         "dashboard_cards": _permitted_columns(codes, DASHBOARD_CARD_PERMISSIONS),
         "dashboard_charts": _permitted_columns(codes, DASHBOARD_CHART_PERMISSIONS),
         "dashboard_graph_filters": _permitted_columns(
             codes, DASHBOARD_GRAPH_FILTER_PERMISSIONS
         ),
     })
+
+
+@login_required
+@require_GET
+def reports_page(request):
+    if has_function_access(request.user, "attempts.view"):
+        return HttpResponseRedirect(reverse("reports-traffic"))
+    if has_function_access(request.user, "termination_reasons.view"):
+        return HttpResponseRedirect(reverse("reports-term"))
+    return HttpResponse("You do not have access to Reports.", status=403)
+
+
+@login_required
+@require_GET
+def reconciliation_page(request):
+    if not (has_function_access(request.user, "attempts.view") or has_function_access(request.user, "termination_reasons.view")):
+        return HttpResponse("You do not have access to Reports.", status=403)
+    return render(request, "surveys/reconciliation.html", {"active_page": "reconciliation"})
 
 
 @function_permission_required("projects.view")
@@ -629,6 +652,7 @@ def user_hits_page(request):
         "can_change_hit_page_size": "user_hits.control.page_size" in codes,
         "can_paginate_hits": "user_hits.control.pagination" in codes,
         "can_view_user_dashboard": can_view_user_dashboard,
+        "activity_data_selected": can_view_user_dashboard and request.GET.get("tab") == "user-data",
         "user_dashboard_panel": user_dashboard_panel,
         **user_hit_filter_options(request.user),
     })
@@ -638,6 +662,7 @@ def user_hits_page(request):
 def user_dashboard_page(request):
     return render(request, "surveys/user_dashboard.html", {
         "active_page": "user-hits",
+        "activity_data_selected": True,
         **_user_dashboard_page_context(request.user),
     })
 
@@ -3870,9 +3895,11 @@ class DashboardAPIView(APIView):
             OpenApiParameter(
                 "range", OpenApiTypes.STR,
                 description="Global analytics window for every card and graph: 24h, 48h, 7d, current month, 3m, 6m or financial year. Defaults to 24h.",
-                enum=["24h", "48h", "7d", "month", "3m", "6m", "fy"],
+                enum=["24h", "48h", "date", "7d", "month", "3m", "6m", "fy"],
             ),
             OpenApiParameter("financial_year", OpenApiTypes.INT, description="Starting year when range=fy, for example 2026 for 2026-27."),
+            OpenApiParameter("date", OpenApiTypes.DATE, description="Calendar day when range=date, midnight to midnight in the reporting timezone; today ends now."),
+            OpenApiParameter("client", OpenApiTypes.INT, description="Visible client ID applied to all dashboard cards, charts and tables."),
             OpenApiParameter(
                 "traffic_client", OpenApiTypes.INT,
                 description="Visible internal client ID for the Traffic graph only.",
@@ -3927,6 +3954,7 @@ class DashboardAPIView(APIView):
                     range_key,
                     now=dashboard_now,
                     financial_year=selected_year,
+                    selected_date=request.query_params.get("date"),
                 )
 
             range_window = selected_window("range", "financial_year")
@@ -3947,6 +3975,9 @@ class DashboardAPIView(APIView):
 
             traffic_client_id = selected_client("traffic_client")
             finance_client_id = selected_client("finance_client")
+            global_client_id = selected_client("client")
+            if global_client_id:
+                visible_queryset = visible_queryset.filter(survey__client_id=global_client_id)
 
             def graph_queryset(window, client_id=None):
                 scoped = visible_queryset.filter(
@@ -3974,6 +4005,8 @@ class DashboardAPIView(APIView):
                 finance_queryset=finance_queryset,
                 finance_range_window=range_window,
                 finance_client_id=finance_client_id,
+                invoice_queryset=(visible_queryset.filter(survey__client_id=finance_client_id)
+                                  if finance_client_id else visible_queryset),
                 client_options=client_options,
                 comparison_queryset=comparison_queryset,
                 comparison_label=comparison_window["label"],
@@ -3981,7 +4014,8 @@ class DashboardAPIView(APIView):
             )
 
         try:
-            payload = load_dashboard()
+            from .partner_report_cache import cached_report_payload
+            payload = cached_report_payload("dashboard-v4", request, load_dashboard)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)

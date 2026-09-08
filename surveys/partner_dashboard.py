@@ -91,6 +91,44 @@ def _aggregates(cohort=None):
     }
 
 
+def main_table_access(user):
+    """Keep existing partner-page and metric grants when embedding the tables."""
+    if user.is_superuser:
+        return {"client": True, "supplier": True}
+    codes = effective_permission_codes(user)
+    return {
+        section: {
+            "dashboard." + section + ".view", "dashboard.card.completes", chart,
+        }.issubset(codes)
+        for section, chart in (
+            ("client", "dashboard.chart.client_share"),
+            ("supplier", "dashboard.chart.top_users"),
+        )
+    }
+
+
+def main_dashboard_tables(queryset, user, total_completes):
+    tables = {"client": None, "supplier": None}
+    for section, allowed in main_table_access(user).items():
+        if not allowed:
+            continue
+        completed = Q(status=COMPLETED)
+        rows = _dimensioned(queryset.select_related(None).order_by(), section, include_segment=False).values(
+            "partner_id", "partner_name",
+        ).annotate(
+            completes=Count("id", filter=completed),
+            accepted=Count("id", filter=completed & Q(final_id_status__status="accepted")),
+            rejected=Count("id", filter=completed & Q(final_id_status__status="rejected")),
+        ).order_by("-completes", "partner_name", "partner_id")
+        tables[section] = [{
+            "id": str(row["partner_id"]), "name": row["partner_name"],
+            "completes": row["completes"], "accepted": row["accepted"], "rejected": row["rejected"],
+            "share": round(row["completes"] / total_completes * 100, 2) if total_completes else 0,
+            "rejection_percentage": round(row["rejected"] / row["completes"] * 100, 2) if row["completes"] else 0,
+        } for row in rows]
+    return tables
+
+
 def _metrics(row, user, access, total_completes=None):
     row = dict(row)
     row["pending"] = row["completes"] - row["accepted"] - row["rejected"]

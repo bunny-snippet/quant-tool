@@ -2,17 +2,18 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
+  const filter = (name) => document.querySelector(`.studies-filters [data-multi-filter="${name}"]`);
   const columns = new Set(JSON.parse(byId('studyColumnAccess')?.textContent || '[]'));
   const columnCount = Math.max(1, columns.size);
   const elements = {
-    search: byId('studySearch'), branchFilters: document.querySelector('[data-multi-filter="branch"]'),
-    subBranchFilters: document.querySelector('[data-multi-filter="sub_branch"]'),
-    shiftFilters: document.querySelector('[data-multi-filter="shift"]'),
-    userFilters: document.querySelector('[data-multi-filter="user"]'),
-    statusFilters: document.querySelector('[data-multi-filter="status"]'),
-    countryFilters: document.querySelector('[data-multi-filter="country"]'),
-    clientFilters: document.querySelector('[data-multi-filter="client"]'),
-    buyerFilters: document.querySelector('[data-multi-filter="buyer_id"]'), dateField: byId('studyDateField'),
+    search: byId('studySearch'), branchFilters: filter('branch'),
+    subBranchFilters: filter('sub_branch'),
+    shiftFilters: filter('shift'),
+    userFilters: filter('user'),
+    statusFilters: filter('status'),
+    countryFilters: filter('country'),
+    clientFilters: filter('client'),
+    buyerFilters: filter('buyer_id'), dateField: byId('studyDateField'),
     from: byId('studyFromDateTime'), to: byId('studyToDateTime'), clear: byId('clearStudyFilters'),
     export: byId('exportStudies'), pageSize: byId('studyPageSize'), rows: byId('studyRows'),
     cards: byId('studyCards'), summary: byId('studySummary'), pageStatus: byId('studyPageStatus'),

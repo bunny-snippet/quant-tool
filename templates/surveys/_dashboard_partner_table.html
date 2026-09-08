@@ -1,0 +1,9 @@
+<section class="bi-visual dashboard-partner-table" id="dashboardTable-{{ table_key }}" aria-labelledby="dashboardTableTitle-{{ table_key }}">
+  <header><h2 id="dashboardTableTitle-{{ table_key }}">{{ table_title }}</h2></header>
+  <div class="dashboard-partner-scroll" tabindex="0" aria-label="{{ table_title }} performance table">
+    <table>
+      <thead><tr><th scope="col">{{ name_heading }}</th><th scope="col">Completes</th><th scope="col">Accepted</th><th scope="col">Rejected</th><th scope="col" title="Rejected ÷ completes × 100">Rejection %</th></tr></thead>
+      <tbody id="dashboardTableRows-{{ table_key }}"><tr><td colspan="5">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>

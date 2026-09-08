@@ -2,7 +2,10 @@
 {% load static %}
 {% block title %}Traffic Reports · Survey Workspace{% endblock %}
 {% block header_title %}Traffic Reports{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
 {% block content %}
+{% include 'surveys/_reports_tabs.html' %}
+<div data-report-panel="traffic">
 {{ study_columns|json_script:"studyColumnAccess" }}
 <section class="page-intro studies-intro">
   <div>
@@ -39,8 +42,6 @@
 </div>{% endif %}
 
 {% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
-  {% if 'revenue' in study_cards %}<article class="revenue"><span>↗</span><div><small>Total revenue</small><strong id="studyMetricRevenue">—</strong><em>All completed · historical CPI recovered</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
-  {% if 'invoiced_revenue' in study_cards %}<article class="revenue"><span>✓</span><div><small>Invoiced revenue</small><strong id="studyMetricInvoicedRevenue">—</strong><em>Latest Client Accepted decisions</em></div><i class="revenue-spark" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></i></article>{% endif %}
   {% if 'total' in study_cards or 'completed' in study_cards or 'conversion' in study_cards %}<article class="study-summary-card traffic-summary"><header><span>H</span><div><small>Traffic</small><em>Filtered journeys</em></div></header><div class="summary-metrics">
     {% if 'total' in study_cards %}<span><small>Total hits</small><strong id="studyMetricTotal">—</strong></span>{% endif %}
     {% if 'completed' in study_cards %}<span><small>Completes</small><strong id="studyMetricCompleted">—</strong></span>{% endif %}
@@ -194,5 +195,6 @@
     </nav>{% endif %}
   </div>
 </section>
+</div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/studies.js' %}?v=30" defer></script>{% endblock %}
+{% block scripts %}<script data-report-script="traffic" src="{% static 'surveys/studies.js' %}?v=31" defer></script><script src="{% static 'surveys/reports.js' %}?v=2" defer></script>{% endblock %}

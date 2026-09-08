@@ -1,6 +1,10 @@
 {% extends 'surveys/base.html' %}
+{% load static %}
 {% block title %}Term Reports · Survey Workspace{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
 {% block content %}
+{% include 'surveys/_reports_tabs.html' %}
+<div data-report-panel="term">
 <section class="page-intro reason-page-intro">
   <div>
     <p class="eyebrow">Provider outcome audit</p>
@@ -30,8 +34,8 @@
   {% if reason_filters.provider %}<div class="field multi-field"><label id="termProviderLabel">Provider</label><div class="multi-select" data-multi-filter="provider"><button class="multi-trigger" type="button" aria-labelledby="termProviderLabel" aria-expanded="false"><span>Select provider</span><i>⌄</i></button><div class="multi-menu" hidden><div class="multi-menu-search"><span>⌕</span><input type="search" data-multi-search placeholder="Search provider…" autocomplete="off"></div><div class="multi-options">{% for item in term_providers %}<label><input type="checkbox" name="provider" value="{{ item.value }}"{% if item.value in selected.provider %} checked{% endif %}><span>{{ item.name }}</span></label>{% empty %}<span class="filter-empty">No providers available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching provider</p></div></div></div>{% endif %}
   {% if reason_filters.buyer %}<div class="field multi-field"><label id="termBuyerLabel">Sub-client / Buyer ID</label><div class="multi-select" data-multi-filter="buyer_id"><button class="multi-trigger" type="button" aria-labelledby="termBuyerLabel" aria-expanded="false"><span>All buyer IDs</span><i>⌄</i></button><div class="multi-menu" hidden><div class="multi-menu-search"><span>⌕</span><input type="search" data-multi-search placeholder="Search buyer ID…" autocomplete="off"></div><div class="multi-options">{% for item in term_buyers %}<label data-client-id="{{ item.survey__client_id|default:'' }}"><input type="checkbox" name="buyer_id" value="{{ item.survey__buyer_id }}"{% if item.survey__buyer_id in selected.buyer_id %} checked{% endif %}><span>{{ item.survey__buyer_id }}</span></label>{% empty %}<span class="filter-empty">No buyer IDs available</span>{% endfor %}</div><p class="multi-no-results" hidden>No matching buyer ID</p></div></div></div>{% endif %}
   {% if reason_filters.date %}<div class="field"><label for="termDateField">Date column</label><select id="termDateField" name="date_field"><option value="callback"{% if selected.date_field == 'callback' %} selected{% endif %}>End date</option><option value="initiated"{% if selected.date_field == 'initiated' %} selected{% endif %}>Start date</option></select></div><div class="field datetime-field"><label for="termFromDateTime">From date &amp; time</label><div class="datetime-control"><input id="termFromDateTime" name="date_from" type="datetime-local" step="60" value="{{ selected.date_from }}"></div></div><div class="field datetime-field"><label for="termToDateTime">To date &amp; time</label><div class="datetime-control"><input id="termToDateTime" name="date_to" type="datetime-local" step="60" value="{{ selected.date_to }}"></div></div>{% endif %}
-  <button class="primary-button reason-filter-button" type="submit">Apply filters</button>
-  {% if reason_filters.clear %}<a class="clear-button reason-clear-link" href="{% url 'termination-reasons' %}">Clear filters</a>{% endif %}
+  <div class="report-filter-actions"><button class="primary-button reason-filter-button" type="submit">Apply filters</button>
+  {% if reason_filters.clear %}<a class="clear-button reason-clear-link" href="{% url 'termination-reasons' %}">Clear filters</a>{% endif %}</div>
 </form>
 
 {% if lookup_error and not detail_attempt %}<div class="reason-alert"><strong>Outcome not found</strong><span>{{ lookup_error }}</span></div>{% endif %}
@@ -99,6 +103,7 @@
     </div>
   </section>
 </div>{% endif %}
+</div>
 
 {% endblock %}
-{% block scripts %}<script src="/static/surveys/term_reports.js?v=2"></script>{% endblock %}
+{% block scripts %}<script data-report-script="term" src="{% static 'surveys/term_reports.js' %}?v=3" defer></script><script src="{% static 'surveys/reports.js' %}?v=2" defer></script>{% endblock %}

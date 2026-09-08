@@ -1,0 +1,7 @@
+<section class="user-activity-switcher" data-user-activity-tabs>
+  <nav class="user-activity-tabs" role="tablist" aria-label="Supplier activity views">
+    {% if 'user_hits.view' in access_codes %}<a class="user-activity-tab{% if active_page == 'user-hits' and not activity_data_selected %} active{% endif %}" href="{% url 'user-hits' %}" id="userHitsTab" role="tab" aria-controls="userHitsPanel" data-activity-tab="user-hits"><strong>User Hits</strong></a>{% endif %}
+    {% if 'user_dashboard.view' in access_codes %}<a class="user-activity-tab{% if activity_data_selected %} active{% endif %}" href="{% if 'user_hits.view' in access_codes %}{% url 'user-hits' %}?tab=user-data{% else %}{% url 'user-dashboard' %}{% endif %}" id="userDataTab" role="tab" aria-controls="userDataPanel" data-activity-tab="user-data"><strong>User Data</strong></a>{% endif %}
+    {% if 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}<a class="user-activity-tab{% if active_page == 'vendors' %} active{% endif %}" href="{% url 'vendor-management' %}" id="activitySuppliersTab" role="tab" aria-controls="activitySuppliersPanel" data-activity-tab="suppliers"><strong>Suppliers</strong></a>{% endif %}
+  </nav>
+</section>

@@ -709,6 +709,7 @@ class UserHitsResponseSerializer(serializers.Serializer):
 
 
 class DashboardSummarySerializer(serializers.Serializer):
+    invoiced_revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
     hits = serializers.IntegerField(min_value=0, allow_null=True)
     completes = serializers.IntegerField(min_value=0, allow_null=True)
     last_hour_completes = serializers.IntegerField(min_value=0, allow_null=True)
@@ -756,6 +757,8 @@ class DashboardFinancialYearSerializer(serializers.Serializer):
 
 
 class DashboardPerformancePointSerializer(serializers.Serializer):
+    rejected = serializers.IntegerField(min_value=0)
+    invoiced_revenue = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True, required=False)
     key = serializers.CharField()
     label = serializers.CharField()
     short_label = serializers.CharField()
@@ -839,6 +842,7 @@ class DashboardRecentActivitySerializer(serializers.Serializer):
 
 
 class DashboardResponseSerializer(serializers.Serializer):
+    partner_tables = serializers.DictField(allow_null=True)
     range = DashboardRangeSerializer()
     summary = DashboardSummarySerializer()
     comparison = DashboardComparisonSerializer(allow_null=True)

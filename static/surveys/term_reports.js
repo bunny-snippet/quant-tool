@@ -1,7 +1,11 @@
 /* Searchable, cascading multi-select controls for the server-rendered Term Reports. */
 (() => {
+  let controller;
+  window.initTermReport = () => {
   const form = document.getElementById('reasonFilters');
-  if (!form) return;
+  if (!form || form.dataset.initialized) return;
+  controller?.abort(); controller = new AbortController();
+  form.dataset.initialized = 'true';
 
   const containers = [...form.querySelectorAll('.multi-select')];
   const byFilter = (name) => form.querySelector(`[data-multi-filter="${name}"]`);
@@ -111,8 +115,10 @@
   updateBuyers();
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.reason-list-filters .multi-select')) closeMenus();
-  });
+  }, {signal: controller.signal});
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closeMenus();
-  });
+  }, {signal: controller.signal});
+  };
+  window.initTermReport();
 })();

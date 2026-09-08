@@ -2067,6 +2067,8 @@ class UserHitsTests(TestCase):
 
 class DashboardAnalyticsTests(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.owner = get_user_model().objects.create_superuser(
             username="dashboard-owner", email="dashboard-owner@example.test", password="test-password"
         )
@@ -2111,17 +2113,19 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(page, "Performance intelligence")
         self.assertContains(page, 'id="volumeChart"')
         self.assertContains(page, 'id="financeChart"')
-        self.assertContains(page, 'id="trafficGraphClient"')
-        self.assertContains(page, 'id="financeGraphClient"')
+        self.assertNotContains(page, 'id="trafficGraphClient"')
+        self.assertNotContains(page, 'id="financeGraphClient"')
+        self.assertContains(page, 'id="dashboardClient"')
         self.assertNotContains(page, 'aria-label="Traffic graph time range"')
         self.assertNotContains(page, 'aria-label="Finance graph time range"')
         self.assertContains(page, 'id="clientShareChart"')
         self.assertContains(page, 'data-dashboard-range="24h"')
         self.assertContains(page, 'data-dashboard-range="48h"')
-        self.assertContains(page, 'data-dashboard-range="7d"')
+        self.assertNotContains(page, 'data-dashboard-range="7d"')
         self.assertContains(page, 'data-dashboard-range="month"')
-        self.assertContains(page, 'data-dashboard-range="3m"')
-        self.assertContains(page, 'data-dashboard-range="6m"')
+        self.assertContains(page, 'id="dashboardDate"')
+        self.assertNotContains(page, 'data-dashboard-range="3m"')
+        self.assertNotContains(page, 'data-dashboard-range="6m"')
         self.assertContains(page, 'id="dashboardFinancialYear"')
         self.assertNotContains(page, 'data-dashboard-range="1y"')
         self.assertNotContains(page, 'data-dashboard-filter="branch"')
@@ -2159,7 +2163,8 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["client_distribution"][0]["conversion_rate"], 100.0)
         self.assertEqual(len(response.data["traffic_chart"]["points"]), 12)
         self.assertEqual(sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2)
-        self.assertEqual(len(response.data["finance_chart"]["points"]), 12)
+        self.assertIn(len(response.data["finance_chart"]["points"]), (1, 2))
+        self.assertTrue(response.data["finance_chart"]["range"]["bucket_label"].startswith("Monthly"))
         self.assertEqual(
             {item["name"] for item in response.data["graph_clients"]},
             {"Client Alpha", "Client Beta"},
@@ -2283,11 +2288,11 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["top_suppliers"][0]["name"], "Supplier One")
         self.assertEqual(response.data["top_suppliers"][0]["branch_name"], "Noida")
 
-    def test_dashboard_is_unfiltered_for_owner_and_rejects_employee(self):
+    def test_dashboard_global_client_filter_and_denies_ungranted_employee(self):
         filtered = self.api.get(reverse("dashboard-api"), {"client": self.client_b.pk})
         self.assertEqual(filtered.status_code, 200)
-        self.assertEqual(filtered.data["summary"]["hits"], 2)
-        self.assertEqual(filtered.data["summary"]["completes"], 1)
+        self.assertEqual(filtered.data["summary"]["hits"], 1)
+        self.assertEqual(filtered.data["summary"]["completes"], 0)
 
         scoped = APIClient()
         scoped.force_authenticate(self.employee)

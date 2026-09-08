@@ -1,0 +1,12 @@
+{% extends 'surveys/base.html' %}
+{% load static %}
+{% block title %}Reconciliation · Survey Workspace{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
+{% block content %}
+{% include 'surveys/_reports_tabs.html' %}
+<div data-report-panel="reconciliation">
+  <section class="page-intro"><div><h1>Reconciliation</h1></div></section>
+  <section class="survey-panel"><div class="empty-state"><strong>Coming soon</strong></div></section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/reports.js' %}?v=2" defer></script>{% endblock %}
