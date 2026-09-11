@@ -1,9 +1,16 @@
 from datetime import timedelta
+import uuid
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
+
+from .identifiers import PLATFORM_PID_MAX_LENGTH, generate_platform_pid
+
+
+def generate_export_storage_key():
+    return f"{uuid.uuid4()}.xlsx"
 
 
 class LocalIdSequence(models.Model):
@@ -17,12 +24,20 @@ class LocalIdSequence(models.Model):
 
     @classmethod
     def next_id(cls) -> str:
+        return cls.next_ids(1)[0]
+
+    @classmethod
+    def next_ids(cls, count: int) -> list[str]:
+        count = int(count)
+        if count < 1:
+            return []
         prefix = timezone.localdate().strftime("%Y%m")
         with transaction.atomic():
             sequence, _ = cls.objects.select_for_update().get_or_create(year_month=prefix)
-            sequence.last_value += 1
+            first_value = sequence.last_value + 1
+            sequence.last_value += count
             sequence.save(update_fields=["last_value"])
-            return f"{prefix}{sequence.last_value:08d}"
+            return [f"{prefix}{value:08d}" for value in range(first_value, sequence.last_value + 1)]
 
 
 class SyncLease(models.Model):
@@ -115,6 +130,7 @@ class Survey(models.Model):
     is_pii_required = models.BooleanField(default=False)
     is_recontact = models.BooleanField(default=False)
     source_created_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    source_end_at = models.DateTimeField(null=True, blank=True, db_index=True)
     source_modified_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
     detail_synced_at = models.DateTimeField(null=True, blank=True)
@@ -128,6 +144,10 @@ class Survey(models.Model):
         ordering = ["-source_modified_at", "-created_at"]
         indexes = [
             models.Index(fields=["status", "country_code"]),
+            models.Index(
+                fields=["status", "country_code", "cpi", "source_modified_at", "created_at", "client", "source_created_at"],
+                name="survey_filtered_page_idx",
+            ),
             models.Index(fields=["client", "cpi"]),
             models.Index(
                 fields=["-source_modified_at", "-created_at"],
@@ -400,6 +420,17 @@ class SurveyAttempt(models.Model):
         SURVEY_TAKEN = "12", "Survey already taken"
 
     rid = models.CharField(max_length=10, unique=True, db_index=True)
+    pid = models.CharField(
+        max_length=PLATFORM_PID_MAX_LENGTH,
+        unique=True,
+        db_index=True,
+        editable=False,
+        default=generate_platform_pid,
+        help_text=(
+            "Platform tracking ID. Newly generated as 12-13 mixed alphanumeric "
+            "characters; legacy 6-9 character values remain valid."
+        ),
+    )
     prescreener_uid = models.CharField(
         max_length=19,
         unique=True,
@@ -507,6 +538,14 @@ class SurveyAttempt(models.Model):
         indexes = [
             models.Index(fields=["survey", "user_id", "-initiated_at"]),
             models.Index(fields=["initiation_ip"], name="attempt_entry_ip_idx"),
+            models.Index(
+                fields=[
+                    "initiated_at", "status", "survey", "platform_user", "vendor",
+                    "source_cpi_snapshot", "payable_cpi_snapshot", "cpi_currency_snapshot",
+                    "status_source", "entry_device", "loi_seconds", "callback_at",
+                ],
+                name="attempt_report_cover_idx",
+            ),
             models.Index(
                 fields=["status", "-initiated_at"],
                 name="attempt_status_init_idx",
@@ -817,3 +856,43 @@ class ProfileReuseProjectUsage(models.Model):
             ),
         ]
         indexes = [models.Index(fields=["integration", "survey"])]
+
+
+class ExportJob(models.Model):
+    class Kind(models.TextChoices):
+        PROJECTS = "projects", "Projects"
+        TRAFFIC = "traffic", "Traffic reports"
+        TERMS = "terms", "Term reports"
+        PANELIST = "panelist", "Panelist data"
+        USER_DASHBOARD = "user_dashboard", "User dashboard"
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="export_jobs",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    query = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    filename = models.CharField(max_length=255, blank=True)
+    storage_key = models.CharField(max_length=80, default=generate_export_storage_key, unique=True, editable=False)
+    error = models.CharField(max_length=500, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    downloaded_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(
+            fields=["requested_by", "status", "-created_at"],
+            name="quant_export_user_status_idx",
+        )]

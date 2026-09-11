@@ -1,24 +1,26 @@
-.dashboard-partner-table{margin-top:20px;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:20px}
+.dashboard-partner-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px;align-items:start}
+.dashboard-partner-grid>.dashboard-partner-table:only-child{grid-column:1/-1}
+.dashboard-partner-table{min-width:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:20px}
 .dashboard-partner-table>header{padding:20px 24px;border-bottom:1px solid var(--line)}
 .dashboard-partner-table h2{margin:0;font-size:18px;color:var(--navy)}
-.dashboard-partner-scroll{max-height:440px;overflow:auto}
-.dashboard-partner-table table{width:100%;min-width:620px;border-collapse:collapse;table-layout:fixed}
-.dashboard-partner-table th,.dashboard-partner-table td{padding:15px 20px;text-align:center;border-bottom:1px solid var(--line);color:var(--ink);font-variant-numeric:tabular-nums}
+.dashboard-partner-scroll{max-height:440px;overflow-x:hidden;overflow-y:auto}
+.dashboard-partner-table table{width:100%;min-width:100%!important;max-width:100%;border-collapse:collapse;table-layout:fixed!important}
+.dashboard-partner-table th,.dashboard-partner-table td{padding:13px 5px;text-align:center;border-bottom:1px solid var(--line);color:var(--ink);font-size:10px;font-variant-numeric:tabular-nums}
 .dashboard-partner-table th{position:sticky;top:0;z-index:1;background:var(--canvas);font-size:11px;color:var(--muted);font-weight:700}
-.dashboard-partner-table th:first-child,.dashboard-partner-table td:first-child{width:32%;text-align:left;overflow-wrap:anywhere}
+.dashboard-partner-table th:first-child,.dashboard-partner-table td:first-child{width:25%;padding-left:10px;text-align:left;overflow-wrap:anywhere}
 .dashboard-partner-table td:first-child{font-weight:700;color:var(--navy)}
 .dashboard-partner-table tbody tr:last-child td{border-bottom:0}
 .dashboard-partner-table tbody tr:hover{background:var(--cyan-soft)}
 .dashboard-partner-table .partner-share{display:flex;align-items:center;justify-content:center;gap:10px}
-.dashboard-partner-table .partner-share-track{width:64px;height:5px;border-radius:8px;background:var(--line);overflow:hidden}
+.dashboard-partner-table .partner-share-track{width:30px;height:5px;border-radius:8px;background:var(--line);overflow:hidden}
 .dashboard-partner-table .partner-share-track i{display:block;height:100%;background:var(--cyan);border-radius:8px}
 .dashboard-partner-table .partner-rejection .partner-share-track i{background:#e45d70}
 
 .bi-volume-rejected{fill:#e45d70}
-.bi-invoiced-line{stroke:#29ad7b}
-.bi-invoiced-dot{fill:#29ad7b;stroke:var(--surface);stroke-width:2}
+.bi-invoiced-line{stroke:#42d98b;stroke-width:3;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+.bi-invoiced-dot{fill:#42d98b;stroke:var(--surface);stroke-width:1.5}
 .legend-rejected{background:#e45d70}
-.legend-invoiced{background:#29ad7b;width:12px!important;height:2px!important}
+.legend-invoiced{background:#42d98b;width:12px!important;height:2px!important}
 .bi-kpi-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr))}
 .bi-kpi-grid>.bi-kpi{padding:12px;gap:8px}
 .bi-kpi-grid>.bi-kpi-completes{grid-column:span 2;display:flex;align-items:center;gap:8px}
@@ -27,9 +29,8 @@
 .complete-card-details>span{display:flex;flex-direction:column;gap:3px;min-width:0}
 .bi-kpi-completes .complete-card-details small{font-size:9px;line-height:1.35;color:var(--muted);text-transform:none;letter-spacing:0;white-space:nowrap}
 .complete-card-details b{font-size:14px;color:var(--navy);font-variant-numeric:tabular-nums}
-@media(min-width:1600px) and (max-width:1850px){.bi-kpi-grid>.bi-kpi{padding:10px;gap:7px}.bi-kpi-grid .bi-kpi-icon{width:28px;height:28px;flex-basis:28px}.bi-kpi-grid strong{font-size:18px}.bi-kpi-grid small{font-size:7px}.bi-kpi-completes .complete-card-details small{font-size:8px}}
-@media(max-width:1599px){.bi-kpi-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
-@media(max-width:1050px){.bi-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:901px) and (max-width:1850px){.bi-kpi-grid>.bi-kpi{padding:10px;gap:7px}.bi-kpi-grid .bi-kpi-icon{width:28px;height:28px;flex-basis:28px}.bi-kpi-grid strong{font-size:clamp(15px,1.1vw,18px)}.bi-kpi-grid small{font-size:clamp(6px,.48vw,7px)}.bi-kpi-completes .complete-card-details{gap:5px;padding-left:6px}.bi-kpi-completes .complete-card-details small{font-size:clamp(6px,.52vw,8px)}.complete-card-details b{font-size:clamp(11px,.82vw,14px)}}
+@media(max-width:900px){.bi-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.bi-kpi-grid>.bi-kpi:last-child:nth-child(odd){grid-column:auto}.bi-kpi-completes .bi-kpi-icon{margin-bottom:0}.bi-kpi-completes .complete-card-details small{font-size:8px}}
 .dashboard-global-client{display:flex;align-items:center;gap:12px;margin:0 0 18px;color:var(--muted)}
 .dashboard-global-client select,.bi-date-select input{color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font:inherit}
@@ -44,4 +45,1067 @@
 .bi-custom-dates .bi-date-select{display:flex;align-items:center;gap:5px;font-size:11px;color:inherit}
 .bi-command-actions .bi-range-switch{display:flex;flex-wrap:wrap;justify-content:flex-end}
 .bi-custom-dates input{min-width:125px;padding:8px}
+.bi-finance-panel .bi-chart-stage,.bi-volume-panel .bi-chart-stage{height:310px}
+.bi-finance-panel .bi-right-axis text,.bi-finance-panel .bi-rate-caption{fill:#e7a038}
+.bi-finance-demo{padding:10px;border:1px solid #b48634;border-radius:8px;background:var(--surface);color:var(--ink);font-size:11px;line-height:1.5}
+.bi-finance-panel,.bi-volume-panel{grid-column:span 6}
+.bi-finance-panel>header,.bi-volume-panel>header{min-height:70px}
+.bi-finance-panel .bi-legend{font-size:10px}
+@media(max-width:900px){.bi-finance-panel,.bi-volume-panel{grid-column:span 12}}
+@media(max-width:900px){.dashboard-partner-grid{grid-template-columns:1fr}}
 @media(max-width:640px){.bi-custom-dates{flex-basis:100%;display:grid;grid-template-columns:1fr 1fr auto}.bi-custom-dates .bi-date-select{display:grid;gap:4px;min-width:0}.bi-custom-dates input{width:100%;min-width:0;box-sizing:border-box}.bi-custom-dates button{align-self:end}}
+
+/* =========================================================
+   DASHBOARD — COMPLETE RESPONSIVE / ZOOM-SAFE CSS
+   Toolbar + KPI + charts + tables
+   ========================================================= */
+
+/* ---------- GLOBAL SAFETY ---------- */
+.page-dashboard,
+.page-dashboard *{
+    box-sizing:border-box;
+}
+
+.page-dashboard{
+    min-width:0;
+    max-width:100%;
+    overflow-x:hidden;
+}
+
+.page-dashboard .content{
+    width:100%;
+    max-width:none;
+    min-width:0;
+    overflow-x:hidden;
+}
+
+.page-dashboard main,
+.page-dashboard section,
+.page-dashboard article,
+.page-dashboard header,
+.page-dashboard .bi-kpi,
+.page-dashboard .bi-finance-panel,
+.page-dashboard .bi-volume-panel,
+.page-dashboard .dashboard-partner-table{
+    min-width:0;
+}
+
+/* =========================================================
+   TOP TOOLBAR
+   ========================================================= */
+
+.bi-command-bar-controls-only{
+    display:flex !important;
+    flex-flow:row nowrap !important;
+    align-items:center !important;
+    width:100% !important;
+    min-width:0 !important;
+    height:72px !important;
+    min-height:72px !important;
+    padding:12px 16px !important;
+    gap:14px !important;
+    box-sizing:border-box !important;
+    overflow:hidden !important;
+}
+
+/* Title */
+.bi-command-bar-controls-only .bi-command-title{
+    position:static !important;
+    flex:0 1 170px !important;
+    width:auto !important;
+    min-width:70px !important;
+    max-width:190px !important;
+    margin:0 !important;
+    padding:0 !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    font:800 15px/1 "Manrope",sans-serif !important;
+}
+
+/* Toolbar controls */
+.bi-command-bar-controls-only .bi-command-actions-inline{
+    display:flex !important;
+    flex:1 1 auto !important;
+    flex-flow:row nowrap !important;
+    align-items:center !important;
+    justify-content:flex-end !important;
+    width:auto !important;
+    min-width:0 !important;
+    max-width:none !important;
+    margin:0 !important;
+    padding:0 !important;
+    gap:7px !important;
+    overflow:hidden !important;
+}
+
+/* Range group */
+.bi-command-bar-controls-only .bi-range-switch{
+    display:flex !important;
+    flex:1 1 auto !important;
+    flex-flow:row nowrap !important;
+    align-items:center !important;
+    justify-content:flex-end !important;
+    width:auto !important;
+    min-width:0 !important;
+    max-width:none !important;
+    margin:0 !important;
+    padding:3px !important;
+    gap:3px !important;
+    overflow:hidden !important;
+}
+
+/* Range buttons */
+.bi-command-bar-controls-only .bi-range-switch > button{
+    flex:0 1 auto !important;
+    min-width:0 !important;
+    width:auto !important;
+    margin:0 !important;
+    padding:8px 9px !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+/* Custom dates */
+.bi-command-bar-controls-only .bi-custom-dates{
+    display:flex !important;
+    flex:0 1 auto !important;
+    flex-flow:row nowrap !important;
+    align-items:center !important;
+    width:auto !important;
+    min-width:0 !important;
+    margin:0 !important;
+    padding:0 !important;
+    gap:4px !important;
+    overflow:visible !important;
+}
+
+.bi-command-bar-controls-only .bi-custom-dates .bi-date-select{
+    display:flex !important;
+    flex:0 1 auto !important;
+    flex-flow:row nowrap !important;
+    align-items:center !important;
+    min-width:0 !important;
+    margin:0 !important;
+    padding:0 !important;
+    gap:3px !important;
+    white-space:nowrap !important;
+}
+
+.bi-command-bar-controls-only .bi-custom-dates input{
+    flex:0 1 118px !important;
+    width:118px !important;
+    min-width:58px !important;
+    max-width:118px !important;
+    height:38px !important;
+    min-height:38px !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+}
+
+.bi-command-bar-controls-only .bi-custom-dates button{
+    flex:0 1 auto !important;
+    min-width:0 !important;
+    height:38px !important;
+    min-height:38px !important;
+    margin:0 !important;
+    white-space:nowrap !important;
+}
+
+/* FY */
+.bi-command-bar-controls-only .bi-fy-select{
+    display:flex !important;
+    flex:0 1 118px !important;
+    align-items:center !important;
+    width:118px !important;
+    min-width:68px !important;
+    max-width:118px !important;
+    margin:0 !important;
+    padding:0 !important;
+}
+
+.bi-command-bar-controls-only .bi-fy-select select{
+    width:100% !important;
+    min-width:0 !important;
+    height:38px !important;
+    min-height:38px !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+/* Client */
+.bi-command-bar-controls-only .dashboard-global-client{
+    display:flex !important;
+    flex:0 1 180px !important;
+    align-items:center !important;
+    width:180px !important;
+    min-width:90px !important;
+    max-width:180px !important;
+    margin:0 !important;
+    padding:0 !important;
+}
+
+.bi-command-bar-controls-only .dashboard-global-client select{
+    width:100% !important;
+    min-width:0 !important;
+    height:42px !important;
+    min-height:42px !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+/* Live */
+.bi-command-bar-controls-only .dashboard-live{
+    display:flex !important;
+    flex:0 1 auto !important;
+    align-items:center !important;
+    min-width:0 !important;
+    max-width:160px !important;
+    margin:0 !important;
+    padding:0 !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+
+/* =========================================================
+   KPI GRID — FLUID AT EVERY WIDTH
+   ========================================================= */
+
+.bi-kpi-grid{
+    display:grid !important;
+    width:100% !important;
+    min-width:0 !important;
+    grid-template-columns:
+        repeat(10,minmax(0,1fr)) !important;
+    gap:14px !important;
+    overflow:hidden !important;
+}
+
+.bi-kpi-grid > .bi-kpi{
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+    padding:12px !important;
+    gap:8px !important;
+}
+
+.bi-kpi-grid .bi-kpi-icon{
+    flex:0 0 32px !important;
+    width:32px !important;
+    height:32px !important;
+}
+
+.bi-kpi-grid strong,
+.bi-kpi-grid b,
+.bi-kpi-grid small{
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+.bi-kpi-completes{
+    min-width:0 !important;
+    overflow:hidden !important;
+}
+
+.bi-kpi-completes .complete-card-details{
+    min-width:0 !important;
+    overflow:hidden !important;
+}
+
+.complete-card-details > span{
+    min-width:0 !important;
+    overflow:hidden !important;
+}
+
+
+/* =========================================================
+   CHART PANELS — NEVER OVERFLOW
+   ========================================================= */
+
+.bi-finance-panel,
+.bi-volume-panel{
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+}
+
+.bi-finance-panel .bi-chart-stage,
+.bi-volume-panel .bi-chart-stage{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    overflow:hidden !important;
+}
+
+.bi-finance-panel svg,
+.bi-volume-panel svg{
+    display:block;
+    width:100%;
+    max-width:100%;
+}
+
+.bi-finance-panel .bi-legend,
+.bi-volume-panel .bi-legend{
+    min-width:0;
+    max-width:100%;
+}
+
+
+/* =========================================================
+   PARTNER TABLES
+   ========================================================= */
+
+.dashboard-partner-grid{
+    width:100% !important;
+    min-width:0 !important;
+    max-width:100% !important;
+}
+
+.dashboard-partner-table{
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+}
+
+.dashboard-partner-scroll{
+    width:100% !important;
+    max-width:100% !important;
+    overflow-x:auto !important;
+    overflow-y:auto !important;
+}
+
+.dashboard-partner-table table{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:560px !important;
+    table-layout:fixed !important;
+}
+
+.dashboard-partner-table th,
+.dashboard-partner-table td{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+
+/* =========================================================
+   1600px+
+   Normal spacious desktop
+   ========================================================= */
+
+@media (min-width:1601px){
+
+    .bi-kpi-grid{
+        gap:16px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi{
+        padding:14px !important;
+    }
+}
+
+
+/* =========================================================
+   1400px — DESKTOP / 100% TYPE VIEW
+   ========================================================= */
+
+@media (max-width:1400px){
+
+    .bi-command-bar-controls-only{
+        height:64px !important;
+        min-height:64px !important;
+        padding:9px 12px !important;
+        gap:9px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-title{
+        flex-basis:145px !important;
+        max-width:150px !important;
+        font-size:13px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-actions-inline{
+        gap:4px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch{
+        gap:2px !important;
+        padding:2px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch > button{
+        padding:7px !important;
+        font-size:9px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates{
+        gap:3px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates input{
+        flex-basis:88px !important;
+        width:88px !important;
+        min-width:54px !important;
+        max-width:88px !important;
+        height:34px !important;
+        min-height:34px !important;
+        padding:5px !important;
+        font-size:9px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates button{
+        height:34px !important;
+        min-height:34px !important;
+        padding:5px 6px !important;
+        font-size:9px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select{
+        flex-basis:90px !important;
+        min-width:64px !important;
+        max-width:90px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select select{
+        height:34px !important;
+        min-height:34px !important;
+        font-size:9px !important;
+        padding:5px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client{
+        flex-basis:140px !important;
+        min-width:82px !important;
+        max-width:140px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client select{
+        height:36px !important;
+        min-height:36px !important;
+        padding:5px 7px !important;
+        font-size:9px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live{
+        max-width:135px !important;
+        font-size:9px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live small{
+        font-size:8px !important;
+    }
+
+    .bi-kpi-grid{
+        gap:10px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi{
+        padding:10px !important;
+    }
+
+    .bi-kpi-grid .bi-kpi-icon{
+        flex-basis:28px !important;
+        width:28px !important;
+        height:28px !important;
+    }
+
+    .bi-kpi-grid strong{
+        font-size:clamp(15px,1.1vw,18px) !important;
+    }
+
+    .bi-kpi-grid small{
+        font-size:clamp(7px,.52vw,9px) !important;
+    }
+}
+
+
+/* =========================================================
+   1200px — LAPTOP
+   ========================================================= */
+
+@media (max-width:1200px){
+
+    .bi-command-bar-controls-only{
+        padding-inline:9px !important;
+        gap:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-title{
+        flex-basis:125px !important;
+        max-width:130px !important;
+        font-size:11px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch > button{
+        padding-inline:5px !important;
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates .bi-date-select{
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates input{
+        flex-basis:76px !important;
+        width:76px !important;
+        min-width:50px !important;
+        max-width:76px !important;
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select{
+        flex-basis:80px !important;
+        min-width:58px !important;
+        max-width:80px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select select{
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client{
+        flex-basis:120px !important;
+        min-width:72px !important;
+        max-width:120px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client select{
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live{
+        max-width:110px !important;
+        font-size:8px !important;
+    }
+
+    /* KPI cards: reduce spacing without destroying the 10-column design */
+    .bi-kpi-grid{
+        gap:7px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi{
+        padding:8px !important;
+        gap:5px !important;
+    }
+
+    .bi-kpi-grid .bi-kpi-icon{
+        flex-basis:25px !important;
+        width:25px !important;
+        height:25px !important;
+    }
+
+    .bi-kpi-grid strong{
+        font-size:clamp(13px,1.05vw,17px) !important;
+    }
+
+    .bi-kpi-grid small{
+        font-size:clamp(6px,.5vw,8px) !important;
+    }
+
+    .bi-kpi-completes .complete-card-details{
+        gap:4px !important;
+        padding-left:5px !important;
+    }
+
+    .bi-kpi-completes .complete-card-details small{
+        font-size:clamp(6px,.48vw,8px) !important;
+    }
+
+    .complete-card-details b{
+        font-size:clamp(10px,.78vw,13px) !important;
+    }
+}
+
+
+/* =========================================================
+   1000px — SMALL LAPTOP
+   ========================================================= */
+
+@media (max-width:1000px){
+
+    .bi-command-bar-controls-only{
+        height:52px !important;
+        min-height:52px !important;
+        padding:6px 7px !important;
+        gap:5px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-title{
+        flex-basis:105px !important;
+        max-width:110px !important;
+        font-size:10px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-actions-inline{
+        gap:2px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch{
+        gap:1px !important;
+        padding:1px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch > button{
+        padding:4px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates{
+        gap:2px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates .bi-date-select{
+        gap:2px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates input{
+        flex-basis:68px !important;
+        width:68px !important;
+        min-width:46px !important;
+        max-width:68px !important;
+        height:29px !important;
+        min-height:29px !important;
+        padding:3px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates button{
+        height:29px !important;
+        min-height:29px !important;
+        padding:3px 5px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select{
+        flex-basis:72px !important;
+        min-width:52px !important;
+        max-width:72px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select select{
+        height:29px !important;
+        min-height:29px !important;
+        font-size:7px !important;
+        padding:3px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client{
+        flex-basis:105px !important;
+        min-width:65px !important;
+        max-width:105px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client select{
+        height:29px !important;
+        min-height:29px !important;
+        padding:3px 4px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live{
+        max-width:92px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live small{
+        font-size:6px !important;
+    }
+
+    /* At this size, give KPI cards a little more breathing room */
+    .bi-kpi-grid{
+        gap:6px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi{
+        padding:7px !important;
+    }
+}
+
+
+/* =========================================================
+   900px — TWO-COLUMN ANALYTICS, KPI 2-COLUMN
+   Toolbar remains one row.
+   ========================================================= */
+
+@media (max-width:900px){
+
+    .bi-command-bar-controls-only{
+        display:flex !important;
+        flex-flow:row nowrap !important;
+        align-items:center !important;
+        height:48px !important;
+        min-height:48px !important;
+        padding:5px !important;
+        gap:4px !important;
+        overflow:hidden !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-title{
+        flex:0 1 90px !important;
+        max-width:95px !important;
+        min-width:55px !important;
+        font-size:8px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-actions-inline{
+        flex:1 1 auto !important;
+        display:flex !important;
+        flex-flow:row nowrap !important;
+        min-width:0 !important;
+        gap:2px !important;
+        overflow:hidden !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch{
+        flex:1 1 auto !important;
+        min-width:0 !important;
+        display:flex !important;
+        flex-flow:row nowrap !important;
+        overflow:hidden !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates{
+        flex:0 1 auto !important;
+        display:flex !important;
+        flex-flow:row nowrap !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client{
+        margin:0 !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live{
+        flex:0 1 auto !important;
+    }
+
+    /* KPI layout */
+    .bi-kpi-grid{
+        grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+        gap:8px !important;
+        overflow:visible !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi,
+    .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:span 1 !important;
+        min-width:0 !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi-completes{
+        display:flex !important;
+    }
+
+    .bi-finance-panel,
+    .bi-volume-panel{
+        grid-column:span 12 !important;
+    }
+
+    .dashboard-partner-grid{
+        grid-template-columns:1fr !important;
+    }
+}
+
+
+/* =========================================================
+   700px — PHONE / NARROW
+   Toolbar one row, dashboard content remains usable.
+   ========================================================= */
+
+@media (max-width:700px){
+
+    .bi-command-bar-controls-only{
+        height:44px !important;
+        min-height:44px !important;
+        padding:4px !important;
+        gap:3px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-command-title{
+        flex-basis:72px !important;
+        max-width:75px !important;
+        min-width:45px !important;
+        font-size:7px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-range-switch > button{
+        padding:3px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates .bi-date-select span{
+        display:none !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates input{
+        flex-basis:56px !important;
+        width:56px !important;
+        min-width:38px !important;
+        max-width:56px !important;
+        height:25px !important;
+        min-height:25px !important;
+        padding:2px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-custom-dates button{
+        height:25px !important;
+        min-height:25px !important;
+        padding:2px 3px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select{
+        flex-basis:55px !important;
+        min-width:42px !important;
+        max-width:55px !important;
+    }
+
+    .bi-command-bar-controls-only .bi-fy-select select{
+        height:25px !important;
+        min-height:25px !important;
+        padding:2px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client{
+        flex-basis:72px !important;
+        min-width:52px !important;
+        max-width:72px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-global-client select{
+        height:25px !important;
+        min-height:25px !important;
+        padding:2px 3px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live{
+        max-width:65px !important;
+        font-size:6px !important;
+    }
+
+    .bi-command-bar-controls-only .dashboard-live small{
+        display:none !important;
+    }
+
+    /* Mobile KPI cards */
+    .bi-kpi-grid{
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+        gap:8px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi,
+    .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:auto !important;
+        padding:10px !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:span 2 !important;
+    }
+
+    .bi-kpi-grid .bi-kpi-icon{
+        flex-basis:30px !important;
+        width:30px !important;
+        height:30px !important;
+    }
+
+    .bi-kpi-grid strong{
+        font-size:16px !important;
+    }
+
+    .bi-kpi-grid small{
+        font-size:8px !important;
+    }
+
+    /* Charts */
+    .bi-finance-panel .bi-chart-stage,
+    .bi-volume-panel .bi-chart-stage{
+        height:280px !important;
+    }
+
+    /* Tables can scroll internally instead of breaking page width */
+    .dashboard-partner-scroll{
+        overflow-x:auto !important;
+    }
+
+    .dashboard-partner-table table{
+        min-width:560px !important;
+    }
+}
+
+
+/* =========================================================
+   480px — VERY SMALL PHONE
+   ========================================================= */
+
+@media (max-width:480px){
+
+    .bi-kpi-grid{
+        grid-template-columns:1fr !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi,
+    .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:auto !important;
+    }
+
+    .bi-kpi-grid > .bi-kpi-completes{
+        display:flex !important;
+    }
+
+    .bi-finance-panel .bi-chart-stage,
+    .bi-volume-panel .bi-chart-stage{
+        height:250px !important;
+    }
+
+    .dashboard-partner-table>header{
+        padding:14px 16px !important;
+    }
+
+    .dashboard-partner-table h2{
+        font-size:16px !important;
+    }
+}
+
+
+/* =========================================================
+   FINAL WIDTH / OVERFLOW GUARDS
+   ========================================================= */
+
+.bi-command-bar-controls-only *,
+.bi-kpi-grid *,
+.dashboard-partner-table *,
+.bi-finance-panel *,
+.bi-volume-panel *{
+    max-width:100%;
+}
+
+.bi-command-bar-controls-only select,
+.bi-command-bar-controls-only input,
+.bi-command-bar-controls-only button{
+    box-sizing:border-box !important;
+}
+
+/* Do NOT let dashboard children create page-wide horizontal scroll */
+.page-dashboard .bi-kpi-grid,
+.page-dashboard .dashboard-partner-grid,
+.page-dashboard .bi-finance-panel,
+.page-dashboard .bi-volume-panel{
+    max-width:100% !important;
+}
+
+/* =========================================================
+   KPI CARD MATRIX
+   Kept deliberately separate from the dashboard toolbar.
+   ========================================================= */
+
+.page-dashboard .bi-kpi-grid{
+    display:grid !important;
+    grid-template-columns:repeat(5,minmax(0,1fr)) !important;
+    gap:12px !important;
+    align-items:stretch !important;
+    overflow:visible !important;
+}
+
+.page-dashboard .bi-kpi-grid > .bi-kpi{
+    grid-column:span 1 !important;
+    min-width:0 !important;
+    min-height:112px !important;
+    padding:14px !important;
+    gap:10px !important;
+    overflow:hidden !important;
+}
+
+.page-dashboard .bi-kpi-grid > .revenue-card-combined,
+.page-dashboard .bi-kpi-grid > .bi-kpi-completes{
+    grid-column:span 2 !important;
+}
+
+.page-dashboard .bi-kpi-grid .bi-kpi-icon{
+    width:34px !important;
+    height:34px !important;
+    flex-basis:34px !important;
+}
+
+.page-dashboard .bi-kpi-grid small{
+    max-width:none !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:normal !important;
+    font-size:8px !important;
+    line-height:1.25 !important;
+}
+
+.page-dashboard .bi-kpi-grid strong{
+    max-width:100% !important;
+    font-size:clamp(16px,1.35vw,21px) !important;
+    line-height:1.15 !important;
+}
+
+.page-dashboard .bi-kpi-completes .complete-card-details{
+    flex:1 1 auto !important;
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:10px !important;
+    padding-left:10px !important;
+}
+
+/* At 75% zoom on a typical desktop the CSS viewport crosses this width.
+   The sidebar is collapsed here, leaving enough room for one stable row. */
+@media(min-width:1680px){
+    .page-dashboard .bi-kpi-grid{
+        grid-template-columns:repeat(10,minmax(0,1fr)) !important;
+        gap:12px !important;
+    }
+
+    .page-dashboard .bi-kpi-grid > .bi-kpi{
+        min-height:112px !important;
+        padding:12px !important;
+        gap:8px !important;
+    }
+
+    .page-dashboard .bi-kpi-grid .bi-kpi-icon{
+        width:32px !important;
+        height:32px !important;
+        flex-basis:32px !important;
+    }
+
+    .page-dashboard .bi-kpi-grid strong{
+        font-size:clamp(15px,1.05vw,20px) !important;
+    }
+}
+
+@media(max-width:900px){
+    .page-dashboard .bi-kpi-grid{
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+        gap:8px !important;
+    }
+
+    .page-dashboard .bi-kpi-grid > .revenue-card-combined,
+    .page-dashboard .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:span 2 !important;
+    }
+}
+
+@media(max-width:480px){
+    .page-dashboard .bi-kpi-grid{
+        grid-template-columns:1fr !important;
+    }
+
+    .page-dashboard .bi-kpi-grid > .revenue-card-combined,
+    .page-dashboard .bi-kpi-grid > .bi-kpi-completes{
+        grid-column:span 1 !important;
+    }
+}

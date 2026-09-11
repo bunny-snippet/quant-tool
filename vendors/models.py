@@ -203,8 +203,9 @@ class ClientIntegration(models.Model):
             "track_opinion": 300,
             "acuity": 300,
             "unimarket": 300,
+            "zamplia": 300,
         }.get(self.provider_code, 60)
-        managed_providers = {"rfg", "toluna", "track_opinion", "acuity", "unimarket"}
+        managed_providers = {"rfg", "toluna", "track_opinion", "acuity", "unimarket", "zamplia"}
         if self.provider_code in managed_providers and self.sync_interval_seconds < minimum_interval:
             raise ValidationError({
                 "sync_interval_seconds": (

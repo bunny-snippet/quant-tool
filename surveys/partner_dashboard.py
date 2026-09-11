@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET
 from accounts.access import effective_permission_codes, has_function_access
 from django.contrib.auth.decorators import login_required
 from .dashboard import COMPLETED, _visible_revenue, dashboard_attempts, dashboard_comparison_window, dashboard_range_window, dashboard_financial_year_options, _month_shift
-from .partner_report_cache import cached_report_payload
+from .report_cache import cached_report_payload
 
 
 UNIT = "platform_user__employee_profile__organization_unit"
@@ -109,7 +109,11 @@ def main_table_access(user):
 
 def main_dashboard_tables(queryset, user, total_completes):
     tables = {"client": None, "supplier": None}
-    for section, allowed in main_table_access(user).items():
+    table_access = main_table_access(user)
+    if not any(table_access.values()):
+        return tables
+    money_allowed = user.is_superuser or has_function_access(user, "dashboard.card.revenue")
+    for section, allowed in table_access.items():
         if not allowed:
             continue
         completed = Q(status=COMPLETED)
@@ -119,12 +123,19 @@ def main_dashboard_tables(queryset, user, total_completes):
             completes=Count("id", filter=completed),
             accepted=Count("id", filter=completed & Q(final_id_status__status="accepted")),
             rejected=Count("id", filter=completed & Q(final_id_status__status="rejected")),
+            revenue=Sum("source_cpi_snapshot", filter=completed, default=Decimal("0.00")),
+            currency_min=Min("cpi_currency_snapshot", filter=completed),
+            currency_max=Max("cpi_currency_snapshot", filter=completed),
+            missing_cpi=Count("id", filter=completed & (Q(source_cpi_snapshot__isnull=True) | Q(cpi_currency_snapshot__isnull=True) | Q(cpi_currency_snapshot=""))),
         ).order_by("-completes", "partner_name", "partner_id")
         tables[section] = [{
             "id": str(row["partner_id"]), "name": row["partner_name"],
             "completes": row["completes"], "accepted": row["accepted"], "rejected": row["rejected"],
             "share": round(row["completes"] / total_completes * 100, 2) if total_completes else 0,
             "rejection_percentage": round(row["rejected"] / row["completes"] * 100, 2) if row["completes"] else 0,
+            "revenue": _visible_revenue(user, row["revenue"]) if money_allowed and not row["missing_cpi"] and row["currency_min"] == row["currency_max"] else None,
+            "currency": (row["currency_min"] or "USD") if money_allowed and not row["missing_cpi"] and row["currency_min"] == row["currency_max"] else None,
+            "money_note": "Mixed currencies or missing CPI/currency snapshots" if money_allowed and (row["missing_cpi"] or row["currency_min"] != row["currency_max"]) else "",
         } for row in rows]
     return tables
 

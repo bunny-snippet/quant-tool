@@ -28,10 +28,20 @@ BIOBRAIN_FIELD_MAP = {
     "LOI": "LengthOfInterview", "supCmps": "Completes", "entryLink": "SurveyUrl",
     "isQuota": "Has_Quotas", "isPIIRequired": "CollectPii", "createdDate": "StartDate",
     "modifiedDate": "LastUpdatedOnUTC", "Language": "LanguageId",
+    "endDate": "EndDate",
 }
 
+# Increment this whenever stored BioBrain question/quota metadata needs to be
+# rebuilt.  The inventory sync persists the marker and services clear the old
+# detail timestamps once, allowing the normal bounded detail worker to hydrate
+# existing rows without deleting inventory or respondent traffic.
 BIOBRAIN_DETAIL_ADAPTER_VERSION = 3
 
+
+# The localized collection endpoint is authoritative. These small fallbacks are
+# only used when an older BioBrain/Voqall gateway returns the qualification code
+# but omits the documented question/option labels. Values sent upstream remain
+# the provider's original OptionId/OptionCode; these labels are display-only.
 BIOBRAIN_STANDARD_QUALIFICATIONS = {
     "GENDER": {
         "question": "What is your gender?",

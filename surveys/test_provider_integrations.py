@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+
+from vendors.models import Client, ClientIntegration
 
 from .integrations import InnovateMRAPIError, InnovateMRClient
 from .models import Survey, TargetingQuestion
 from .survey_flow import build_biobrain_outbound_url
-from .views import _prescreener_questions
+from .views import _collect_prescreener_answers, _prescreener_questions
 
 
 class FakeResponse:
@@ -123,15 +125,16 @@ class ConfigurableProviderClientTests(SimpleTestCase):
         ).get_quota_for_survey(44, language_id=9)[0]
         self.assertEqual(quota["targeting_details"], [{"name": "What is your gender?", "values": ["Male"]}])
 
-    def test_biobrain_outbound_url_uses_canonical_rid_and_profile_uid(self):
+    def test_biobrain_outbound_url_uses_only_opaque_platform_pid(self):
         outbound = build_biobrain_outbound_url(
             "https://respond.voqall.com/l?vq_sid=44&vq_vid=7",
             "Abc123xYz9", "uidA-123",
             {"1": {"question_id": 59, "upstream_values": [100]}},
         )
         self.assertIn("vq_token=Abc123xYz9", outbound)
-        self.assertIn("vq_uid=uidA-123", outbound)
-        self.assertIn("Q59=100", outbound)
+        self.assertIn("vq_uid=Abc123xYz9", outbound)
+        self.assertNotIn("uidA-123", outbound)
+        self.assertNotIn("Q59=100", outbound)
         self.assertNotIn("trackId=", outbound)
 
     def test_custom_provider_field_mapping(self):
@@ -142,6 +145,49 @@ class ConfigurableProviderClientTests(SimpleTestCase):
 
 
 class BioBrainPrescreenerCompatibilityTests(TestCase):
+    def _survey(self, suffix):
+        client = Client.objects.create(
+            code=f"biobrain-{suffix}", name="BioBrain", provider_code="biobrain"
+        )
+        integration_obj = ClientIntegration.objects.create(
+            client=client, name=f"BioBrain {suffix}", provider_code="biobrain",
+            base_url="https://partner-api.voqall.com/api/v1/surveys",
+        )
+        return Survey.objects.create(
+            source_id=45, source_key=f"45-{suffix}", client=client,
+            integration=integration_obj, company_name="BioBrain",
+        )
+
+    def test_biobrain_keeps_basic_safety_but_leaves_provider_targeting_to_provider(self):
+        survey = self._survey("provider-targeting")
+        age = TargetingQuestion.objects.create(
+            survey=survey, question_id=60, key="AGE", text="What is your age?",
+            question_type="Numeric",
+            options=[{"OptionId": 1, "OptionText": "18-24", "ageStart": 18, "ageEnd": 24}],
+        )
+        postal = TargetingQuestion.objects.create(
+            survey=survey, question_id=61, key="POSTAL_CODE", text="What is your postal code?",
+            question_type="Text", raw_data={"targeting_choices": ["10001"]},
+        )
+        request = RequestFactory().post("/", {
+            f"question_{age.pk}": "65", f"question_{postal.pk}": "99999",
+        })
+        answers, errors = _collect_prescreener_answers(request, survey)
+        self.assertEqual(errors, [])
+        self.assertEqual(answers[str(age.pk)]["upstream_values"], ["65"])
+        self.assertEqual(answers[str(postal.pk)]["upstream_values"], ["99999"])
+
+    def test_biobrain_rejects_impossible_age_before_redirect(self):
+        survey = self._survey("age-safety")
+        age = TargetingQuestion.objects.create(
+            survey=survey, question_id=60, key="AGE", text="What is your age?",
+            question_type="Numeric",
+        )
+        request = RequestFactory().post("/", {f"question_{age.pk}": "2121"})
+        answers, errors = _collect_prescreener_answers(request, survey)
+        self.assertEqual(answers, {})
+        self.assertEqual(errors, ["Enter an age between 18 and 99."])
+
     def test_legacy_numeric_options_render_without_server_error(self):
         survey = Survey.objects.create(
             source_id=44,

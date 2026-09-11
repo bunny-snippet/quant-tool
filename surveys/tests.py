@@ -570,6 +570,7 @@ class SurveyAPITests(TestCase):
         self.assertContains(admin_projects, 'id="cpiMaxRange"')
 
 
+@override_settings(INNOVATEMR_CALLBACK_HASH_REQUIRED=False)
 class SurveyFlowTests(TestCase):
     def setUp(self):
         now = timezone.now()
@@ -897,7 +898,7 @@ class SurveyFlowTests(TestCase):
     def test_status_requires_known_rid(self):
         response = self.client.get(reverse("survey-status"), {"status": "3", "rid": "Aa1Bb2Cc3D"})
         self.assertEqual(response.status_code, 404)
-        self.assertContains(response, "could not be attached", status_code=404)
+        self.assertContains(response, "could not be verified", status_code=404)
 
     def test_loi_includes_prescreener_time(self):
         now = timezone.now()
@@ -1260,7 +1261,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(rows[0], [
             "Project id", "Client name", "Cleint survey id", "Country",
             "Current Client CPI", "Client entry link CPI", "Vendor CPI", "Vendor name",
-            "RID", "User name", "Device", "OS", "Browser", "User agent",
+            "RID", "PID", "User name", "Device", "OS", "Browser", "User agent",
             "Entry IP", "Exit IP", "Actual LOI (minutes)", "Status", "Status source",
             "Final status", "Invoice month",
             "Inisitate at", "Presecreent at", "Redirect at", "entry date time",
@@ -1449,7 +1450,8 @@ class StudiesTrackingTests(TestCase):
         listing = scoped_api.get(reverse("survey-attempt-list"))
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.data["count"], 1)
-        self.assertEqual(listing.data["results"][0]["rid"], own_attempt.rid)
+        self.assertNotIn("rid", listing.data["results"][0])
+        self.assertNotIn("pid", listing.data["results"][0])
         self.assertEqual(scoped_api.get(reverse("survey-attempt-export")).status_code, 403)
 
         self.client.force_login(viewer)
@@ -1551,7 +1553,7 @@ class StudiesTrackingTests(TestCase):
         studies = lead_api.get(reverse("survey-attempt-list"))
         self.assertEqual(studies.status_code, 200)
         self.assertEqual(studies.data["count"], 1)
-        self.assertEqual({row["rid"] for row in studies.data["results"]}, {visible_attempt.rid})
+        self.assertEqual({row["pid"] for row in studies.data["results"]}, {visible_attempt.pid})
         branch_studies = lead_api.get(reverse("survey-attempt-list"), {"branch": str(delhi.pk)})
         self.assertEqual(branch_studies.status_code, 200)
         self.assertEqual(branch_studies.data["count"], 1)
@@ -1560,7 +1562,7 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(sub_branch_studies.data["count"], 0)
         shift_studies = lead_api.get(reverse("survey-attempt-list"), {"shift": str(delhi_morning.pk)})
         self.assertEqual(shift_studies.status_code, 200)
-        self.assertEqual({row["rid"] for row in shift_studies.data["results"]}, {visible_attempt.rid})
+        self.assertEqual({row["pid"] for row in shift_studies.data["results"]}, {visible_attempt.pid})
 
         hits = lead_api.get(reverse("user-hits-api"))
         self.assertEqual(hits.status_code, 200)
@@ -1582,7 +1584,7 @@ class StudiesTrackingTests(TestCase):
         second_lead_studies = second_lead_api.get(reverse("survey-attempt-list"))
         self.assertEqual(second_lead_studies.status_code, 200)
         self.assertEqual(second_lead_studies.data["count"], 1)
-        self.assertEqual({row["rid"] for row in second_lead_studies.data["results"]}, {visible_attempt.rid})
+        self.assertEqual({row["pid"] for row in second_lead_studies.data["results"]}, {visible_attempt.pid})
 
         for code in ("attempts.view", "user_hits.view"):
             UserFunctionOverride.objects.update_or_create(
@@ -1594,11 +1596,12 @@ class StudiesTrackingTests(TestCase):
         employee_studies = employee_api.get(reverse("survey-attempt-list"))
         self.assertEqual(employee_studies.status_code, 200)
         self.assertEqual(employee_studies.data["count"], 1)
-        self.assertEqual(employee_studies.data["results"][0]["rid"], visible_attempt.rid)
+        self.assertNotIn("rid", employee_studies.data["results"][0])
+        self.assertNotIn("pid", employee_studies.data["results"][0])
         employee_hits = employee_api.get(reverse("user-hits-api"))
         self.assertEqual(employee_hits.status_code, 200)
         self.assertEqual(employee_hits.data["count"], 1)
-        self.assertEqual(employee_hits.data["results"][0]["user_id"], employee.pk)
+        self.assertNotIn("user_id", employee_hits.data["results"][0])
 
         self.client.force_login(team_lead)
         page = self.client.get(reverse("studies"))
@@ -2050,7 +2053,7 @@ class UserHitsTests(TestCase):
         response = scoped_api.get(reverse("user-hits-api"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
-        self.assertEqual(response.data["results"][0]["user_id"], viewer.pk)
+        self.assertNotIn("user_id", response.data["results"][0])
         self.assertEqual(scoped_api.get(reverse("user-hits-api"), {"branch": "Gurgaon"}).status_code, 403)
         self.client.force_login(viewer)
         viewer_page = self.client.get(reverse("user-hits"))
@@ -2110,7 +2113,7 @@ class DashboardAnalyticsTests(TestCase):
         page = self.client.get(reverse("dashboard"))
 
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "Performance intelligence")
+        self.assertContains(page, "Dashboard Matrix")
         self.assertContains(page, 'id="volumeChart"')
         self.assertContains(page, 'id="financeChart"')
         self.assertNotContains(page, 'id="trafficGraphClient"')
@@ -2164,8 +2167,10 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(response.data["client_distribution"][0]["conversion_rate"], 100.0)
         self.assertEqual(len(response.data["traffic_chart"]["points"]), 12)
         self.assertEqual(sum(point["hits"] for point in response.data["traffic_chart"]["points"]), 2)
-        self.assertIn(len(response.data["finance_chart"]["points"]), (1, 2))
-        self.assertTrue(response.data["finance_chart"]["range"]["bucket_label"].startswith("Monthly"))
+        self.assertEqual(len(response.data["finance_chart"]["points"]), 12)
+        self.assertTrue(
+            response.data["finance_chart"]["monthly_range"]["bucket_label"].startswith("Monthly")
+        )
         self.assertEqual(
             {item["name"] for item in response.data["graph_clients"]},
             {"Client Alpha", "Client Beta"},

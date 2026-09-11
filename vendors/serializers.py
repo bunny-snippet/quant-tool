@@ -356,19 +356,24 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "scheduled_sync_enabled": "Test and verify this Toluna connection before scheduling it."
                 })
-        elif provider in {"track_opinion", "acuity", "unimarket"}:
+        elif provider in {"track_opinion", "acuity", "unimarket", "zamplia"}:
             required_credentials = {
                 "track_opinion": {"token"},
                 "acuity": {"supplier_id", "token"},
                 "unimarket": {"token"},
+                "zamplia": {"client_id", "token"},
             }[provider]
             credential_refs = attrs.get(
                 "credential_env_keys", getattr(self.instance, "credential_env_keys", {})
             ) or {}
-            if set(credential_refs) != required_credentials:
+            optional_credentials = {"hmac_key"} if provider == "zamplia" else set()
+            if (
+                not required_credentials.issubset(credential_refs)
+                or set(credential_refs) - required_credentials - optional_credentials
+            ):
                 raise serializers.ValidationError({
                     "credential_env_keys": (
-                        f"{provider.replace('_', ' ').title()} requires exactly: "
+                        f"{provider.replace('_', ' ').title()} requires: "
                         f"{', '.join(sorted(required_credentials))}."
                     )
                 })
@@ -387,6 +392,10 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
                     "api.supplier.unimrktresponse.net",
                     "stg-api.supplier.unimrktresponse.net",
                 },
+                "zamplia": {
+                    "surveysupply.zamplia.com",
+                    "surveysupplysandbox.zamplia.com",
+                },
             }[provider]
             parsed_url = urlsplit(base_url)
             if parsed_url.scheme != "https" or parsed_url.hostname not in allowed_hosts:
@@ -404,6 +413,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
             allowed_config = {
                 "timeout_seconds", "detail_refresh_batch", "callback_urls",
                 "configure_redirects", "public_callback_base", "country_codes",
+                "participant_base_url",
             }
             unexpected = set(config) - allowed_config
             if unexpected:
@@ -470,7 +480,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
         if token is not None:
             set_integration_token(instance, token)
-        if connection_changed and instance.provider_code in {"rfg", "toluna", "track_opinion", "acuity", "unimarket"}:
+        if connection_changed and instance.provider_code in {"rfg", "toluna", "track_opinion", "acuity", "unimarket", "zamplia"}:
             instance.last_test_status = ""
             instance.last_test_error = "Connection settings changed; test the connection again."
             instance.scheduled_sync_enabled = False

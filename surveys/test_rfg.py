@@ -127,7 +127,7 @@ class ResearchForGoodIntegrationTests(TestCase):
         self.assertEqual(
             {provider["code"] for provider in response.json()},
             {
-                "acuity", "rfg", "track_opinion", "toluna", "unimarket",
+                "acuity", "rfg", "track_opinion", "toluna", "unimarket", "zamplia",
                 "innovatemr", "custom",
             },
         )

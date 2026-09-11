@@ -11,14 +11,24 @@
     const input=event.target; if (!input.matches(selector)) return;
     const initial=input.value;
     if (!initial) input.value=nowValue();
-    drafts.set(input,{date:input.value.slice(0,10),seed:initial ? null : input.value});
+    drafts.set(input,{value:input.value,seed:initial ? null : input.value,timeEdited:false});
   });
   function changed(event) {
     const input=event.target; if (!input.matches(selector)) return;
-    const draft=drafts.get(input) || {date:''};
-    const date=input.value.slice(0,10);
-    if (date && date!==draft.date && date < nowValue().slice(0,10)) input.value=date+'T00:00';
-    drafts.set(input,{date,seed:null});
+    const draft=drafts.get(input);
+    const value=input.value;
+    // A native segmented editor can briefly report an empty value while the
+    // user types. Do not treat the next complete date/time as a date-only edit.
+    if (!value) { drafts.set(input,{value:'',seed:null,timeEdited:false}); return; }
+    const date=value.slice(0,10), time=value.slice(11);
+    const previousDate=draft?.value.slice(0,10), previousTime=draft?.value.slice(11);
+    const explicitTime=!!draft?.timeEdited || (!!previousTime && time!==previousTime)
+      || event.inputType==='insertFromPaste';
+    // Reset only an observed date-only change carrying forward the old time.
+    // A combined date/time edit, or an event without a known baseline, wins.
+    if (previousDate && date!==previousDate && date < nowValue().slice(0,10)
+        && time===previousTime && !explicitTime) input.value=date+'T00:00';
+    drafts.set(input,{value:input.value,seed:null,timeEdited:explicitTime});
   }
   // Capture normalizes before individual page handlers build API/export queries.
   document.addEventListener('input',changed,true);
@@ -26,6 +36,8 @@
   document.addEventListener('focusout',event=>{
     const input=event.target, draft=drafts.get(input);
     if (draft?.seed && input.value===draft.seed) input.value='';
-    drafts.delete(input);
+    // Some browsers dispatch change after blur. Keep the committed baseline
+    // so that final change cannot mistake an explicit time for a new date.
+    if (draft) drafts.set(input,{value:input.value,seed:null,timeEdited:false});
   });
 })();

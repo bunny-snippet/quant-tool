@@ -1,8 +1,23 @@
+"""Resolve function permissions and organization-scoped user visibility.
+
+UI hiding is only presentation; decorators and DRF permission classes in this
+module are the authoritative enforcement layer.
+"""
+
 from functools import wraps
 
 from django.contrib.auth.views import redirect_to_login
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission
+
+from config.cache_utils import (
+    safe_cache_generation,
+    safe_cache_get,
+    safe_cache_increment,
+    safe_cache_set,
+    stable_cache_key,
+)
 
 from .models import AccessFunction, EmployeeProfile, Role, UserFunctionOverride
 from .profile_context import employee_profile_for_user
@@ -26,8 +41,7 @@ EXTERNAL_VENDOR_FORBIDDEN_CODES = frozenset({
     "termination_reasons.card.quota", "termination_reasons.card.quality",
     "termination_reasons.column.rid", "termination_reasons.column.survey", "termination_reasons.column.client",
     "termination_reasons.column.respondent", "termination_reasons.column.status", "termination_reasons.column.ended",
-    "termination_reasons.column.actions",
-    "termination_reasons.field.status", "termination_reasons.field.reason",
+    "termination_reasons.column.actions", "termination_reasons.field.status", "termination_reasons.field.reason",
     "termination_reasons.field.respondent", "termination_reasons.field.survey",
     "termination_reasons.field.timing", "termination_reasons.field.audit",
     "studies.card.revenue", "dashboard.card.revenue",
@@ -35,6 +49,40 @@ EXTERNAL_VENDOR_FORBIDDEN_CODES = frozenset({
     "dashboard.graph.finance_filters",
     "sync.run",
 })
+
+_PERMISSION_CACHE_GENERATION_KEY = "accounts:permissions:generation"
+_ACTIVITY_VISIBILITY_CACHE_GENERATION_KEY = "accounts:activity-visibility:generation"
+_PERMISSION_CACHE_MISSING = object()
+
+
+def invalidate_effective_permission_cache() -> None:
+    """Invalidate cached role/user permission snapshots across web workers."""
+
+    safe_cache_increment(
+        _PERMISSION_CACHE_GENERATION_KEY,
+        default=safe_cache_generation(_PERMISSION_CACHE_GENERATION_KEY),
+    )
+
+
+def invalidate_activity_visibility_cache() -> None:
+    """Invalidate shared hierarchy-scoped activity visibility snapshots."""
+
+    safe_cache_increment(
+        _ACTIVITY_VISIBILITY_CACHE_GENERATION_KEY,
+        default=safe_cache_generation(_ACTIVITY_VISIBILITY_CACHE_GENERATION_KEY),
+    )
+
+
+def permission_cache_generation() -> int:
+    """Return the shared version for effective function permissions."""
+
+    return safe_cache_generation(_PERMISSION_CACHE_GENERATION_KEY)
+
+
+def activity_visibility_cache_generation() -> int:
+    """Return the shared version for hierarchy-scoped activity visibility."""
+
+    return safe_cache_generation(_ACTIVITY_VISIBILITY_CACHE_GENERATION_KEY)
 
 
 def is_super_admin_account(user) -> bool:
@@ -48,10 +96,17 @@ def is_super_admin_account(user) -> bool:
 
 
 def effective_permission_codes(user) -> set[str]:
+    """Return effective codes from a short, explicitly invalidated snapshot.
+
+    MySQL remains authoritative. Signals invalidate the shared generation as
+    soon as a role, profile, function or per-user override changes. The outer
+    request cache avoids repeated Redis reads inside the same request.
+    """
+
     if not user or not user.is_authenticated or not user.is_active:
         return set()
 
-    def load():
+    def load_from_database():
         if user.is_superuser:
             return frozenset(
                 AccessFunction.objects.filter(is_active=True).values_list("code", flat=True)
@@ -60,15 +115,37 @@ def effective_permission_codes(user) -> set[str]:
         profile = employee_profile_for_user(user)
         codes: set[str] = set()
         if profile and profile.role and profile.role.is_active:
-            codes.update(
-                profile.role.function_assignments.filter(
-                    allowed=True,
-                    function__is_active=True,
-                ).values_list("function__code", flat=True)
+            assignments = getattr(
+                profile.role,
+                "_prefetched_objects_cache",
+                {},
+            ).get("function_assignments")
+            if assignments is None:
+                codes.update(
+                    profile.role.function_assignments.filter(
+                        allowed=True,
+                        function__is_active=True,
+                    ).values_list("function__code", flat=True)
+                )
+            else:
+                codes.update(
+                    assignment.function.code
+                    for assignment in assignments
+                    if assignment.allowed and assignment.function.is_active
+                )
+
+        overrides = getattr(user, "_prefetched_objects_cache", {}).get("function_overrides")
+        if overrides is None:
+            override_rows = user.function_overrides.filter(function__is_active=True).values_list(
+                "function__code", "effect"
             )
-        for code, effect in user.function_overrides.filter(
-            function__is_active=True
-        ).values_list("function__code", "effect"):
+        else:
+            override_rows = (
+                (override.function.code, override.effect)
+                for override in overrides
+                if override.function.is_active
+            )
+        for code, effect in override_rows:
             if effect == UserFunctionOverride.Effect.ALLOW:
                 codes.add(code)
             else:
@@ -77,6 +154,28 @@ def effective_permission_codes(user) -> set[str]:
             codes.difference_update(EXTERNAL_VENDOR_FORBIDDEN_CODES)
             codes = {code for code in codes if not code.startswith("organization.")}
         return frozenset(codes)
+
+    def load():
+        generation = permission_cache_generation()
+        key = stable_cache_key(
+            "accounts:effective-permissions",
+            {
+                "generation": generation,
+                "user_id": user.pk,
+                "superuser": bool(user.is_superuser),
+            },
+        )
+        cached = safe_cache_get(key, _PERMISSION_CACHE_MISSING)
+        if cached is not _PERMISSION_CACHE_MISSING:
+            return frozenset(cached)
+        codes = load_from_database()
+        safe_cache_set(
+            key,
+            tuple(sorted(codes)),
+            timeout=settings.PERMISSION_CACHE_TTL_SECONDS,
+            jitter_seconds=min(30, settings.PERMISSION_CACHE_TTL_SECONDS // 5),
+        )
+        return codes
 
     return set(request_cached(("effective-permissions", user.pk), load))
 
@@ -128,7 +227,6 @@ def any_function_permission_required(*codes: str):
 def subordinate_user_ids(user) -> set[int]:
     if not user or not user.is_authenticated:
         return set()
-
     def load():
         if user.is_superuser:
             from django.contrib.auth import get_user_model
@@ -183,17 +281,37 @@ def activity_visible_user_ids(user) -> set[int]:
     """
     if not user or not user.is_authenticated:
         return set()
-
     def load():
-        return frozenset(_activity_visible_user_ids_uncached(user))
+        generation = activity_visibility_cache_generation()
+        key = stable_cache_key(
+            "accounts:activity-visible-users",
+            {
+                "generation": generation,
+                "user_id": user.pk,
+                "active": bool(user.is_active),
+                "superuser": bool(user.is_superuser),
+            },
+        )
+        cached_ids = safe_cache_get(key, _PERMISSION_CACHE_MISSING)
+        if cached_ids is not _PERMISSION_CACHE_MISSING:
+            return frozenset(cached_ids)
+        visible_ids = frozenset(_activity_visible_user_ids_uncached(user))
+        safe_cache_set(
+            key,
+            tuple(sorted(visible_ids)),
+            timeout=settings.PERMISSION_CACHE_TTL_SECONDS,
+            jitter_seconds=min(30, settings.PERMISSION_CACHE_TTL_SECONDS // 5),
+        )
+        return visible_ids
 
-    return set(request_cached(("activity-visible-users", user.pk), load))
+    cached = request_cached(("activity-visible-users", user.pk), load)
+    return set(cached)
 
 
 def _activity_visible_user_ids_uncached(user) -> set[int]:
     """Uncached implementation used by the request-local public resolver."""
 
-    if user.is_superuser:
+    if is_super_admin_account(user):
         from django.contrib.auth import get_user_model
         return set(get_user_model().objects.values_list("id", flat=True))
 

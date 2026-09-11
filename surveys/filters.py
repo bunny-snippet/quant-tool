@@ -94,6 +94,7 @@ class SurveyFilter(django_filters.FilterSet):
 class SurveyAttemptFilter(django_filters.FilterSet):
     status = CharInFilter(field_name="status", lookup_expr="in", help_text="Comma-separated attempt statuses")
     user = CharInFilter(field_name="platform_user_id", lookup_expr="in", help_text="Comma-separated platform user IDs")
+    supplier = CharInFilter(field_name="vendor_id", lookup_expr="in", help_text="Comma-separated external supplier user IDs")
     country = CharInFilter(field_name="survey__country_code", lookup_expr="in", help_text="Comma-separated survey country codes")
     company = CharInFilter(field_name="survey__company_name", lookup_expr="in")
     client = CharInFilter(field_name="survey__client_id", lookup_expr="in", help_text="Comma-separated internal client IDs")
@@ -187,7 +188,7 @@ class SurveyAttemptFilter(django_filters.FilterSet):
     class Meta:
         model = SurveyAttempt
         fields = [
-            "status", "user", "country", "company", "client", "buyer_id", "branch", "sub_branch", "shift",
+            "status", "user", "supplier", "country", "company", "client", "buyer_id", "branch", "sub_branch", "shift",
             "survey_id", "internal_id", "initiated_from", "initiated_to",
             "callback_from", "callback_to", "entry_ip", "exit_ip",
         ]

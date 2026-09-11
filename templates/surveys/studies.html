@@ -2,11 +2,13 @@
 {% load static %}
 {% block title %}Traffic Reports · Survey Workspace{% endblock %}
 {% block header_title %}Traffic Reports{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=6">{% endblock %}
 {% block content %}
 {% include 'surveys/_reports_tabs.html' %}
 <div data-report-panel="traffic">
 {{ study_columns|json_script:"studyColumnAccess" }}
+{{ can_view_study_client_name|json_script:"studyClientNameAccess" }}
+{{ can_view_study_provider_status|json_script:"studyProviderStatusAccess" }}
 <section class="page-intro studies-intro">
   <div>
     <p class="eyebrow">Respondent tracking</p>
@@ -42,6 +44,7 @@
 </div>{% endif %}
 
 {% if study_cards %}<section class="study-overview study-overview-compact" id="studyOverview" aria-label="Filtered study totals">
+  {% if 'revenue' in study_cards %}{% include 'surveys/_revenue_card.html' with total_id='studyMetricRevenue' %}{% endif %}
   {% if 'total' in study_cards or 'completed' in study_cards or 'conversion' in study_cards %}<article class="study-summary-card traffic-summary"><header><span>H</span><div><small>Traffic</small><em>Filtered journeys</em></div></header><div class="summary-metrics">
     {% if 'total' in study_cards %}<span><small>Total hits</small><strong id="studyMetricTotal">—</strong></span>{% endif %}
     {% if 'completed' in study_cards %}<span><small>Completes</small><strong id="studyMetricCompleted">—</strong></span>{% endif %}

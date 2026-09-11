@@ -135,7 +135,7 @@ def _styles_xml() -> str:
 </styleSheet>"""
 
 
-def build_excel_response(filename: str, sheets: list[ExcelSheet]) -> FileResponse:
+def build_excel_file(sheets: list[ExcelSheet]):
     workbook_sheets = [
         ExcelSheet(_safe_sheet_name(sheet.name, index), sheet.headers, sheet.rows, sheet.widths)
         for index, sheet in enumerate(sheets, 1)
@@ -166,6 +166,12 @@ def build_excel_response(filename: str, sheets: list[ExcelSheet]) -> FileRespons
         for index, sheet in enumerate(workbook_sheets, 1):
             _sheet_xml(archive, f"xl/worksheets/sheet{index}.xml", sheet)
     output.seek(0)
+    return output
+
+
+def build_excel_response(filename: str, sheets: list[ExcelSheet]) -> FileResponse:
+    output = build_excel_file(sheets)
     response = FileResponse(output, content_type=EXCEL_CONTENT_TYPE, as_attachment=True, filename=filename)
     response["X-Content-Type-Options"] = "nosniff"
+    response._export_workbook = output
     return response

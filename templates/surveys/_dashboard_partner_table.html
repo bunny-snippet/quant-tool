@@ -2,8 +2,8 @@
   <header><h2 id="dashboardTableTitle-{{ table_key }}">{{ table_title }}</h2></header>
   <div class="dashboard-partner-scroll" tabindex="0" aria-label="{{ table_title }} performance table">
     <table>
-      <thead><tr><th scope="col">{{ name_heading }}</th><th scope="col">Completes</th><th scope="col">Accepted</th><th scope="col">Rejected</th><th scope="col" title="Rejected ÷ completes × 100">Rejection %</th></tr></thead>
-      <tbody id="dashboardTableRows-{{ table_key }}"><tr><td colspan="5">Loading…</td></tr></tbody>
+      <thead><tr><th scope="col">{{ name_heading }}</th><th scope="col">Completes</th><th scope="col">Accepted</th><th scope="col">Rejected</th><th scope="col" title="Rejected ÷ completes × 100">Rejection %</th>{% if 'revenue' in dashboard_cards %}<th scope="col">Revenue</th>{% endif %}</tr></thead>
+      <tbody id="dashboardTableRows-{{ table_key }}" data-revenue-visible="{% if 'revenue' in dashboard_cards %}true{% else %}false{% endif %}"><tr><td colspan="{% if 'revenue' in dashboard_cards %}6{% else %}5{% endif %}">Loading…</td></tr></tbody>
     </table>
   </div>
 </section>

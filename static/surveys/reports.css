@@ -8,6 +8,20 @@
 .page-reports [data-report-panel]>.page-intro p:not(.eyebrow){font-size:12px;margin-top:4px}
 .page-reports [data-report-panel]>.page-intro .primary-button{height:40px;min-height:40px;font-size:11px;padding-inline:14px}
 .page-reports :is(.study-overview-compact,.reason-overview){grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:10px}
+.page-reports .study-overview-compact:has(.revenue-summary){grid-template-columns:minmax(180px,.95fr) minmax(210px,1.05fr) minmax(300px,1.5fr) minmax(245px,1.2fr) minmax(180px,.9fr)}
+.page-reports .revenue-summary>strong{margin-top:auto;font-size:23px;font-variant-numeric:tabular-nums}
+.page-studies .study-overview-compact>article{min-width:0;overflow:hidden}
+.page-studies .study-overview-compact .summary-metrics{min-width:0;gap:clamp(2px,.4vw,6px)}
+.page-studies .study-overview-compact .summary-metrics>span{min-width:0;overflow:hidden;padding-inline:clamp(3px,.45vw,7px)}
+.page-studies .study-overview-compact .summary-metrics small{min-width:0;font-size:clamp(5.5px,.46vw,7px);letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-studies .study-overview-compact .summary-metrics strong{font-size:clamp(11px,.9vw,15px);letter-spacing:-.25px;white-space:nowrap}
+.page-studies .study-overview-compact .status-metrics{gap:clamp(2px,.3vw,4px)}
+.page-studies .study-overview-compact .status-metrics>span{padding-inline:clamp(2px,.32vw,5px)}
+.page-studies .study-overview-compact .status-metrics small{font-size:clamp(5px,.4vw,6.5px)}
+.page-studies .study-overview-compact .device-metrics strong{font-size:clamp(12px,1vw,16px)}
+.page-studies .study-overview-compact .ir-metric strong{font-size:clamp(17px,1.45vw,23px)}
+@media(max-width:1300px){.page-reports .study-overview-compact:has(.revenue-summary){grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1000px){.page-reports .study-overview-compact:has(.revenue-summary){grid-template-columns:repeat(2,minmax(0,1fr))}}
 .page-reports :is(.study-overview-compact,.reason-overview)>article{height:96px;min-height:96px;padding:10px 12px;box-sizing:border-box}
 .page-reports .reason-overview strong{font-size:20px}.page-reports .reason-overview small{font-size:8px}.page-reports .reason-overview em{font-size:7px}
 .page-reports :is(.studies-filters,.reason-list-filters){display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:10px;padding:12px;border-radius:16px;align-items:end}

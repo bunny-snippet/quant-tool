@@ -20,9 +20,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=47">
+  <link rel="stylesheet" href="{% static 'surveys/app.css' %}?v=55">
   {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'surveys/theme.css' %}?v=9">
+  <link rel="stylesheet" href="{% static 'surveys/revenue_card.css' %}?v=1">
 </head>
 <body class="page-{{ active_page|default:'workspace' }}{% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' %} page-reports page-studies{% endif %}{% if active_page == 'vendors' %} page-user-hits{% endif %}">
   <div class="app-shell" data-sidebar="open">
@@ -39,17 +40,29 @@
           <span class="nav-icon">▤</span><span>Projects</span><span class="nav-caret" aria-hidden="true">⌄</span>
         </a>
         {% if active_page == 'projects' %}<span class="nav-child" id="projectsNavChildren"><i></i>All surveys</span>{% endif %}{% endif %}
-        {% if 'attempts.view' in access_codes or 'termination_reasons.view' in access_codes %}<a class="nav-item {% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' %}active{% endif %}" href="{% url 'reports' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg></span><span>Reports</span>
-        </a>{% endif %}
+        {% if 'attempts.view' in access_codes or 'termination_reasons.view' in access_codes or 'user_hits.view' in access_codes or 'user_dashboard.view' in access_codes or 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}
+        <details class="dashboard-nav-group" id="reportsNavGroup"{% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' or active_page == 'user-hits' or active_page == 'vendors' %} open{% endif %}>
+          <summary class="nav-item {% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' or active_page == 'user-hits' or active_page == 'vendors' %}active{% endif %}" aria-controls="reportsNavChildren">
+            <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg></span><span>Reports</span><span class="nav-caret" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="nav-submenu" id="reportsNavChildren">
+            {% if 'attempts.view' in access_codes or 'termination_reasons.view' in access_codes %}<a class="nav-child-link {% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' %}active{% endif %}" href="{% url 'reports' %}"{% if active_page == 'studies' or active_page == 'termination-reasons' or active_page == 'reconciliation' %} aria-current="page"{% endif %}><i aria-hidden="true"></i>Response Summary</a>{% endif %}
+            {% if 'user_hits.view' in access_codes or 'user_dashboard.view' in access_codes or 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}<a class="nav-child-link {% if active_page == 'user-hits' or active_page == 'vendors' %}active{% endif %}" href="{% if 'user_hits.view' in access_codes %}{% url 'user-hits' %}{% elif 'user_dashboard.view' in access_codes %}{% url 'user-dashboard' %}{% else %}{% url 'vendor-management' %}{% endif %}"{% if active_page == 'user-hits' or active_page == 'vendors' %} aria-current="page"{% endif %}><i aria-hidden="true"></i>Supplier Activity</a>{% endif %}
+          </div>
+        </details>
+        {% endif %}
+        {% if 'prescreener_data.view' in access_codes %}
+        <details class="dashboard-nav-group" id="panelNavGroup"{% if active_page == 'prescreened-data' %} open{% endif %}>
+          <summary class="nav-item {% if active_page == 'prescreened-data' %}active{% endif %}" aria-controls="panelNavChildren">
+            <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Panel</span><span class="nav-caret" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="nav-submenu" id="panelNavChildren">
+            <a class="nav-child-link {% if active_page == 'prescreened-data' %}active{% endif %}" href="{% url 'prescreened-data' %}"{% if active_page == 'prescreened-data' %} aria-current="page"{% endif %}><i aria-hidden="true"></i>Panelist</a>
+          </div>
+        </details>
+        {% endif %}
         {% if 'toluna_notifications.view' in access_codes %}<a class="nav-item {% if active_page == 'toluna-notifications' %}active{% endif %}" href="{% url 'toluna-notifications' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3V8Z"/><path d="M10 19h4"/></svg></span><span>Notifications</span>
-        </a>{% endif %}
-        {% if 'prescreener_data.view' in access_codes %}<a class="nav-item {% if active_page == 'prescreened-data' %}active{% endif %}" href="{% url 'prescreened-data' %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span>Panelist Data</span>
-        </a>{% endif %}
-        {% if 'user_hits.view' in access_codes or 'user_dashboard.view' in access_codes or 'vendors.view' in access_codes or 'vendors.manage' in access_codes or 'allocations.view' in access_codes or 'allocations.manage' in access_codes %}<a class="nav-item {% if active_page == 'user-hits' or active_page == 'vendors' %}active{% endif %}" href="{% if 'user_hits.view' in access_codes %}{% url 'user-hits' %}{% elif 'user_dashboard.view' in access_codes %}{% url 'user-dashboard' %}{% else %}{% url 'vendor-management' %}{% endif %}">
-          <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10m7 10V4m7 16v-7"/><path d="M3 20h18"/></svg></span><span>Supplier Activity</span>
         </a>{% endif %}
         {% if 'clients.integration.view' in access_codes %}<a class="nav-item {% if active_page == 'client-integrations' %}active{% endif %}" href="{% url 'client-integrations' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 12h8m-4-4v8M5 5h14v14H5z"/></svg></span><span>Client APIs</span>
@@ -88,8 +101,9 @@
     </main>
   </div>
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-  <script src="{% static 'surveys/app.js' %}?v=11" defer></script>
-  <script src="{% static 'surveys/date_filters.js' %}?v=1" defer></script>
+  <script src="{% static 'surveys/app.js' %}?v=16" defer></script>
+  <script src="{% static 'surveys/date_filters.js' %}?v=2" defer></script>
+  <script src="{% static 'surveys/export_jobs.js' %}?v=5" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

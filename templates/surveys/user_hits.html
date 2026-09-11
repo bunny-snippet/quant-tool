@@ -2,7 +2,7 @@
 {% load static %}
 {% block title %}Supplier Activity · Survey Workspace{% endblock %}
 {% block header_title %}Supplier Activity{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=5"><link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'vendors/management.css' %}?v=5"><link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=6">{% endblock %}
 {% block content %}
 {% include 'surveys/_supplier_activity_tabs.html' %}
 
@@ -14,7 +14,7 @@
 </section>{% endif %}
 {% endblock %}
 {% block scripts %}
-<script data-activity-script="user-hits" src="{% static 'surveys/user_hits.js' %}?v=10" defer></script>
-{% if can_view_user_dashboard %}<script data-activity-script="user-data" src="{% static 'surveys/user_dashboard.js' %}?v=3" defer></script>{% endif %}
+<script data-activity-script="user-hits" src="{% static 'surveys/user_hits.js' %}?v=11" defer></script>
+{% if can_view_user_dashboard %}<script data-activity-script="user-data" src="{% static 'surveys/user_dashboard.js' %}?v=5" defer></script>{% endif %}
 <script src="{% static 'surveys/user_activity.js' %}?v=2" defer></script>
 {% endblock %}

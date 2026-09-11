@@ -117,7 +117,7 @@ class PhaseOneQueryPerformanceTests(TestCase):
         self.assertEqual(len(full.data["results"]), 20)
         matching = next(
             row for row in full.data["results"]
-            if row["rid"] == one.data["results"][0]["rid"]
+            if row["pid"] == one.data["results"][0]["pid"]
         )
         self.assertEqual(one.data["results"][0], matching)
         self.assertLessEqual(full_count, one_count + 1)

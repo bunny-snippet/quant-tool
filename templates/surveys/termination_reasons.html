@@ -1,7 +1,7 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
 {% block title %}Term Reports · Survey Workspace{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=3">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/reports.css' %}?v=6">{% endblock %}
 {% block content %}
 {% include 'surveys/_reports_tabs.html' %}
 <div data-report-panel="term">
@@ -11,7 +11,7 @@
     <h1>Term Reports</h1>
     <p>Review every terminated, quota-full and quality/security outcome across connected clients.</p>
   </div>
-  {% if can_export_reasons %}<a class="primary-button export-button" href="{% url 'termination-reasons-export' %}{% if export_query %}?{{ export_query }}{% endif %}"><span aria-hidden="true">↓</span> Export</a>{% endif %}
+  {% if can_export_reasons %}<button class="primary-button export-button" id="exportTermReports" type="button"><span aria-hidden="true">↓</span> Export</button>{% endif %}
 </section>
 
 {% if reason_cards %}<section class="reason-overview" aria-label="Filtered outcome totals">

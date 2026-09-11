@@ -7,7 +7,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from . import test_partner_dashboard as fixtures
-from .dashboard import _invoice_totals, _monthly_finance, _performance_series, dashboard_range_window
+from .dashboard import _invoice_totals, _monthly_finance, _performance_series, dashboard_range_window, overall_revenue_totals
 from .models import SurveyAttempt, FinalIDStatus
 from .partner_dashboard import main_dashboard_tables
 
@@ -40,18 +40,21 @@ class DashboardConsolidationTests(TestCase):
         for key in ('client','supplier'):
             self.assertEqual([(r['completes'],r['accepted'],r['rejected'],r['share']) for r in tables[key]],[(3,1,1,100)])
             self.assertEqual(tables[key][0]['rejection_percentage'],33.33)
+            self.assertEqual(tables[key][0]['revenue'],Decimal('7.50'))
         with patch('surveys.partner_dashboard.effective_permission_codes',return_value=set()), self.assertNumQueries(0):
             self.assertEqual(main_dashboard_tables(qs,self.worker,3),{'client':None,'supplier':None})
 
     def test_global_client_filters_summary_charts_tables_and_invoice_card(self):
         self.attempt(10,survey=self.other_survey,status='1',initiated_at=self.now-timedelta(days=60))
         api=APIClient(); api.force_authenticate(self.admin)
-        with patch('surveys.views.timezone.now',return_value=self.now), patch('surveys.partner_report_cache.cached_report_payload',side_effect=lambda ns,req,factory:factory()):
+        with patch('surveys.views.timezone.now',return_value=self.now), patch('surveys.views.cached_report_payload',side_effect=lambda ns,req,factory:factory()):
             response=api.get(reverse('dashboard-api'),{'range':'month','client':self.other.pk})
             self.assertEqual(response.status_code,200)
             p=response.data
             self.assertEqual(p['summary']['hits'],0)
             self.assertEqual(p['summary']['invoiced_revenue'],0)
+            self.assertEqual(p['overall_revenue']['revenue'],Decimal('10.00'))
+            self.assertEqual(p['overall_revenue']['invoiced_revenue'],Decimal('2.50'))
             self.assertEqual(p['partner_tables']['client'],[])
             self.assertEqual(sum(r['hits'] for r in p['traffic_chart']['points']),0)
             response=api.get(reverse('dashboard-api'),{'range':'date','date':'2026-09-07','client':self.client_record.pk})
@@ -66,6 +69,24 @@ class DashboardConsolidationTests(TestCase):
         self.assertEqual(len(window['buckets']),12)
         for invalid in ['invalid','2026-09-40','2027-01-01',None]:
             with self.assertRaises(ValueError): dashboard_range_window('date',now=self.now,selected_date=invalid)
+
+    def test_finance_retains_timeline_buckets_separate_from_invoice_months(self):
+        api=APIClient(); api.force_authenticate(self.admin)
+        with patch('surveys.views.timezone.now',return_value=self.now), patch('surveys.views.cached_report_payload',side_effect=lambda ns,req,factory:factory()):
+            response=api.get(reverse('dashboard-api'),{'range':'month'})
+        self.assertEqual(response.status_code,200)
+        chart=response.data['finance_chart']
+        self.assertGreater(len(chart['points']),1)
+        self.assertEqual(len(chart['monthly_points']),1)
+        self.assertEqual(sum(p['revenue'] for p in chart['points']),sum(p['revenue'] for p in chart['monthly_points']))
+        self.assertTrue(all('invoiced_revenue' not in p for p in chart['points']))
+        self.assertTrue(all('invoiced_revenue' in p for p in chart['monthly_points']))
+
+    def test_overall_revenue_totals_are_all_time(self):
+        totals = overall_revenue_totals(SurveyAttempt.objects.all(), self.admin)
+        self.assertEqual(totals['currency'],'USD')
+        self.assertEqual(totals['revenue'],Decimal('7.50'))
+        self.assertEqual(totals['invoiced_revenue'],Decimal('2.50'))
 
     def test_custom_dates_inclusive_end_and_bounded_buckets(self):
         window = dashboard_range_window('custom', now=self.now, date_from='2026-08-01', date_to='2026-08-31')
@@ -92,7 +113,8 @@ class DashboardConsolidationTests(TestCase):
             self.assertContains(page,'data-report-panel=')
             self.assertContains(page,'surveys/reports.css')
             self.assertContains(page,'surveys/reports.js')
-            self.assertNotContains(page,'id="studyMetricRevenue"')
+            if name == 'reports-traffic':
+                self.assertContains(page,'id="studyMetricRevenue"')
             self.assertNotContains(page,'id="studyMetricInvoicedRevenue"')
         with patch('surveys.views.has_function_access',side_effect=lambda user,code:code=='termination_reasons.view'):
             self.assertRedirects(self.client.get(reverse('reports')),reverse('reports-term'),fetch_redirect_response=False)

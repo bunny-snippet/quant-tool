@@ -32,15 +32,31 @@
   const menu = document.getElementById('menuButton');
   const scrim = document.getElementById('scrim');
   if (!shell || !menu) return;
-  const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
+  const drawerQuery = window.matchMedia('(max-width: 900px)');
+  const desktopZoom = () => window.outerWidth > 0 ? window.outerWidth / window.innerWidth : 1;
+  const isDrawer = () => drawerQuery.matches || (window.innerWidth > 900 && desktopZoom() >= 0.74);
   const setSidebar = (open) => {
     shell.dataset.sidebar = open ? 'open' : 'closed';
     menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
   };
   menu.addEventListener('click', () => setSidebar(shell.dataset.sidebar !== 'open'));
   scrim?.addEventListener('click', () => setSidebar(false));
-  window.addEventListener('resize', () => { if (!isMobile() && shell.dataset.sidebar === 'closed') setSidebar(true); });
-  if (isMobile()) setSidebar(false);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && isDrawer() && shell.dataset.sidebar === 'open') setSidebar(false);
+  });
+  shell.querySelector('.sidebar')?.addEventListener('click', (event) => {
+    if (isDrawer() && event.target.closest('a')) setSidebar(false);
+  });
+  const syncSidebarMode = () => {
+    const drawer = isDrawer();
+    shell.dataset.sidebarMode = drawer ? 'drawer' : 'fixed';
+    setSidebar(!drawer);
+  };
+  if (typeof drawerQuery.addEventListener === 'function') drawerQuery.addEventListener('change', syncSidebarMode);
+  else drawerQuery.addListener(syncSidebarMode);
+  window.addEventListener('resize', syncSidebarMode, { passive: true });
+  syncSidebarMode();
 })();
 
 /* Show checked multi-select values above their filter panel. Removing a chip

@@ -631,7 +631,7 @@ class VendorFoundationTests(TestCase):
         }
         supplied_hash = params.pop("hash")
         self.assertEqual(params["rid"], attempt.rid)
-        self.assertEqual(params["pid"], attempt.rid)
+        self.assertEqual(params["pid"], attempt.pid)
         self.assertEqual(params["surveyId"], self.survey.local_id)
         self.assertEqual(supplied_hash, sign_supplier_callback(params, callback_secret))
 

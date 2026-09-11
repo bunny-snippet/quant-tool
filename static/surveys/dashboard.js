@@ -146,14 +146,15 @@
       host.innerHTML = '<div class="dashboard-empty">No activity in this period for the selected client.</div>'; return;
     }
     const width = Math.max(320, Math.round(host.clientWidth || 700)), height = 360;
-    const left = options.finance ? 76 : 56, right = 20, plotWidth = width - left - right;
+    const combined = options.hasLine;
+    const left = options.finance ? 62 : 56, right = combined ? 64 : 20, plotWidth = width - left - right;
     const keys = options.bars.filter(key => rows.some(row => row[key] != null));
     if (!keys.length && !options.hasLine && !options.invoiceOverlay) {
       host.innerHTML = '<div class="dashboard-empty">Financial metrics are not available for this view.</div>'; return;
     }
     const overlay = options.lineKey === 'invoiced_revenue';
-    const top = 32, mainHeight = options.hasLine && !overlay ? 150 : 266;
-    const rateTop = keys.length ? 240 : 48, rateHeight = keys.length ? 66 : 258;
+    const top = 32, mainHeight = combined ? 266 : options.hasLine && !overlay ? 150 : 266;
+    const rateTop = combined ? top : keys.length ? 240 : 48, rateHeight = combined ? mainHeight : keys.length ? 66 : 258;
     const group = plotWidth / rows.length;
     const x = index => left + group * (index + .5);
     const scale = chartScale(Math.max(0, ...rows.flatMap(row => [...keys, ...(overlay || options.invoiceOverlay ? ['invoiced_revenue'] : [])].map(key => Number(row[key] || 0)))), options.finance ? .01 : 1);
@@ -191,9 +192,15 @@
     }
     if (options.hasLine) {
       if (!overlay) {
+      if (combined) {
+        svg += '<text class="bi-axis-caption bi-rate-caption" x="'+(width-right)+'" y="16" text-anchor="end">'+escapeHtml(options.lineLabel)+(options.finance ? options.lineKey === 'average_cpi' ? ' · per complete' : ' · per entrant' : ' %')+'</text><g class="bi-chart-grid bi-right-axis">';
+        for (const tick of rateScale.ticks) svg += '<text x="'+(width-right+10)+'" y="'+(rateY(tick)+4)+'" text-anchor="start">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : tick+'%')+'</text>';
+        svg += '</g>';
+      } else {
       svg += '<text class="bi-axis-caption bi-rate-caption" x="'+left+'" y="'+(rateTop-16)+'">'+escapeHtml(options.lineLabel)+(options.finance ? (options.lineKey === 'average_cpi' ? ' · per complete' : ' · per entrant') : ' · completes ÷ entrants')+'</text><g class="bi-chart-grid bi-rate-grid">';
       for (const tick of rateScale.ticks) svg += '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+rateY(tick)+'" y2="'+rateY(tick)+'"/><text x="'+(left-10)+'" y="'+(rateY(tick)+4)+'" text-anchor="end">'+escapeHtml(options.finance ? formatCurrency(tick,options.currency,true) : tick+'%')+'</text>';
       svg += '</g>';
+      }
       }
       let points = [];
       const flush = () => {if(points.length) svg += '<path class="bi-chart-line '+(overlay?'bi-invoiced-line':options.finance?'bi-rpc-line':'bi-conversion-line')+'" d="'+svgLine(points)+'"/>'; points=[];};
@@ -238,6 +245,26 @@
     ];
     renderTimeline(byId('financeChart'),rows,{bars:hasRevenue?['revenue']:[],hasLine,lineKey,lineLabel,invoiceOverlay:hasInvoice,finance:true,currency,title:'Revenue'+(hasInvoice?', invoiced revenue':'')+(hasLine?' and '+lineLabel:''),rangeLabel,
       details,tooltipText:row=>row.label+' · '+details(row).map(pair=>pair.join(' ')).join(' · ')});
+  }
+
+  function renderSelectedFinance(data) {
+    let chart = data.finance_chart;
+    const demo = byId('financeDemoNotice') && window.dashboardFinanceDemo;
+    if (demo) chart = window.dashboardFinanceDemo(chart);
+    // Actual invoices have month precision; never invent hourly allocations.
+    // Synthetic preview explicitly supplies per-bucket invoice values.
+    const monthly = !demo && Array.isArray(chart?.monthly_points);
+    const label = byId('financeBucketLabel');
+    if (label) label.textContent = monthly ? 'Monthly totals · invoices by accounting month' : chart?.range.bucket_label || '';
+    const rows = monthly ? chart.monthly_points : chart?.points;
+    const currency = data.summary?.revenue_currency || 'USD';
+    renderFinance(rows, currency, chart?.range.label || data.range.label);
+  }
+
+  function renderSelectedTraffic(data) {
+    let chart = data.traffic_chart;
+    if (byId('financeDemoNotice') && window.dashboardFinanceDemo) chart = window.dashboardFinanceDemo(chart);
+    renderVolume(chart?.points, chart?.range.label || data.range.label);
   }
 
   function renderClients(rows) {
@@ -340,19 +367,28 @@
       const body = byId(`dashboardTableRows-${section}`);
       if (!panel || !body) return;
       const rows = tables[section];
+      const showRevenue = body.dataset?.revenueVisible === 'true';
+      const columnCount = showRevenue ? 6 : 5;
       panel.hidden = !Array.isArray(rows);
       if (!Array.isArray(rows)) { body.innerHTML = ''; return; }
       body.innerHTML = rows.length ? rows.map((row) => {
         const rejection = Number(row.completes) > 0 ? Math.max(0, Math.min(100, Number(row.rejected) / Number(row.completes) * 100)) : 0;
-        return `<tr><td>${escapeHtml(row.name)}</td><td>${number(row.completes)}</td><td>${number(row.accepted)}</td><td>${number(row.rejected)}</td><td><span class="partner-share partner-rejection" title="Rejected ÷ completes"><span>${rejection.toFixed(1)}%</span><span class="partner-share-track" aria-hidden="true"><i style="width:${rejection}%"></i></span></span></td></tr>`;
-      }).join('') : '<tr><td colspan="5">No activity in this period</td></tr>';
+        const revenue = showRevenue ? `<td title="${escapeHtml(row.money_note || '')}">${row.revenue == null ? '—' : escapeHtml(formatCurrency(row.revenue,row.currency || 'USD'))}</td>` : '';
+        return `<tr><td>${escapeHtml(row.name)}</td><td>${number(row.completes)}</td><td>${number(row.accepted)}</td><td>${number(row.rejected)}</td><td><span class="partner-share partner-rejection" title="Rejected ÷ completes"><span>${rejection.toFixed(1)}%</span><span class="partner-share-track" aria-hidden="true"><i style="width:${rejection}%"></i></span></span></td>${revenue}</tr>`;
+      }).join('') : `<tr><td colspan="${columnCount}">No activity in this period</td></tr>`;
     });
   }
 
   function render(data) {
     state.data = data;
     if (data.range?.financial_year) state.financialYear = String(data.range.financial_year);
-    updateSummary(data.summary || {}, data.comparison);
+    const summary = {...data.summary};
+    if (data.overall_revenue) {
+      summary.revenue = data.overall_revenue.revenue;
+      summary.invoiced_revenue = data.overall_revenue.invoiced_revenue;
+      summary.revenue_currency = data.overall_revenue.currency || summary.revenue_currency;
+    }
+    updateSummary(summary, data.comparison);
     const caption = byId('dashboardRangeCaption'); if (caption) caption.textContent = data.range.label;
     if (byId('trafficBucketLabel') && data.traffic_chart) byId('trafficBucketLabel').textContent = data.traffic_chart.range.bucket_label;
     if (byId('financeBucketLabel') && data.finance_chart) byId('financeBucketLabel').textContent = data.finance_chart.range.bucket_label;
@@ -365,8 +401,8 @@
     if (byId('dashboardDateFrom')) byId('dashboardDateFrom').value = ['custom','date'].includes(state.range) ? state.dateFrom : '';
     if (byId('dashboardDateTo')) byId('dashboardDateTo').value = ['custom','date'].includes(state.range) ? state.dateTo : '';
     renderOperationalInsights(data);
-    renderVolume(data.traffic_chart?.points, data.traffic_chart?.range?.label || data.range.label);
-    renderFinance(data.finance_chart?.points, data.summary?.revenue_currency || 'USD', data.finance_chart?.range?.label || data.range.label);
+    renderSelectedTraffic(data);
+    renderSelectedFinance(data);
     renderClients(data.client_distribution);
     renderStatus(data.status_breakdown);
     renderDevices(data.device_breakdown, data.device_performance);
@@ -379,7 +415,7 @@
   function showError(message) {
     ['client', 'supplier'].forEach((section) => {
       const body = byId(`dashboardTableRows-${section}`);
-      if (body) body.innerHTML = `<tr><td colspan="5">Could not load data: ${escapeHtml(message)}</td></tr>`;
+      if (body) body.innerHTML = `<tr><td colspan="${body.dataset?.revenueVisible === 'true' ? 6 : 5}">Could not load data: ${escapeHtml(message)}</td></tr>`;
     });
     document.querySelectorAll('.bi-chart-stage,.bi-client-body,.bi-status-list,.bi-device-body,.bi-performer-list').forEach((host) => {
       host.innerHTML = `<div class="dashboard-error"><strong>Could not load analytics</strong><span>${escapeHtml(message)}</span><button type="button" data-dashboard-retry>Try again</button></div>`;
@@ -494,15 +530,8 @@
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
       if (!state.data) return;
-      renderVolume(
-        state.data.traffic_chart?.points,
-        state.data.traffic_chart?.range?.label || state.data.range.label
-      );
-      renderFinance(
-        state.data.finance_chart?.points,
-        state.data.summary?.revenue_currency || 'USD',
-        state.data.finance_chart?.range?.label || state.data.range.label
-      );
+      renderSelectedTraffic(state.data);
+      renderSelectedFinance(state.data);
     }, 120);
   });
   document.querySelectorAll('.bi-chart-stage').forEach((host) => resizeObserver.observe(host));

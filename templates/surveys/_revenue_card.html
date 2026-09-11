@@ -1,0 +1,5 @@
+<article class="revenue-card{% if combined %} revenue-card-combined bi-kpi bi-kpi-featured{% else %} study-summary-card revenue-summary{% endif %}" aria-label="{% if combined %}All-time revenue, unaffected by client and time filters{% else %}Total revenue{% endif %}">
+  <span class="revenue-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18V8m5 10V5m5 13v-7m5 7V3"/></svg></span>
+  <div class="revenue-card-values"><div><small>Total revenue{% if combined %}<em>All time</em>{% endif %}</small><strong id="{{ total_id }}">—</strong></div>{% if combined %}<div class="revenue-card-invoiced"><small>Invoiced revenue</small><strong id="{{ invoice_id }}">—</strong></div>{% endif %}</div>
+  <i class="bi-kpi-accent" aria-hidden="true"></i>
+</article>

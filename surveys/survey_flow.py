@@ -284,38 +284,46 @@ def build_outbound_url(entry_link: str, rid: str, answers: dict) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(outbound), parts.fragment))
 
 
-def build_biobrain_outbound_url(entry_link: str, rid: str, profile_uid: str, answers: dict) -> str:
-    """Build the documented Voqall/BioBrain respondent entry URL."""
+def build_biobrain_outbound_url(
+    entry_link: str,
+    rid: str,
+    profile_uid: str,
+    answers: dict,
+) -> str:
+    """Build a BioBrain URL containing only opaque journey identifiers."""
+    entry_link = re.sub(r"\[#(?:vq_tid|vq_tuid)#\]", "", entry_link, flags=re.IGNORECASE)
     parts = urlsplit(entry_link)
-    reserved = {"vq_token", "vq_uid", "pid", "trackid"}
+    hostname = (parts.hostname or "").lower()
+    if (
+        parts.scheme != "https"
+        or not hostname
+        or parts.username
+        or parts.password
+        or (hostname != "voqall.com" and not hostname.endswith(".voqall.com"))
+    ):
+        raise ValueError("BioBrain returned an invalid respondent entry link.")
+    reserved = {"vq_token", "vq_uid", "pid", "trackid", "age", "gender", "zip"}
     outbound = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
         if key.casefold() not in reserved and not key.casefold().startswith("q")
     ]
-    outbound.extend([("vq_token", rid), ("vq_uid", profile_uid or rid)])
-    for answer in answers.values():
-        if answer.get("platform_only"):
-            continue
-        question_id = str(answer.get("question_id") or "").strip()
-        if not question_id:
-            continue
-        values = [
-            str(value).strip()
-            for value in answer.get("upstream_values") or []
-            if value is not None and str(value).strip()
-        ]
-        if values:
-            outbound.append((f"Q{question_id}", ",".join(values)))
+    outbound.extend([("vq_token", rid), ("vq_uid", rid)])
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(outbound), parts.fragment))
 
 
-def status_rid_from_request(request) -> str:
+def status_identifiers_from_request(request) -> list[str]:
+    values = []
     for name in (
-        "rid", "RID", "pid", "PID", "qsid", "QSID", "trackId",
+        "tid", "TID", "trackId", "rid", "RID", "pid", "PID", "qsid", "QSID",
         "token", "vq_token", "vendor_user_id", "vq_uid",
     ):
-        value = request.GET.get(name)
-        if value:
-            return value.strip()
-    return ""
+        value = str(request.GET.get(name) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def status_rid_from_request(request) -> str:
+    values = status_identifiers_from_request(request)
+    return values[0] if values else ""

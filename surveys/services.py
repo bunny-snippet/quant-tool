@@ -2,13 +2,15 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from dateutil import parser as date_parser
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from vendors.models import ClientIntegration
@@ -19,11 +21,24 @@ from .integrations import (
     InnovateMRClient,
     InnovateMRNotFound,
 )
-from .models import Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
+from .models import LocalIdSequence, Survey, SurveyAttempt, SurveyQuota, SyncRun, TargetingQuestion
+from .project_cache import invalidate_project_cache
 from .survey_flow import normalize_client_ip
 
 logger = logging.getLogger(__name__)
 INNOVATEMR_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def _inventory_write_batch_size() -> int:
+    """Keep inventory transactions and ``IN`` clauses bounded."""
+
+    return max(
+        100,
+        min(
+            int(getattr(settings, "INNOVATEMR_INVENTORY_WRITE_BATCH_SIZE", 1000)),
+            5000,
+        ),
+    )
 
 
 def _integer(value: Any, default: int = 0) -> int:
@@ -107,7 +122,12 @@ def merge_inventory(*inventories: list[dict[str, Any]]) -> dict[int, dict[str, A
     return merged
 
 
-def _survey_values(payload: dict[str, Any], seen_at: datetime) -> dict[str, Any]:
+def _survey_values(
+    payload: dict[str, Any],
+    seen_at: datetime,
+    *,
+    end_date_controls_status: bool = False,
+) -> dict[str, Any]:
     group_type = str(payload.get("groupType") or payload.get("surveyType") or "").strip()
     normalized_group = "".join(character for character in group_type.upper() if character.isalnum())
     if normalized_group in {"B2B", "BUSINESS", "BUSINESSTOBUSINESS"}:
@@ -116,10 +136,16 @@ def _survey_values(payload: dict[str, Any], seen_at: datetime) -> dict[str, Any]
         survey_type = "B2C"
     else:
         survey_type = group_type[:20]
+    source_end_at = parse_upstream_datetime(payload.get("endDate") or payload.get("EndDate"))
+    status = (
+        Survey.Status.CLOSED
+        if end_date_controls_status and source_end_at is not None and source_end_at <= timezone.now()
+        else Survey.Status.LIVE
+    )
     return {
         "company_name": str(payload.get("_provider_name") or "InnovateMR"),
         "name": str(payload.get("surveyName") or ""),
-        "status": Survey.Status.LIVE,
+        "status": status,
         "sample_size": max(0, _integer(payload.get("N"))),
         "completes": max(0, _integer(payload.get("supCmps"))),
         "remaining": max(0, _integer(payload.get("remainingN"))),
@@ -142,20 +168,36 @@ def _survey_values(payload: dict[str, Any], seen_at: datetime) -> dict[str, Any]
         "is_pii_required": bool(payload.get("isPIIRequired")),
         "is_recontact": bool(payload.get("reContact")),
         "source_created_at": parse_upstream_datetime(payload.get("createdDate")),
+        "source_end_at": source_end_at,
         "source_modified_at": parse_upstream_datetime(payload.get("modifiedDate")),
         "last_seen_at": seen_at,
         "raw_data": payload,
     }
 
 
-def _detail_changed(existing: Survey, incoming: dict[str, Any]) -> bool:
-    incoming_modified = payload_modified_at(incoming)
+def _detail_changed(
+    existing: Survey,
+    incoming: dict[str, Any],
+    normalized_values: dict[str, Any] | None = None,
+) -> bool:
+    normalized_values = normalized_values or {}
+    incoming_modified = (
+        normalized_values.get("source_modified_at")
+        or normalized_values.get("source_created_at")
+        or payload_modified_at(incoming)
+    )
     existing_modified = existing.source_modified_at or existing.source_created_at or datetime.min.replace(tzinfo=dt_timezone.utc)
     if incoming_modified > existing_modified:
         return True
-    comparable_existing = json.dumps(existing.raw_data, sort_keys=True, default=str)
-    comparable_incoming = json.dumps(incoming, sort_keys=True, default=str)
-    return comparable_existing != comparable_incoming or existing.status != Survey.Status.LIVE
+    # JSONField deserializes objects into ordinary Python structures, whose
+    # equality is independent of dictionary key order.  Avoid serializing two
+    # large payloads for every unchanged survey in a 90k+ item inventory.
+    desired_status = normalized_values.get("status", Survey.Status.LIVE)
+    return (
+        existing.raw_data != incoming
+        or existing.status != desired_status
+        or existing.source_end_at != normalized_values.get("source_end_at")
+    )
 
 
 def replace_survey_quotas(client: InnovateMRClient, survey: Survey) -> None:
@@ -324,6 +366,14 @@ def sync_surveys(client: InnovateMRClient | None = None, integration: ClientInte
     client = client or InnovateMRClient(integration=integration)
     run = SyncRun.objects.create(integration=integration)
     now = timezone.now()
+    latest_marker = Survey.objects.filter(integration=integration).aggregate(
+        value=Max("last_seen_at")
+    )["value"]
+    snapshot_marker = now.replace(microsecond=0)
+    if latest_marker is not None:
+        latest_marker = latest_marker.replace(microsecond=0)
+        if snapshot_marker <= latest_marker:
+            snapshot_marker = latest_marker + timedelta(seconds=1)
 
     try:
         full_inventory = client.get_allocated_surveys()
@@ -333,14 +383,78 @@ def sync_surveys(client: InnovateMRClient | None = None, integration: ClientInte
         run.fetched_paged = len(paged.surveys)
         run.unique_surveys = len(merged)
 
-        with transaction.atomic():
-            source_client = integration.client if integration else None
-            for source_id, payload in merged.items():
+        source_client = integration.client if integration else None
+        merged_items = list(merged.items())
+        write_batch_size = _inventory_write_batch_size()
+        update_fields = [
+            "source_id",
+            "source_key",
+            "client",
+            "integration",
+            "company_name",
+            "name",
+            "status",
+            "sample_size",
+            "completes",
+            "remaining",
+            "starts",
+            "cpi",
+            "loi",
+            "incidence_rate",
+            "country",
+            "country_code",
+            "language",
+            "language_code",
+            "group_type",
+            "buyer_id",
+            "survey_type",
+            "device_type",
+            "entry_link",
+            "test_entry_link",
+            "job_category",
+            "has_quota",
+            "is_pii_required",
+            "is_recontact",
+            "source_created_at",
+            "source_end_at",
+            "source_modified_at",
+            "last_seen_at",
+            "detail_synced_at",
+            "quota_synced_at",
+            "targeting_synced_at",
+            "raw_data",
+            "updated_at",
+        ]
+
+        # Process bounded batches so the recurring 90k+ Innovate inventory
+        # never holds one transaction (or one row lock) for the whole sync.
+        # Each batch performs one preload query and a bounded number of bulk
+        # writes instead of a SELECT + UPDATE for every survey.
+        for offset in range(0, len(merged_items), write_batch_size):
+            batch = merged_items[offset:offset + write_batch_size]
+            source_keys = [str(source_id) for source_id, _payload in batch]
+            existing_query = Survey.objects.filter(source_key__in=source_keys)
+            existing_query = (
+                existing_query.filter(integration=integration)
+                if integration
+                else existing_query.filter(integration__isnull=True)
+            )
+            existing_by_key = {
+                survey.source_key: survey
+                for survey in existing_query
+            }
+            pending_creates: list[Survey] = []
+            pending_updates: list[Survey] = []
+            unchanged_ids: list[int] = []
+
+            for source_id, payload in batch:
                 source_key = str(source_id)
-                lookup = Survey.objects.filter(source_key=source_key)
-                lookup = lookup.filter(integration=integration) if integration else lookup.filter(integration__isnull=True)
-                existing = lookup.first()
-                values = _survey_values(payload, now)
+                existing = existing_by_key.get(source_key)
+                values = _survey_values(
+                    payload,
+                    snapshot_marker,
+                    end_date_controls_status=getattr(client, "is_biobrain", False),
+                )
                 values["client"] = source_client
                 values["integration"] = integration
                 values["source_key"] = source_key
@@ -350,25 +464,76 @@ def sync_surveys(client: InnovateMRClient | None = None, integration: ClientInte
                     and int((existing.raw_data or {}).get("_biobrain_detail_adapter_version") or 0)
                     < BIOBRAIN_DETAIL_ADAPTER_VERSION
                 ):
+                    # One-time, non-destructive rehydration: inventory and all
+                    # respondent traffic remain untouched while the bounded
+                    # detail worker replaces only raw-ID targeting/quota rows.
                     values["detail_synced_at"] = None
                     values["quota_synced_at"] = None
                     values["targeting_synced_at"] = None
                 if existing is None:
-                    survey = Survey.objects.create(source_id=source_id, **values)
+                    pending_creates.append(Survey(source_id=source_id, **values))
                     run.created += 1
-                elif _detail_changed(existing, payload):
+                elif _detail_changed(existing, payload, values):
+                    values["source_id"] = source_id
                     for field, value in values.items():
                         setattr(existing, field, value)
-                    existing.save()
+                    existing.updated_at = now
+                    pending_updates.append(existing)
                     run.updated += 1
                 else:
-                    existing.last_seen_at = now
-                    existing.save(update_fields=["last_seen_at"])
+                    unchanged_ids.append(existing.pk)
                     run.unchanged += 1
 
-            closed = Survey.objects.filter(status=Survey.Status.LIVE, integration=integration)
-            closed = closed.exclude(source_id__in=merged.keys())
-            run.closed = closed.update(status=Survey.Status.CLOSED, updated_at=now)
+            with transaction.atomic():
+                if pending_creates:
+                    local_ids = LocalIdSequence.next_ids(len(pending_creates))
+                    for survey, local_id in zip(pending_creates, local_ids):
+                        survey.local_id = local_id
+                    Survey.objects.bulk_create(
+                        pending_creates,
+                        batch_size=write_batch_size,
+                    )
+                if pending_updates:
+                    Survey.objects.bulk_update(
+                        pending_updates,
+                        update_fields,
+                        batch_size=write_batch_size,
+                    )
+                if unchanged_ids:
+                    Survey.objects.filter(pk__in=unchanged_ids).update(
+                        last_seen_at=snapshot_marker
+                    )
+
+        if getattr(client, "is_biobrain", False):
+            # BioBrain lifecycle is governed solely by its documented EndDate,
+            # not by whether a row happens to be absent from one inventory
+            # snapshot. Reconcile every stored row as well as this response so
+            # legacy rows incorrectly marked closed are repaired immediately.
+            biobrain_surveys = Survey.objects.filter(integration=integration)
+            run.closed = biobrain_surveys.filter(
+                source_end_at__isnull=False,
+                source_end_at__lte=now,
+            ).exclude(status=Survey.Status.CLOSED).update(
+                status=Survey.Status.CLOSED,
+                updated_at=now,
+            )
+            biobrain_surveys.filter(
+                Q(source_end_at__isnull=True) | Q(source_end_at__gt=now),
+            ).exclude(status=Survey.Status.LIVE).update(
+                status=Survey.Status.LIVE,
+                updated_at=now,
+            )
+        else:
+            # Every survey present in this snapshot was stamped with exactly
+            # the unique marker above, so closing missing rows no longer needs
+            # a 95k-value ``NOT IN`` clause.
+            run.closed = Survey.objects.filter(
+                status=Survey.Status.LIVE,
+                integration=integration,
+            ).exclude(last_seen_at=snapshot_marker).update(
+                status=Survey.Status.CLOSED,
+                updated_at=now,
+            )
 
         # Detail endpoints are refreshed separately in bounded batches. This
         # keeps a large initial inventory import inside its one-minute window.
@@ -381,6 +546,9 @@ def sync_surveys(client: InnovateMRClient | None = None, integration: ClientInte
     finally:
         run.finished_at = timezone.now()
         run.save()
+
+    if run.status == SyncRun.Status.SUCCESS and (run.created or run.updated or run.closed):
+        invalidate_project_cache()
 
     return SyncSummary(
         run_id=run.id,

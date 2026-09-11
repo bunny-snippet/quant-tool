@@ -199,9 +199,13 @@ class PrescreenerParityTests(TestCase):
             f"question_{region.pk}": "south",
         })
         answers, errors = _collect_prescreener_answers(rejected, survey)
-        self.assertNotIn(str(age.pk), answers)
-        self.assertNotIn(str(region.pk), answers)
-        self.assertEqual(len(errors), 2)
+        # BioBrain asks these qualifications again on the provider page. Keep
+        # the respondent's answers for internal audit, but do not reject a
+        # provider-valid age/region locally merely because it misses the
+        # cached targeting choices.
+        self.assertEqual(errors, [])
+        self.assertEqual(answers[str(age.pk)]["upstream_values"], ["20"])
+        self.assertEqual(answers[str(region.pk)]["upstream_values"], ["south"])
 
         accepted = RequestFactory().post("/survey/prescreener/", {
             f"question_{age.pk}": "27",

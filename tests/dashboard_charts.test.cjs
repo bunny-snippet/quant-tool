@@ -58,6 +58,8 @@ test('finance keeps RPC alongside revenue bars and invoice line with separate un
   assert.match(svg,/RPC · per entrant/);
   assert.match(svg,/Invoiced revenue \$35.00/);
   assert.match(svg,/RPC \$0.50/);
+  assert.match(svg,/bi-right-axis/);
+  assert.doesNotMatch(svg,/bi-rate-grid/); // One shared plot, not the old detached RPC panel.
   renderFinance([point({invoiced_revenue:35,rpc:null,average_cpi:null})],'USD');
   assert.match(hosts.financeChart.innerHTML,/bi-invoiced-line/);
   assert.doesNotMatch(hosts.financeChart.innerHTML,/bi-rpc-line|RPC \$/);

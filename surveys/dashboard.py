@@ -531,6 +531,39 @@ def _permission_scoped_performance(queryset, range_window, user, card_access):
     return points
 
 
+def overall_revenue_totals(queryset, user):
+    """All-time viewer-scoped cards, independent of dashboard UI filters."""
+    complete = Q(status=COMPLETED)
+    accepted = Q(final_id_status__status="accepted")
+    money_rows = complete | accepted
+    totals = queryset.select_related(None).order_by().aggregate(
+        revenue=Sum("source_cpi_snapshot", filter=complete, default=Decimal("0.00")),
+        invoiced_revenue=Sum("source_cpi_snapshot", filter=accepted, default=Decimal("0.00")),
+        currency_min=Min("cpi_currency_snapshot", filter=money_rows),
+        currency_max=Max("cpi_currency_snapshot", filter=money_rows),
+        money_count=Count("id", filter=money_rows),
+        missing_money=Count(
+            "id",
+            filter=money_rows & (
+                Q(source_cpi_snapshot__isnull=True)
+                | Q(cpi_currency_snapshot__isnull=True)
+                | Q(cpi_currency_snapshot="")
+            ),
+        ),
+    )
+    money_available = not totals["money_count"] or (
+        not totals["missing_money"]
+        and bool(totals["currency_min"])
+        and totals["currency_min"] == totals["currency_max"]
+    )
+    return {
+        "revenue": _visible_revenue(user, totals["revenue"]) if money_available else None,
+        "invoiced_revenue": _visible_revenue(user, totals["invoiced_revenue"]) if money_available else None,
+        "currency": (totals["currency_min"] or "USD") if money_available else None,
+        "scope": "all_time",
+    }
+
+
 def _invoice_totals(queryset, window, user):
     if queryset is None:
         return {}
@@ -745,6 +778,15 @@ def build_dashboard_payload(
                 _monthly_finance(finance_queryset, invoices, finance_range_window, user, card_access),
                 client_id=finance_client_id,
             )
+            # Do not flatten the revenue timeline just because invoices have
+            # only month precision. Expose accounting totals as a separate view.
+            finance_chart["monthly_points"] = finance_chart["points"]
+            finance_chart["monthly_range"] = finance_chart["range"]
+            finance_chart["range"] = _range_payload(finance_range_window)
+            same_scope = (traffic_queryset.query.sql_with_params() == finance_queryset.query.sql_with_params()
+                          and traffic_range_window["buckets"] == finance_range_window["buckets"])
+            finance_chart["points"] = ([dict(point) for point in traffic_points] if same_scope
+                                       else _permission_scoped_performance(finance_queryset, finance_range_window, user, card_access))
         elif any(card_access.get(key) for key in ("average_cpi", "rpc")):
             same_scope = (
                 traffic_client_id == finance_client_id

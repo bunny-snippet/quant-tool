@@ -198,8 +198,8 @@ class FunctionAccessTests(TestCase):
         owner.employee_profile.role = Role.objects.get(slug="super-admin")
         owner.employee_profile.save(update_fields=["role", "updated_at"])
         self.client.force_login(owner)
-        self.assertTrue(has_function_access(owner, "dashboard.view"))
-        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        self.assertFalse(has_function_access(owner, "dashboard.view"))
+        self.assertEqual(self.client.get(reverse("dashboard")).status_code, 403)
 
     def test_denied_navigation_and_project_column_are_not_rendered(self):
         UserFunctionOverride.objects.create(

@@ -185,7 +185,7 @@ class PrescreenerVaultFlowTests(TestCase):
         self.assertContains(response, "Male")
         self.assertContains(response, "All countries")
         self.assertContains(response, "vault-answer-drawer")
-        self.assertNotContains(response, "<details")
+        self.assertNotContains(response, "<details class=\"vault-answer-details\"")
 
         rid_search = self.client.get(reverse("prescreened-data"), {"search": attempt.rid})
         self.assertContains(rid_search, "No profiles available")

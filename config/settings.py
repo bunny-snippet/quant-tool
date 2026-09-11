@@ -131,6 +131,10 @@ STATIC_ROOT = Path(os.getenv(
     "DJANGO_STATIC_ROOT",
     DEPLOYED_STATIC_ROOT if DEPLOYED_STATIC_ROOT.parent.is_dir() else BASE_DIR / "staticfiles",
 ))
+# Export workbooks are private, owner-scoped files and are removed by the
+# scheduled cleanup task after their retention window.
+EXPORT_JOB_DIR = Path(os.getenv("EXPORT_JOB_DIR", BASE_DIR / "var" / "exports"))
+EXPORT_JOB_RETENTION_HOURS = max(1, int(os.getenv("EXPORT_JOB_RETENTION_HOURS", "24")))
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -146,6 +150,61 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "login"
+
+CACHE_ENABLED = env_bool("CACHE_ENABLED", bool(os.getenv("REDIS_CACHE_URL", "").strip()))
+CACHE_DEFAULT_TTL_SECONDS = max(1, int(os.getenv("CACHE_DEFAULT_TTL_SECONDS", "900")))
+CACHE_TTL_JITTER_SECONDS = max(0, int(os.getenv("CACHE_TTL_JITTER_SECONDS", "180")))
+CACHE_KEY_PREFIX = os.getenv("CACHE_KEY_PREFIX", "quant-tool").strip() or "quant-tool"
+PROJECT_CACHE_DEFAULT_TTL_SECONDS = max(1, int(os.getenv("PROJECT_CACHE_DEFAULT_TTL_SECONDS", "300")))
+PROJECT_CACHE_TTL_JITTER_SECONDS = max(0, int(os.getenv("PROJECT_CACHE_TTL_JITTER_SECONDS", "60")))
+PROJECT_CACHE_FILTERS_TTL_SECONDS = max(1, int(os.getenv("PROJECT_CACHE_FILTERS_TTL_SECONDS", "600")))
+PROJECT_CACHE_COUNT_TTL_SECONDS = max(1, int(os.getenv("PROJECT_CACHE_COUNT_TTL_SECONDS", "90")))
+REPORT_CACHE_DEFAULT_TTL_SECONDS = max(1, int(os.getenv("REPORT_CACHE_DEFAULT_TTL_SECONDS", "30")))
+REPORT_CACHE_RESULT_TTL_SECONDS = max(1, int(os.getenv("REPORT_CACHE_RESULT_TTL_SECONDS", "15")))
+REPORT_CACHE_METADATA_TTL_SECONDS = max(1, int(os.getenv("REPORT_CACHE_METADATA_TTL_SECONDS", "600")))
+REPORT_CACHE_DYNAMIC_METADATA_TTL_SECONDS = max(1, int(os.getenv("REPORT_CACHE_DYNAMIC_METADATA_TTL_SECONDS", "30")))
+REPORT_CACHE_TTL_JITTER_SECONDS = max(0, int(os.getenv("REPORT_CACHE_TTL_JITTER_SECONDS", "3")))
+INNOVATEMR_INVENTORY_WRITE_BATCH_SIZE = max(
+    100, min(int(os.getenv("INNOVATEMR_INVENTORY_WRITE_BATCH_SIZE", "1000")), 5000)
+)
+SUPPLIER_CALLBACK_CONNECT_TIMEOUT_SECONDS = max(0.5, float(os.getenv("SUPPLIER_CALLBACK_CONNECT_TIMEOUT_SECONDS", "3")))
+SUPPLIER_CALLBACK_READ_TIMEOUT_SECONDS = max(0.5, float(os.getenv("SUPPLIER_CALLBACK_READ_TIMEOUT_SECONDS", "7")))
+SUPPLIER_CALLBACK_RECOVERY_INTERVAL_SECONDS = max(60, int(os.getenv("SUPPLIER_CALLBACK_RECOVERY_INTERVAL_SECONDS", "300")))
+SUPPLIER_CALLBACK_RECOVERY_LOOKBACK_HOURS = max(1, int(os.getenv("SUPPLIER_CALLBACK_RECOVERY_LOOKBACK_HOURS", "168")))
+SUPPLIER_CALLBACK_RECOVERY_BATCH = max(1, min(int(os.getenv("SUPPLIER_CALLBACK_RECOVERY_BATCH", "100")), 1000))
+
+if CACHE_ENABLED:
+    def redis_cache(alias_url, db, timeout, prefix):
+        return {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.getenv(alias_url, f"redis://127.0.0.1:6379/{db}"),
+            "TIMEOUT": timeout,
+            "KEY_PREFIX": prefix,
+            "OPTIONS": {
+                "socket_connect_timeout": float(os.getenv("CACHE_CONNECT_TIMEOUT_SECONDS", "0.25")),
+                "socket_timeout": float(os.getenv("CACHE_SOCKET_TIMEOUT_SECONDS", "0.25")),
+                "max_connections": max(1, int(os.getenv("CACHE_MAX_CONNECTIONS", "100"))),
+            },
+        }
+
+    CACHES = {
+        "default": redis_cache("REDIS_CACHE_URL", 2, CACHE_DEFAULT_TTL_SECONDS, CACHE_KEY_PREFIX),
+        "projects": redis_cache("PROJECTS_REDIS_CACHE_URL", 3, PROJECT_CACHE_DEFAULT_TTL_SECONDS, f"{CACHE_KEY_PREFIX}-projects"),
+        "reports": redis_cache("REPORTS_REDIS_CACHE_URL", 4, REPORT_CACHE_DEFAULT_TTL_SECONDS, f"{CACHE_KEY_PREFIX}-reports"),
+    }
+else:
+    CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": f"{CACHE_KEY_PREFIX}-local", "TIMEOUT": CACHE_DEFAULT_TTL_SECONDS, "OPTIONS": {"MAX_ENTRIES": 5000}},
+        "projects": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": f"{CACHE_KEY_PREFIX}-projects-local", "TIMEOUT": PROJECT_CACHE_DEFAULT_TTL_SECONDS, "OPTIONS": {"MAX_ENTRIES": 5000}},
+        "reports": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": f"{CACHE_KEY_PREFIX}-reports-local", "TIMEOUT": REPORT_CACHE_DEFAULT_TTL_SECONDS, "OPTIONS": {"MAX_ENTRIES": 10000}},
+    }
+
+SESSION_ENGINE = os.getenv(
+    "DJANGO_SESSION_ENGINE",
+    "django.contrib.sessions.backends.cached_db" if CACHE_ENABLED else "django.contrib.sessions.backends.db",
+)
+SESSION_CACHE_ALIAS = os.getenv("DJANGO_SESSION_CACHE_ALIAS", "default")
+PERMISSION_CACHE_TTL_SECONDS = max(1, int(os.getenv("PERMISSION_CACHE_TTL_SECONDS", "300")))
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
@@ -204,6 +263,21 @@ SPECTACULAR_SETTINGS = {
 
 INNOVATEMR_API_TOKEN = os.getenv("INNOVATEMR_API_TOKEN", "")
 INNOVATEMR_BASE_URL = os.getenv("INNOVATEMR_BASE_URL", "https://supplier.innovatemr.net/api/v2").rstrip("/")
+INNOVATEMR_CALLBACK_HASH_KEY = os.getenv("INNOVATEMR_CALLBACK_HASH_KEY", "")
+INNOVATEMR_CALLBACK_HASH_ALGORITHM = os.getenv("INNOVATEMR_CALLBACK_HASH_ALGORITHM", "sha256").strip().lower()
+INNOVATEMR_CALLBACK_HASH_REQUIRED = env_bool("INNOVATEMR_CALLBACK_HASH_REQUIRED", True)
+BIOBRAIN_CALLBACK_HASH_KEY = (
+    os.getenv("BIOBRAIN_CALLBACK_HASH_KEY")
+    or os.getenv("BIOBRAIN_HASH_KEY")
+    or ""
+).strip()
+BIOBRAIN_CALLBACK_HASH_ALGORITHM = os.getenv(
+    "BIOBRAIN_CALLBACK_HASH_ALGORITHM",
+    os.getenv("BIOBRAIN_HASH_ALGORITHM", "sha256"),
+).strip().lower()
+BIOBRAIN_CALLBACK_HASH_REQUIRED = bool(BIOBRAIN_CALLBACK_HASH_KEY) and env_bool(
+    "BIOBRAIN_CALLBACK_HASH_REQUIRED", True
+)
 PUBLIC_SUPPLIER_CODE = os.getenv("PUBLIC_SUPPLIER_CODE", "1000").strip() or "1000"
 INTEGRATION_CREDENTIAL_ENCRYPTION_KEY = os.getenv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", SECRET_KEY)
 INNOVATEMR_TIMEOUT_SECONDS = int(os.getenv("INNOVATEMR_TIMEOUT_SECONDS", "30"))
@@ -275,6 +349,10 @@ INNOVATEMR_ATTEMPT_RECONCILE_LOOKBACK_HOURS = int(os.getenv("INNOVATEMR_ATTEMPT_
 VENDOR_RESERVATION_TTL_MINUTES = int(os.getenv("VENDOR_RESERVATION_TTL_MINUTES", "180"))
 VENDOR_RESERVATION_CLEANUP_INTERVAL_SECONDS = int(os.getenv("VENDOR_RESERVATION_CLEANUP_INTERVAL_SECONDS", "60"))
 CELERY_BEAT_SCHEDULE = {
+    "cleanup-expired-export-jobs": {
+        "task": "surveys.cleanup_expired_export_jobs",
+        "schedule": 3600.0,
+    },
     "dispatch-client-integration-syncs": {
         "task": "surveys.dispatch_due_integrations",
         "schedule": float(CLIENT_INTEGRATION_DISPATCH_INTERVAL_SECONDS),
@@ -287,9 +365,8 @@ CELERY_BEAT_SCHEDULE = {
         "task": "vendors.expire_allocation_reservations",
         "schedule": float(VENDOR_RESERVATION_CLEANUP_INTERVAL_SECONDS),
     },
+    "recover-pending-supplier-callbacks": {
+        "task": "surveys.dispatch_pending_supplier_callbacks",
+        "schedule": float(SUPPLIER_CALLBACK_RECOVERY_INTERVAL_SECONDS),
+    },
 } if ENABLE_SCHEDULED_JOBS else {}
-INNOVATEMR_CALLBACK_HASH_KEY = os.getenv("INNOVATEMR_CALLBACK_HASH_KEY", "")
-INNOVATEMR_CALLBACK_HASH_ALGORITHM = os.getenv(
-    "INNOVATEMR_CALLBACK_HASH_ALGORITHM", "sha256"
-).strip().lower()
-INNOVATEMR_CALLBACK_HASH_REQUIRED = bool(INNOVATEMR_CALLBACK_HASH_KEY)

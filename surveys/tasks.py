@@ -1,19 +1,133 @@
+import logging
+import os
+import shutil
 from datetime import timedelta, timezone as dt_timezone
+from pathlib import Path
 
 from celery import shared_task
 from django.conf import settings
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.test import RequestFactory
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from vendors.models import ClientIntegration
 from vendors.credentials import resolve_integration_token
 
 from .integrations import InnovateMRAPIError, InnovateMRClient
-from .models import Survey, SurveyAttempt, SyncLease
+from .models import ExportJob, Survey, SurveyAttempt, SyncLease
 from .services import reconcile_attempt_status, replace_survey_details, sync_surveys
 from .provider_services import refresh_client_integration_details, sync_client_integration
 from .providers import installed_provider_codes
+from .supplier_callbacks import (
+    DELIVERY_AUDIT_KEY,
+    SupplierCallbackRetryableError,
+    deliver_supplier_result_callback,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+def _internal_request_host():
+    return next((host for host in settings.ALLOWED_HOSTS if host and host != "*"), "localhost")
+
+
+def _queued_export_response(job):
+    from .views import (
+        SurveyAttemptViewSet,
+        SurveyViewSet,
+        prescreener_data_export,
+        termination_reasons_export,
+        user_dashboard_export,
+    )
+    query = {
+        str(key): [str(item) for item in values]
+        for key, values in (job.query or {}).items()
+    }
+    host = _internal_request_host()
+    if job.kind == ExportJob.Kind.PANELIST:
+        request = RequestFactory().get("/prescreened-data/export/", data=query, HTTP_HOST=host)
+        request.user = job.requested_by
+        return prescreener_data_export(request)
+    if job.kind == ExportJob.Kind.TERMS:
+        request = RequestFactory().get("/termination-reasons/export/", data=query, HTTP_HOST=host)
+        request.user = job.requested_by
+        return termination_reasons_export(request)
+    if job.kind == ExportJob.Kind.USER_DASHBOARD:
+        request = RequestFactory().get("/user-dashboard/export/", data=query, HTTP_HOST=host)
+        request.user = job.requested_by
+        return user_dashboard_export(request)
+    factory = APIRequestFactory()
+    if job.kind == ExportJob.Kind.PROJECTS:
+        request = factory.get("/api/v1/surveys/export/", data=query, HTTP_HOST=host)
+        force_authenticate(request, user=job.requested_by)
+        return SurveyViewSet.as_view({"get": "export"})(request)
+    if job.kind == ExportJob.Kind.TRAFFIC:
+        request = factory.get("/api/v1/survey-attempts/export/", data=query, HTTP_HOST=host)
+        force_authenticate(request, user=job.requested_by)
+        return SurveyAttemptViewSet.as_view({"get": "export"})(request)
+    raise ValueError(f"Unsupported export job kind: {job.kind}")
+
+
+@shared_task(name="surveys.build_export_job", soft_time_limit=270, time_limit=300)
+def build_export_job(public_id):
+    try:
+        job = ExportJob.objects.select_related("requested_by").get(public_id=public_id)
+    except ExportJob.DoesNotExist:
+        return {"status": "missing"}
+    if job.expires_at <= timezone.now():
+        return {"status": "expired"}
+    updated = ExportJob.objects.filter(
+        pk=job.pk, status=ExportJob.Status.QUEUED,
+    ).update(status=ExportJob.Status.RUNNING, started_at=timezone.now(), error="")
+    if not updated:
+        return {"status": "already-processed"}
+    job.refresh_from_db()
+    try:
+        response = _queued_export_response(job)
+        if getattr(response, "status_code", 200) != 200:
+            raise RuntimeError(f"Export builder returned HTTP {response.status_code}.")
+        workbook = getattr(response, "_export_workbook", None)
+        if workbook is None:
+            raise RuntimeError("Export builder did not return a workbook.")
+        filename = response.get("Content-Disposition", "").split("filename=")[-1].strip('"') or "export.xlsx"
+        storage_key = job.storage_key or f"{job.public_id}.xlsx"
+        directory = Path(settings.EXPORT_JOB_DIR)
+        directory.mkdir(parents=True, exist_ok=True)
+        temporary = directory / f".{storage_key}.tmp-{os.getpid()}"
+        destination = directory / storage_key
+        workbook.seek(0)
+        with temporary.open("wb") as output:
+            shutil.copyfileobj(workbook, output, length=1024 * 1024)
+        temporary.replace(destination)
+        workbook.close()
+        ExportJob.objects.filter(pk=job.pk).update(
+            status=ExportJob.Status.COMPLETED, filename=filename[:255], storage_key=storage_key,
+            finished_at=timezone.now(), error="",
+        )
+        return {"status": "completed", "id": str(job.public_id)}
+    except Exception as exc:
+        logger.exception("Export job %s failed", public_id)
+        ExportJob.objects.filter(pk=job.pk).update(
+            status=ExportJob.Status.FAILED, error=str(exc)[:500], finished_at=timezone.now(),
+        )
+        return {"status": "failed", "id": str(job.public_id)}
+
+
+@shared_task(name="surveys.cleanup_expired_export_jobs")
+def cleanup_expired_export_jobs():
+    expired = ExportJob.objects.filter(expires_at__lte=timezone.now())
+    keys = list(expired.exclude(storage_key="").values_list("storage_key", flat=True))
+    expired.delete()
+    directory = Path(settings.EXPORT_JOB_DIR)
+    for key in keys:
+        try:
+            (directory / key).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove expired export file %s", directory / key)
+    return {"deleted": len(keys)}
 
 
 PROVIDER_MINIMUM_SYNC_INTERVAL_SECONDS = {
@@ -245,3 +359,67 @@ def reconcile_pending_attempts_task():
         return {"checked": checked, "terminal": terminal, "failures": failures}
     finally:
         SyncLease.release(lease_name)
+
+
+@shared_task(
+    bind=True,
+    name="surveys.deliver_supplier_result_callback",
+    max_retries=5,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=45,
+    time_limit=60,
+)
+def deliver_supplier_result_callback_task(self, attempt_id, event_id):
+    """Send one persisted supplier result with bounded exponential retries."""
+
+    try:
+        return deliver_supplier_result_callback(attempt_id, event_id)
+    except SupplierCallbackRetryableError as exc:
+        countdown = min(300, 5 * (2 ** int(self.request.retries or 0)))
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+@shared_task(name="surveys.dispatch_pending_supplier_callbacks")
+def dispatch_pending_supplier_callbacks_task():
+    """Recover callbacks stranded by broker outages or killed workers."""
+
+    now = timezone.now()
+    stale_before = now - timedelta(seconds=60)
+    lookback = now - timedelta(hours=settings.SUPPLIER_CALLBACK_RECOVERY_LOOKBACK_HOURS)
+    candidates = SurveyAttempt.objects.filter(
+        status__in=(
+            SurveyAttempt.Status.COMPLETED,
+            SurveyAttempt.Status.TERMINATED,
+            SurveyAttempt.Status.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED,
+        ),
+        callback_at__gte=lookback,
+        upstream_transaction_data__supplier_callback_delivery__state__in=(
+            "queued", "queue_failed", "delivering",
+        ),
+    ).only(
+        "id", "upstream_transaction_data", "callback_at",
+    ).order_by("-callback_at")[: settings.SUPPLIER_CALLBACK_RECOVERY_BATCH]
+    queued = []
+    failures = 0
+    for attempt in candidates:
+        audit = attempt.upstream_transaction_data
+        record = audit.get(DELIVERY_AUDIT_KEY, {}) if isinstance(audit, dict) else {}
+        event_id = str(record.get("event_id") or "")
+        if not event_id:
+            continue
+        updated_at = parse_datetime(str(record.get("updated_at") or ""))
+        if record.get("state") != "queue_failed" and updated_at and updated_at > stale_before:
+            continue
+        try:
+            deliver_supplier_result_callback_task.delay(attempt.pk, event_id)
+            queued.append(attempt.pk)
+        except Exception as exc:  # pragma: no cover - environment-specific broker failures
+            logger.error(
+                "Could not recover supplier callback attempt_id=%s error_type=%s",
+                attempt.pk,
+                type(exc).__name__,
+            )
+            failures += 1
+    return {"queued": queued, "count": len(queued), "failures": failures}

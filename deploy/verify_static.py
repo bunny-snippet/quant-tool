@@ -33,11 +33,15 @@ for template in templates:
     text = (ROOT / "templates" / template).read_text(encoding="utf-8")
     assets.update(re.findall(r"{%\s*static\s+['\"]([^'\"]+)['\"]\s*%}", text))
 for asset in sorted(assets):
-    stored = staticfiles_storage.stored_name(asset)
+    stored_name = getattr(staticfiles_storage, "stored_name", None)
+    stored = stored_name(asset) if stored_name else asset
     path = Path(staticfiles_storage.path(stored))
     if not path.is_file():
         raise SystemExit("Missing collected asset: " + stored)
-    url = staticfiles_storage.url(asset, force=True)
+    try:
+        url = staticfiles_storage.url(asset, force=True)
+    except TypeError:
+        url = staticfiles_storage.url(asset)
     if args.base_url:
         public_url = urljoin(args.base_url, url)
         with urlopen(Request(public_url, headers={"Accept-Encoding": "identity"}), timeout=25) as response:

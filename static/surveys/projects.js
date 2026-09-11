@@ -436,8 +436,14 @@
     if (projectColumns.has('completes')) cells.push(`<td><div class="complete-value"><strong>${survey.completes.toLocaleString()} / ${survey.sample_size.toLocaleString()}</strong><span><i style="width:${percent}%"></i></span></div></td>`);
     if (projectColumns.has('cpi')) cells.push(`<td><strong class="cpi">${money(survey.cpi)}</strong></td>`);
     if (projectColumns.has('loi_ir')) cells.push(`<td><div class="metric-pair"><span><b>${survey.loi ?? '—'}</b> min</span><span><b>${survey.incidence_rate ?? '—'}</b>%</span></div><small class="survey-type-tag">${escapeHtml(survey.survey_type || survey.group_type || 'Type unavailable')}</small></td>`);
-    if (projectColumns.has('entry_link')) cells.push(`<td>${entryLinkControl(survey)}</td>`);
-    if (projectColumns.has('modified')) cells.push(`<td><div class="source-timestamp">${sourceTimestamp(survey.source_modified_display, survey.source_modified_at)}</div><small class="created-date">Fetched ${escapeHtml(formatDate(survey.last_seen_at))}</small><small class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</small></td>`);
+    if (projectColumns.has('entry_link')) cells.push(`<td>${survey.start_link ? `<button class="copy-link" data-copy-link="${escapeHtml(survey.start_link)}">Copy link</button>` : '<button class="copy-link" type="button" disabled title="The supplier callback link is still being verified">Preparing link...</button>'}</td>`);
+    if (projectColumns.has('modified')) {
+      const showsProviderEndDate = ['biobrain', 'voqall', 'zamplia'].includes(String(survey.provider_code || '').toLowerCase());
+      const lifecycleDate = showsProviderEndDate
+        ? `End date ${escapeHtml(formatDate(survey.source_end_at))}`
+        : `Created ${escapeHtml(survey.source_created_display || formatDate(survey.source_created_at || survey.created_at))}`;
+      cells.push(`<td><div class="source-timestamp">${sourceTimestamp(survey.source_modified_display, survey.source_modified_at || survey.updated_at)}</div><small class="created-date">${lifecycleDate}</small><small class="status ${survey.status}"><i></i>${escapeHtml(survey.status)}</small></td>`);
+    }
     if (projectColumns.has('actions')) cells.push(`<td><button class="eye-button" data-action="${escapeHtml(survey.local_id)}" aria-label="View details for ${escapeHtml(survey.name)}">◉</button></td>`);
     return `<tr>${cells.length ? cells.join('') : '<td><div class="column-denied">No project columns are assigned to your account.</div></td>'}</tr>`;
   }

@@ -3,8 +3,9 @@ import ipaddress
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote, urlencode
 
@@ -16,7 +17,7 @@ from django.core import signing
 from django.db import DatabaseError, transaction
 from django.db.models import Count, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse, HttpResponseRedirect, JsonResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseRedirect, JsonResponse, StreamingHttpResponse
 from django.core.paginator import Paginator
 from django.shortcuts import render
 from django.template.loader import render_to_string
@@ -39,6 +40,7 @@ from accounts.access import (
     effective_permission_codes,
     function_permission_required,
     has_function_access,
+    is_super_admin_account,
 )
 from vendors.services import (
     AllocationUnavailable,
@@ -66,8 +68,8 @@ from .dashboard import (
 )
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
-from .innovatemr_callbacks import verify_callback_request
-from .models import FinalIDUpload, Survey, SurveyAttempt, SyncRun, TolunaNotification
+from .innovatemr_callbacks import verify_biobrain_callback_request, verify_callback_request
+from .models import ExportJob, FinalIDUpload, Survey, SurveyAttempt, SyncRun, TolunaNotification
 from .final_ids import FinalIDImportError, import_final_ids
 from .outcomes import describe_toluna_callback, provider_outcome
 from .report_pricing import (
@@ -93,6 +95,13 @@ from .serializers import (
 )
 from .status_context import verified_toluna_notification_summary
 from .pagination import SurveyPagination
+from .project_cache import invalidate_project_cache, project_filter_metadata
+from .report_cache import (
+    cached_report_payload,
+    cached_user_metadata,
+    term_filter_metadata,
+    traffic_filter_metadata,
+)
 from prescreener_vault.services import (
     PrescreenerVaultError,
     answers_with_entry_postal_code,
@@ -124,10 +133,11 @@ from .survey_flow import (
     ensure_attempt_prescreener_uid,
     get_request_client_data,
     get_request_ip,
+    status_identifiers_from_request,
     status_rid_from_request,
 )
 from .tasks import sync_innovatemr_surveys_task
-from .user_hits import aggregate_user_hits, user_hit_filter_options
+from .user_hits import aggregate_user_hit_payload, expand_user_hit_rows, user_hit_filter_options
 from .user_dashboard import build_user_dashboard_payload, user_dashboard_filter_options
 
 
@@ -159,15 +169,21 @@ PROJECT_FILTER_PERMISSIONS = {
 STUDY_COLUMN_PERMISSIONS = {
     "project_id": "studies.column.project_id", "survey_id": "studies.column.survey_id",
     "country": "studies.column.country", "cpi": "studies.column.cpi",
-    "respondent_id": "studies.column.respondent_id", "user": "studies.column.user",
+    "respondent_id": "studies.column.respondent_id", "pid": "studies.column.pid",
+    "user": "studies.column.user",
     "device": "studies.column.device", "ip": "studies.column.ip", "loi": "studies.column.loi",
     "status": "studies.column.status", "final_status": "studies.column.final_status",
     "start": "studies.column.start", "end": "studies.column.end",
 }
 
+STUDY_CLIENT_NAME_PERMISSION = "studies.column.client_name"
+STUDY_PROVIDER_STATUS_PERMISSION = "studies.field.provider_status"
+STUDY_STATUS_SOURCE_PERMISSION = "studies.field.status_source"
+
 STUDY_FILTER_PERMISSIONS = {
     "search": "studies.filter.search", "branch": "studies.filter.branch",
     "sub_branch": "studies.filter.sub_branch", "shift": "studies.filter.shift", "user": "studies.filter.user",
+    "supplier": "studies.filter.supplier",
     "status": "studies.filter.status", "country": "studies.filter.country",
     "client": "studies.filter.client", "buyer": "studies.filter.buyer",
     "project": "studies.filter.project", "date": "studies.filter.date",
@@ -220,6 +236,7 @@ USER_HIT_COLUMN_PERMISSIONS = {
 USER_HIT_FILTER_PERMISSIONS = {
     "search": "user_hits.filter.search", "branch": "user_hits.filter.branch",
     "sub_branch": "user_hits.filter.sub_branch", "shift": "user_hits.filter.shift", "user": "user_hits.filter.user",
+    "supplier": "user_hits.filter.supplier",
     "date": "user_hits.filter.date", "clear": "user_hits.filters.clear",
 }
 
@@ -254,6 +271,7 @@ TERM_REASON_FILTER_PERMISSIONS = {
     "sub_branch": "termination_reasons.filter.sub_branch",
     "shift": "termination_reasons.filter.shift",
     "user": "termination_reasons.filter.user",
+    "supplier": "termination_reasons.filter.supplier",
     "status": "termination_reasons.filter.status",
     "country": "termination_reasons.filter.country",
     "client": "termination_reasons.filter.client",
@@ -262,6 +280,13 @@ TERM_REASON_FILTER_PERMISSIONS = {
     "date": "termination_reasons.filter.date",
     "clear": "termination_reasons.filters.clear",
 }
+
+TERM_REASON_TABLE_DETAIL_PERMISSIONS = {
+    "provider_status": "termination_reasons.table.provider_status",
+    "reason": "termination_reasons.table.reason",
+}
+
+TERM_REASON_STATUS_SOURCE_EXPORT_PERMISSION = "termination_reasons.export.status_source"
 
 TOLUNA_NOTIFICATION_TABS = (
     (TolunaNotification.EventType.MEMBER_COMPLETE, "Member completion", "Completed respondents"),
@@ -347,6 +372,13 @@ PRESCREENER_DATA_COLUMN_PERMISSIONS = {
     "captured": "prescreener_data.column.captured",
     "usage_count": "prescreener_data.column.usage_count",
     "answers": "prescreener_data.column.answers",
+}
+
+PRESCREENER_DATA_CARD_PERMISSIONS = {
+    "records": "prescreener_data.card.records",
+    "countries": "prescreener_data.card.countries",
+    "age_groups": "prescreener_data.card.age_groups",
+    "genders": "prescreener_data.card.genders",
 }
 
 UNSUCCESSFUL_STATUS_LABELS = {
@@ -448,44 +480,36 @@ def reconciliation_page(request):
 def projects_page(request):
     codes = effective_permission_codes(request.user)
     visible_surveys = scope_surveys_for_user(Survey.objects.all(), request.user)
-    countries = visible_surveys.exclude(country_code="").values_list("country_code", "country").distinct().order_by("country_code")
+    scoped_vendor_id = vendor_scope_user_id(request.user)
     is_client_scoped_panel = bool(
-        vendor_scope_user_id(request.user)
-        or organization_client_ids_for_user(request.user) is not None
-    )
-    if is_client_scoped_panel:
-        companies = visible_surveys.filter(client__isnull=False).values_list("client__name", flat=True).distinct().order_by("client__name")
-    else:
-        companies = visible_surveys.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name")
-    survey_types = list(
-        visible_surveys.exclude(survey_type="").values_list("survey_type", flat=True).distinct().order_by("survey_type")
+        scoped_vendor_id or organization_client_ids_for_user(request.user) is not None
     )
     project_columns = _project_columns_for_user(request.user)
     project_filters = _component_access(codes, PROJECT_FILTER_PERMISSIONS)
     can_sort_cpi = project_filters["cpi"]
+    cpi_surveys = visible_surveys
+    cpi_field = "cpi"
+    if can_sort_cpi and not scoped_vendor_id:
+        cpi_surveys = annotate_survey_pricing_for_user(visible_surveys, request.user)
+        cpi_field = "visible_cpi"
+    metadata = project_filter_metadata(
+        visible_surveys,
+        user_id=request.user.pk,
+        client_scoped=is_client_scoped_panel,
+        include_cpi=can_sort_cpi,
+        cpi_field=cpi_field,
+        cpi_queryset=cpi_surveys,
+    )
     cpi_min, cpi_max = 0, 100
     if can_sort_cpi:
-        # Keep the exact viewer-visible slider bounds. The pricing expression is
-        # isolated to this one aggregate so it no longer widens every country,
-        # client and survey-type metadata query on the page.
-        cpi_queryset = annotate_survey_pricing_for_user(
-            visible_surveys, request.user
-        )
-        cpi_bounds = cpi_queryset.aggregate(
-            minimum=Min("visible_cpi"),
-            maximum=Max("visible_cpi"),
-        )
-        cpi_min = cpi_bounds["minimum"] or 0
-        cpi_max = cpi_bounds["maximum"] or 100
+        cpi_min = 0 if scoped_vendor_id else (metadata["cpi_min"] or 0)
+        cpi_max = metadata["cpi_max"] or 100
         if cpi_max <= cpi_min:
             cpi_max = cpi_min + 1
     return render(request, "surveys/projects.html", {
-        "active_page": "projects", "countries": countries, "companies": companies,
-        # Buyer IDs are intentionally loaded only when the filter is opened.
-        # Large inventories can contain tens of thousands of distinct values;
-        # embedding them made the browser parse megabytes before projects.js
-        # could issue the first survey-list request.
-        "buyer_options": [], "survey_types": survey_types,
+        "active_page": "projects", "countries": metadata["countries"],
+        "companies": metadata["companies"], "buyer_options": metadata["buyer_options"],
+        "survey_types": metadata["survey_types"],
         "company_filter_label": "Client",
         "company_filter_param": "client_name" if is_client_scoped_panel else "company",
         "company_filter_default": "All clients",
@@ -504,36 +528,25 @@ def projects_page(request):
 @function_permission_required("attempts.view")
 def studies_page(request):
     codes = effective_permission_codes(request.user)
+    study_columns = _permitted_columns(codes, STUDY_COLUMN_PERMISSIONS)
+    if "pid" in study_columns and "respondent_id" in study_columns and not is_super_admin_account(request.user):
+        study_columns.remove("respondent_id")
     user_ids = activity_visible_user_ids(request.user)
-    hierarchy_options = user_hit_filter_options(request.user, user_ids=user_ids)
     visible_attempts = SurveyAttempt.objects.all()
     if not request.user.is_superuser:
         visible_attempts = visible_attempts.filter(platform_user_id__in=user_ids)
     visible_surveys = scope_surveys_for_user(Survey.objects.all(), request.user)
-    countries = list(
-        visible_surveys.exclude(country_code="")
-        .values("country_code", "country")
-        .distinct().order_by("country_code")
-    )
-    study_clients = list(
-        visible_attempts.filter(survey__client__isnull=False)
-        .values("survey__client_id", "survey__client__name")
-        .distinct().order_by("survey__client__name")
-    )
-    study_buyers = list(
-        visible_attempts.exclude(survey__buyer_id="")
-        .values("survey__buyer_id", "survey__client_id")
-        .distinct().order_by("survey__buyer_id")
-    )
+    metadata = traffic_filter_metadata(request.user, visible_attempts, visible_surveys)
     return render(request, "surveys/studies.html", {
         "active_page": "studies",
-        "tracked_users": hierarchy_options["users"],
-        "study_branches": hierarchy_options["branches"],
-        "study_sub_branches": hierarchy_options["sub_branches"],
-        "study_shifts": hierarchy_options["shifts"],
-        "study_countries": countries,
-        "study_clients": study_clients,
-        "study_buyers": study_buyers,
+        "tracked_users": metadata["users"],
+        "study_branches": metadata["branches"],
+        "study_sub_branches": metadata["sub_branches"],
+        "study_shifts": metadata["shifts"],
+        "study_suppliers": metadata["suppliers"],
+        "study_countries": metadata["countries"],
+        "study_clients": metadata["clients"],
+        "study_buyers": metadata["buyers"],
         "attempt_statuses": [
             ("initiated,redirected", "Initiated"),
             (SurveyAttempt.Status.COMPLETED, "Completed"),
@@ -548,8 +561,10 @@ def studies_page(request):
             (SurveyAttempt.Status.SURVEY_TAKEN, "Survey already taken"),
         ],
         "study_filters": _component_access(codes, STUDY_FILTER_PERMISSIONS),
-        "study_columns": _permitted_columns(codes, STUDY_COLUMN_PERMISSIONS),
-        "study_column_count": max(1, len(_permitted_columns(codes, STUDY_COLUMN_PERMISSIONS))),
+        "study_columns": study_columns,
+        "study_column_count": max(1, len(study_columns)),
+        "can_view_study_client_name": STUDY_CLIENT_NAME_PERMISSION in codes,
+        "can_view_study_provider_status": STUDY_PROVIDER_STATUS_PERMISSION in codes,
         "study_cards": _permitted_columns(codes, STUDY_CARD_PERMISSIONS),
         "can_export": "attempts.export" in codes,
         "can_import_final_ids": "attempts.final_ids.import" in codes,
@@ -635,6 +650,9 @@ def _user_dashboard_page_context(user):
 def user_hits_page(request):
     codes = effective_permission_codes(request.user)
     hit_columns = _permitted_columns(codes, USER_HIT_COLUMN_PERMISSIONS)
+    filter_options = cached_user_metadata(
+        "user-hit-filters", request.user, lambda: user_hit_filter_options(request.user),
+    )
     can_view_user_dashboard = "user_dashboard.view" in codes
     user_dashboard_panel = ""
     if can_view_user_dashboard:
@@ -654,7 +672,7 @@ def user_hits_page(request):
         "can_view_user_dashboard": can_view_user_dashboard,
         "activity_data_selected": can_view_user_dashboard and request.GET.get("tab") == "user-data",
         "user_dashboard_panel": user_dashboard_panel,
-        **user_hit_filter_options(request.user),
+        **filter_options,
     })
 
 
@@ -665,6 +683,37 @@ def user_dashboard_page(request):
         "activity_data_selected": True,
         **_user_dashboard_page_context(request.user),
     })
+
+
+@function_permission_required("user_dashboard.view")
+def user_dashboard_export(request):
+    try:
+        payload = build_user_dashboard_payload(request.user, request.GET)
+    except ValueError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    period_label = payload["period"]["label"]
+    headers = [
+        "Employee", "Email", "Username", "Employee ID", "Branch", "Sub-branch",
+        "Completes", "Accepted", "Rejected", "Pending", "Accepted %", "Rejected %",
+        "Pending %", "Reviewed %", "Period",
+    ]
+
+    def rows():
+        for row in payload["rows"]:
+            yield [
+                row.get("user_name", ""), row.get("user_email", ""), row.get("username", ""),
+                row.get("employee_id", ""), row.get("branch", ""), row.get("sub_branch", ""),
+                row.get("completes", 0), row.get("accepted", 0), row.get("rejected", 0),
+                row.get("pending", 0), row.get("acceptance_rate", 0), row.get("rejection_rate", 0),
+                row.get("pending_rate", 0), row.get("reviewed_rate", 0), period_label,
+            ]
+
+    local_now = timezone.localtime()
+    return build_excel_response(
+        f"user-dashboard-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
+        [ExcelSheet("User Performance", headers, rows(), [24, 30, 22, 18, 22, 24, 12, 12, 12, 12, 14, 14, 14, 14, 30])],
+    )
 
 
 @function_permission_required("prescreener_data.view")
@@ -864,6 +913,7 @@ def _term_report_filter_state(request, filters_access):
         "sub_branch": _term_report_values(request, "sub_branch"),
         "shift": _term_report_values(request, "shift"),
         "user": _term_report_values(request, "user"),
+        "supplier": _term_report_values(request, "supplier"),
         "status": _term_report_values(request, "status"),
         "country": _term_report_values(request, "country"),
         "client": _term_report_values(request, "client"),
@@ -876,7 +926,7 @@ def _term_report_filter_state(request, filters_access):
     supplied_by_permission = {
         "rid": selected["search"], "branch": selected["branch"],
         "sub_branch": selected["sub_branch"], "shift": selected["shift"],
-        "user": selected["user"], "status": selected["status"],
+        "user": selected["user"], "supplier": selected["supplier"], "status": selected["status"],
         "country": selected["country"], "client": selected["client"],
         "provider": selected["provider"],
         "buyer": selected["buyer_id"], "date": selected["date_from"] or selected["date_to"],
@@ -934,7 +984,7 @@ def _filtered_term_report_queryset(request, filters_access):
     search = selected["search"]
     if search:
         queryset = queryset.filter(
-            Q(rid__icontains=search)
+            Q(rid__icontains=search) | Q(pid__icontains=search)
             | Q(prescreener_uid__icontains=search) | Q(provider_profile_uid__icontains=search)
             | Q(survey__local_id__icontains=search) | Q(survey__source_key__icontains=search)
             | Q(survey__buyer_id__icontains=search) | Q(survey__client__name__icontains=search)
@@ -944,7 +994,7 @@ def _filtered_term_report_queryset(request, filters_access):
         )
     filter_data = {
         name: ",".join(selected[name])
-        for name in ("branch", "sub_branch", "shift", "user", "status", "country", "client", "buyer_id")
+        for name in ("branch", "sub_branch", "shift", "user", "supplier", "status", "country", "client", "buyer_id")
         if selected[name]
     }
     queryset = SurveyAttemptFilter(filter_data, queryset=queryset).qs
@@ -1345,6 +1395,7 @@ def termination_reasons_page(request):
     codes = effective_permission_codes(request.user)
     filters_access = _component_access(codes, TERM_REASON_FILTER_PERMISSIONS)
     columns = _permitted_columns(codes, TERM_REASON_COLUMN_PERMISSIONS)
+    table_details = _component_access(codes, TERM_REASON_TABLE_DETAIL_PERMISSIONS)
     queryset, selected = _filtered_term_report_queryset(request, filters_access)
     detail_rid = (request.GET.get("detail") or request.GET.get("rid") or "").strip()
     detail_attempt = None
@@ -1355,13 +1406,19 @@ def termination_reasons_page(request):
         raise PermissionDenied("Your account cannot open outcome details.")
 
     base_queryset = _term_report_base_queryset(request.user)
-    filter_options = _term_report_options(base_queryset, request.user)
+    filter_options = term_filter_metadata(request.user, base_queryset)
+    filter_options["providers"] = _term_report_options(base_queryset, request.user)["providers"]
 
-    summary = queryset.aggregate(
-        total=Count("id"),
-        terminated=Count("id", filter=Q(status=SurveyAttempt.Status.TERMINATED)),
-        quota=Count("id", filter=Q(status=SurveyAttempt.Status.OVER_QUOTA)),
-        quality=Count("id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)),
+    summary = cached_report_payload(
+        "term-summary-v2",
+        request,
+        lambda: queryset.aggregate(
+            total=Count("id"),
+            terminated=Count("id", filter=Q(status=SurveyAttempt.Status.TERMINATED)),
+            quota=Count("id", filter=Q(status=SurveyAttempt.Status.OVER_QUOTA)),
+            quality=Count("id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)),
+        ),
+        neutral_parameters=("page", "detail", "rid", "format", "ordering"),
     )
     page_obj = Paginator(queryset.order_by("-callback_at", "-initiated_at"), 20).get_page(
         request.GET.get("page", 1)
@@ -1434,6 +1491,7 @@ def termination_reasons_page(request):
         "term_sub_branches": filter_options["sub_branches"],
         "term_shifts": filter_options["shifts"],
         "term_users": filter_options["users"],
+        "term_suppliers": filter_options["suppliers"],
         "term_countries": filter_options["countries"],
         "term_buyers": filter_options["buyers"],
         "term_providers": filter_options["providers"],
@@ -1441,7 +1499,9 @@ def termination_reasons_page(request):
         "summary": summary,
         "page_obj": page_obj,
         "reason_columns": columns,
-        "reason_column_count": max(1, len(columns)),
+        "reason_column_count": max(1, len(columns) + (1 if "status" not in columns and any(table_details.values()) else 0)),
+        "reason_table_details": table_details,
+        "show_reason_status_cell": "status" in columns or any(table_details.values()),
         "reason_filters": filters_access,
         "reason_cards": _permitted_columns(codes, TERM_REASON_CARD_PERMISSIONS),
         "can_paginate_reasons": "termination_reasons.control.pagination" in codes,
@@ -1503,6 +1563,114 @@ def termination_reasons_export(request):
         f"term-reports-{local_now:%Y%m%d-%H%M%S}-IST.xlsx",
         sheets,
     )
+
+
+EXPORT_JOB_PERMISSION = {
+    ExportJob.Kind.PROJECTS: "projects.export",
+    ExportJob.Kind.TRAFFIC: "attempts.export",
+    ExportJob.Kind.TERMS: "termination_reasons.export",
+    ExportJob.Kind.PANELIST: "prescreener_data.export",
+    ExportJob.Kind.USER_DASHBOARD: "user_dashboard.view",
+}
+
+
+def _export_job_for_request(request, public_id):
+    try:
+        job = ExportJob.objects.get(public_id=public_id)
+    except (ExportJob.DoesNotExist, ValueError):
+        raise Http404("Export not found.")
+    if job.requested_by_id != request.user.id:
+        raise Http404("Export not found.")
+    return job
+
+
+@require_POST
+def export_job_create(request, kind):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Authentication is required."}, status=401)
+    if kind not in EXPORT_JOB_PERMISSION:
+        return JsonResponse({"detail": "Unsupported export type."}, status=404)
+    if not has_function_access(request.user, EXPORT_JOB_PERMISSION[kind]):
+        raise PermissionDenied("Your account cannot export this report.")
+    query = {
+        key: values[:100]
+        for key, values in request.GET.lists()
+        if key not in {"page", "page_size"} and len(key) <= 80
+    }
+    if sum(len(value) for values in query.values() for value in values) > 16_000:
+        return JsonResponse({"detail": "Export filters are too large."}, status=400)
+    now = timezone.now()
+    candidates = ExportJob.objects.filter(
+        requested_by=request.user,
+        kind=kind,
+        status__in=[ExportJob.Status.QUEUED, ExportJob.Status.RUNNING, ExportJob.Status.COMPLETED],
+        downloaded_at__isnull=True,
+        expires_at__gt=now,
+    ).order_by("-created_at")
+    existing = next((item for item in candidates if item.query == query), None)
+    if existing:
+        return JsonResponse({
+            "id": str(existing.public_id), "status": existing.status,
+            "status_url": reverse("export-job-status", kwargs={"public_id": existing.public_id}),
+            "download_url": reverse("export-job-download", kwargs={"public_id": existing.public_id}),
+            "reused": True,
+        })
+    job = ExportJob.objects.create(
+        requested_by=request.user,
+        kind=kind,
+        query=query,
+        expires_at=now + timedelta(hours=settings.EXPORT_JOB_RETENTION_HOURS),
+    )
+    try:
+        from .tasks import build_export_job
+        transaction.on_commit(lambda: build_export_job.delay(str(job.public_id)))
+    except Exception:
+        logger.exception("Could not queue export job %s", job.public_id)
+        job.status = ExportJob.Status.FAILED
+        job.error = "The export queue is temporarily unavailable. Please retry."
+        job.finished_at = timezone.now()
+        job.save(update_fields=["status", "error", "finished_at"])
+        return JsonResponse({"detail": job.error}, status=503)
+    return JsonResponse({
+        "id": str(job.public_id), "status": job.status,
+        "status_url": reverse("export-job-status", kwargs={"public_id": job.public_id}),
+        "download_url": reverse("export-job-download", kwargs={"public_id": job.public_id}),
+        "reused": False,
+    }, status=202)
+
+
+@require_GET
+def export_job_status(request, public_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Authentication is required."}, status=401)
+    job = _export_job_for_request(request, public_id)
+    payload = {
+        "id": str(job.public_id), "kind": job.kind, "status": job.status,
+        "filename": job.filename, "error": job.error,
+        "expires_at": job.expires_at.isoformat(), "downloaded": bool(job.downloaded_at),
+    }
+    if job.status == ExportJob.Status.COMPLETED and job.storage_key:
+        payload["download_url"] = reverse("export-job-download", kwargs={"public_id": job.public_id})
+    return JsonResponse(payload)
+
+
+@require_GET
+def export_job_download(request, public_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Authentication is required."}, status=401)
+    job = _export_job_for_request(request, public_id)
+    if job.status != ExportJob.Status.COMPLETED or not job.storage_key:
+        return JsonResponse({"detail": "This export is not ready yet."}, status=409)
+    if job.expires_at <= timezone.now():
+        return JsonResponse({"detail": "This export has expired. Please create a new one."}, status=410)
+    path = Path(settings.EXPORT_JOB_DIR) / job.storage_key
+    if not path.is_file():
+        return JsonResponse({"detail": "The export file is no longer available. Please create a new one."}, status=410)
+    ExportJob.objects.filter(pk=job.pk, downloaded_at__isnull=True).update(downloaded_at=timezone.now())
+    response = FileResponse(path.open("rb"), as_attachment=True, filename=job.filename)
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 def workspace_home(request):
@@ -2070,6 +2238,10 @@ def _prescreener_questions(survey, submitted_data=None, *, qualifying_options_on
 def _collect_prescreener_answers(request, survey):
     answers = {}
     errors = []
+    provider_code = str(
+        getattr(getattr(survey, "integration", None), "provider_code", "") or ""
+    ).lower()
+    bypass_provider_qualification_checks = provider_code in {"biobrain", "voqall"}
     for prepared in _prescreener_questions(
         survey, qualifying_options_only=False
     ):
@@ -2107,7 +2279,9 @@ def _collect_prescreener_answers(request, survey):
         valid_options = {item["value"] for item in prepared["options"]}
         allowed_values = set(prepared.get("allowed_values") or [])
         enforced_allowed_values = (
-            allowed_values if prepared.get("enforce_allowed_values", True) else set()
+            allowed_values
+            if prepared.get("enforce_allowed_values", True) and not bypass_provider_qualification_checks
+            else set()
         )
         upstream_values = values.copy()
         if prepared["input_kind"] in {"radio", "checkbox"}:
@@ -2134,7 +2308,7 @@ def _collect_prescreener_answers(request, survey):
             upstream_values = [str(numeric_value)]
             if prepared["is_age_question"]:
                 respondent_age = numeric_value
-        elif prepared.get("is_postal_question") and (
+        elif not bypass_provider_qualification_checks and prepared.get("is_postal_question") and (
             enforced_allowed_values or prepared.get("postal_prefix_match")
         ):
             accepted = {}
@@ -2160,13 +2334,24 @@ def _collect_prescreener_answers(request, survey):
                 values = [canonical_value]
                 upstream_values = [canonical_value]
 
+        minimum_allowed_age = 18 if bypass_provider_qualification_checks else 1
+        if (
+            respondent_age is not None
+            and bypass_provider_qualification_checks
+            and not minimum_allowed_age <= respondent_age <= OPEN_ENDED_AGE_MAX
+        ):
+            errors.append(f"Enter an age between 18 and {OPEN_ENDED_AGE_MAX}.")
+            continue
         if respondent_age is not None and (
-            not 1 <= respondent_age <= OPEN_ENDED_AGE_MAX
-            or bool(prepared["age_ranges"]) and not any(
+            not bypass_provider_qualification_checks
+            and (
+                not minimum_allowed_age <= respondent_age <= OPEN_ENDED_AGE_MAX
+                or bool(prepared["age_ranges"]) and not any(
                 minimum <= respondent_age <= maximum
                 for minimum, maximum in prepared["age_ranges"]
+                )
+                or prepared.get("age_constraints_present") and not prepared["age_ranges"]
             )
-            or prepared.get("age_constraints_present") and not prepared["age_ranges"]
         ):
             errors.append(f"Enter an age within the accepted range for: {prepared['display_text']}")
             continue
@@ -2396,8 +2581,14 @@ def _finish_duplicate_ip_attempt(attempt, request, prior_attempt=None):
 
 def _recorded_status_url(attempt, status_code):
     """Build a trusted local result URL without invoking provider callback checks."""
-
-    return f"{reverse('survey-status')}?{urlencode({'status': str(status_code), 'rid': attempt.rid})}"
+    provider_code = (
+        attempt.survey.integration.provider_code
+        if attempt.survey.integration_id
+        else "innovatemr"
+    )
+    identifier_name = "pid" if provider_code in {"biobrain", "voqall"} else "rid"
+    identifier = attempt.pid if identifier_name == "pid" else attempt.rid
+    return f"{reverse('survey-status')}?{urlencode({'status': str(status_code), identifier_name: identifier})}"
 
 
 @require_http_methods(["GET", "POST"])
@@ -2749,12 +2940,12 @@ def survey_start(request):
                             outbound_url = provider.build_outbound_url(
                                 locked.survey, locked, answers
                             )
-                        elif provider_code == "biobrain":
+                        elif provider_code in {"biobrain", "voqall"}:
                             outbound_url = build_biobrain_outbound_url(
                                 locked.survey.entry_link,
-                                locked.rid,
-                                locked.provider_profile_uid or locked.prescreener_uid,
-                                answers,
+                                locked.pid,
+                                "",
+                                {},
                             )
                         else:
                             outbound_url = build_outbound_url(
@@ -2849,6 +3040,16 @@ STATUS_PAGES = {
     "4": {"title": "Quality check unsuccessful", "message": "This response did not pass the survey's quality checks.", "tone": "danger"},
 }
 
+PENDING_ATTEMPT_STATUSES = {
+    SurveyAttempt.Status.INITIATED,
+    SurveyAttempt.Status.REDIRECTED,
+}
+TERMINAL_ATTEMPT_STATUSES = set(STATUS_PAGES)
+CALLBACK_TRACKING_PARAMETER_NAMES = {
+    "tid", "TID", "trackId", "rid", "RID", "pid", "PID", "qsid", "QSID",
+    "token", "vq_token", "vendor_user_id", "vq_uid",
+}
+
 
 # Toluna has a wider end-page contract than the platform-neutral S1-S4 set.
 # The database retains each distinct Toluna result so Traffic/Term Reports can
@@ -2914,6 +3115,42 @@ def _status_presentation_for_attempt(attempt, page, status_label):
             "tone": "neutral",
         }, status_label
     return page, status_label
+
+
+def _invalid_callback_response(request, *, status_code=409):
+    return render(request, "surveys/flow_error.html", {
+        "title": "Invalid survey callback",
+        "message": "This survey result could not be verified and was not recorded.",
+    }, status=status_code)
+
+
+def _request_has_duplicate_query_parameters(request):
+    return any(len(request.GET.getlist(name)) > 1 for name in request.GET.keys())
+
+
+def _status_callback_has_duplicate_security_parameters(request):
+    return (
+        _request_has_duplicate_query_parameters(request)
+        or len(request.GET.getlist("status")) != 1
+        or any(len(request.GET.getlist(name)) > 1 for name in CALLBACK_TRACKING_PARAMETER_NAMES)
+    )
+
+
+def _resolve_status_attempt(attempts, identifiers):
+    """Resolve a callback only when its identifiers select one journey."""
+    identifiers = [str(value).strip() for value in identifiers if str(value).strip()]
+    if not identifiers:
+        return None
+    anchored = list(attempts.filter(
+        Q(rid__in=identifiers) | Q(pid__in=identifiers) | Q(prescreener_uid__in=identifiers)
+    ))
+    if len({item.pk for item in anchored}) > 1:
+        return None
+    if anchored:
+        return anchored[0]
+    # Reusable profile IDs are legacy provider identifiers. Preserve Quant's
+    # Toluna behavior while BioBrain uses the unique platform PID.
+    return attempts.filter(provider_profile_uid__in=identifiers).order_by("-initiated_at").first()
 
 
 RFG_CALLBACK_IPS = {
@@ -3088,8 +3325,11 @@ def _external_supplier_result_url(attempt, status_code: str) -> str:
 
 @require_http_methods(["GET"])
 def survey_status(request):
+    if _status_callback_has_duplicate_security_parameters(request):
+        return _invalid_callback_response(request)
     status_code = request.GET.get("status", "").strip()
-    rid = status_rid_from_request(request)
+    callback_identifiers = status_identifiers_from_request(request)
+    rid = callback_identifiers[0] if callback_identifiers else ""
     page = STATUS_PAGES.get(status_code) or TOLUNA_STATUS_PAGES.get(status_code)
     if page is None or not rid:
         return render(request, "surveys/flow_error.html", {
@@ -3101,15 +3341,10 @@ def survey_status(request):
     # profile UID (Toluna MemberCode) in its redirect. Reused UIDs are allowed
     # to appear on multiple historical journeys, so the newest matching
     # journey is the safe fallback when the provider did not return our RID.
-    attempt = SurveyAttempt.objects.filter(rid=rid).first()
+    attempts = SurveyAttempt.objects.select_related("survey__integration")
+    attempt = _resolve_status_attempt(attempts, callback_identifiers)
     if attempt is None:
-        attempt = SurveyAttempt.objects.filter(prescreener_uid=rid).first()
-    if attempt is None:
-        attempt = (
-            SurveyAttempt.objects.filter(provider_profile_uid=rid)
-            .order_by("-initiated_at")
-            .first()
-        )
+        return _invalid_callback_response(request, status_code=404)
     canonical_rid = attempt.rid if attempt else rid
     ip_address = get_request_ip(request)
     toluna_notification = verified_toluna_notification_summary(attempt)
@@ -3138,6 +3373,25 @@ def survey_status(request):
             and trusted_recorded_source
             and str(attempt.status) == status_code
         )
+        biobrain_canonical_query = (
+            provider_code in {"biobrain", "voqall"}
+            and _has_exact_query(request, {"status", "pid"})
+            and request.GET.get("pid", "").strip() == attempt.pid
+        )
+        if biobrain_canonical_query:
+            if attempt.status not in TERMINAL_ATTEMPT_STATUSES or attempt.status != status_code:
+                return _invalid_callback_response(request)
+            page = STATUS_PAGES[attempt.status]
+            status_label = attempt.get_status_display()
+            page, status_label = _status_presentation_for_attempt(attempt, page, status_label)
+            return render(request, "surveys/status.html", {
+                **page,
+                "status_label": status_label,
+                "pid": attempt.pid,
+                "ip_address": ip_address or attempt.callback_ip or attempt.initiation_ip,
+                "loi_seconds": attempt.loi_seconds,
+                "attempt_found": True,
+            })
         if status_code not in STATUS_PAGES and provider_code != "toluna":
             return render(request, "surveys/flow_error.html", {
                 "title": "Invalid survey status",
@@ -3146,6 +3400,7 @@ def survey_status(request):
 
         callback_verified = False
         innovate_callback_verified = False
+        biobrain_callback_verified = False
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES[status_code]
             if not canonical_query:
@@ -3179,6 +3434,20 @@ def survey_status(request):
                     "message": "This survey result could not be verified and was not recorded.",
                 }, status=403)
             innovate_callback_verified = True
+        elif (
+            provider_code in {"biobrain", "voqall"}
+            and settings.BIOBRAIN_CALLBACK_HASH_REQUIRED
+        ):
+            verification = verify_biobrain_callback_request(request)
+            if not verification.valid:
+                logger.warning(
+                    "Rejected BioBrain callback rid=%s reason=%s ip=%s",
+                    attempt.rid,
+                    verification.error,
+                    ip_address or "unknown",
+                )
+                return _invalid_callback_response(request, status_code=403)
+            biobrain_callback_verified = True
         callback_transition_applied = False
         if not canonical_query:
             with transaction.atomic():
@@ -3186,6 +3455,12 @@ def survey_status(request):
                     "survey__integration"
                 ).get(pk=attempt.pk)
                 now = timezone.now()
+                if provider_code in {"biobrain", "voqall"} and (
+                    attempt.status in TERMINAL_ATTEMPT_STATUSES
+                    or attempt.status not in PENDING_ATTEMPT_STATUSES
+                    or attempt.callback_at is not None
+                ):
+                    return _invalid_callback_response(request)
                 toluna_already_finalized = bool(
                     provider_code == "toluna"
                     and attempt.is_verified
@@ -3226,6 +3501,8 @@ def survey_status(request):
                         if provider_code == "toluna"
                         else "innovatemr_signed_redirect"
                         if innovate_callback_verified
+                        else "biobrain_signed_redirect"
+                        if biobrain_callback_verified
                         else "browser_callback"
                     )
                     if provider_code == "toluna":
@@ -3256,6 +3533,16 @@ def survey_status(request):
                     }
                     attempt.exit_client_data = exit_client_data
                     attempt.is_verified = True
+                if callback_transition_applied and biobrain_callback_verified:
+                    callback_data = dict(request.GET.items())
+                    for callback_key in list(callback_data):
+                        if callback_key.casefold() == "hash":
+                            callback_data[callback_key] = "[redacted]"
+                    attempt.upstream_transaction_data = {
+                        **(attempt.upstream_transaction_data or {}),
+                        "biobrain_browser_return": callback_data,
+                    }
+                    attempt.is_verified = True
                 if callback_transition_applied:
                     attempt.last_callback_at = now
                     attempt.callback_count += 1
@@ -3274,6 +3561,8 @@ def survey_status(request):
             # the first verified callback (and any replay of it) into a clean,
             # read-only local result URL so browser refresh/prefetch cannot
             # increment counters or finalize capacity twice.
+            return HttpResponseRedirect(_recorded_status_url(attempt, attempt.status))
+        if provider_code in {"biobrain", "voqall"} and not canonical_query:
             return HttpResponseRedirect(_recorded_status_url(attempt, attempt.status))
         if provider_code == "toluna":
             page = TOLUNA_STATUS_PAGES.get(attempt.status, page)
@@ -3324,6 +3613,8 @@ def survey_status(request):
 )
 class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Survey.objects.all()
+    id_first_pagination = True
+    project_count_cache_enabled = True
     lookup_field = "local_id"
     filterset_class = SurveyFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -3926,6 +4217,16 @@ class DashboardAPIView(APIView):
             # then have exactly equal buckets and can safely reuse one series.
             dashboard_now = timezone.now()
             visible_queryset = dashboard_attempts(request.user, {})
+            overall_revenue = None
+            card_access = _component_access(codes, DASHBOARD_CARD_PERMISSIONS)
+            if card_access.get("revenue"):
+                from .dashboard import overall_revenue_totals
+                overall_revenue = cached_user_metadata(
+                    "dashboard-overall-revenue-v1",
+                    request.user,
+                    lambda: overall_revenue_totals(visible_queryset, request.user),
+                    timeout=60,
+                )
             financial_years = dashboard_financial_year_options(
                 visible_queryset, now=dashboard_now
             )
@@ -3995,10 +4296,10 @@ class DashboardAPIView(APIView):
             )
             traffic_queryset = graph_queryset(range_window, traffic_client_id)
             finance_queryset = graph_queryset(range_window, finance_client_id)
-            return build_dashboard_payload(
+            payload = build_dashboard_payload(
                 queryset,
                 request.user,
-                _component_access(codes, DASHBOARD_CARD_PERMISSIONS),
+                card_access,
                 _component_access(codes, DASHBOARD_CHART_PERMISSIONS),
                 range_window,
                 traffic_queryset=traffic_queryset,
@@ -4014,10 +4315,11 @@ class DashboardAPIView(APIView):
                 comparison_label=comparison_window["label"],
                 financial_years=financial_years,
             )
+            payload["overall_revenue"] = overall_revenue
+            return payload
 
         try:
-            from .partner_report_cache import cached_report_payload
-            payload = cached_report_payload("dashboard-v5", request, load_dashboard)
+            payload = cached_report_payload("dashboard-v7", request, load_dashboard)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)
@@ -4056,30 +4358,51 @@ class UserHitsAPIView(APIView):
             "user_hits.filter.branch": ("branch",),
             "user_hits.filter.sub_branch": ("sub_branch",),
             "user_hits.filter.shift": ("shift",),
+            "user_hits.filter.supplier": ("supplier",),
             "user_hits.filter.date": ("from_date", "from_time", "to_date", "to_time"),
         })
+        codes = effective_permission_codes(request.user)
+
+        def load_user_hits():
+            payload = aggregate_user_hit_payload(request.user, request.query_params)
+            summary = payload["summary"]
+            if USER_HIT_CARD_PERMISSIONS["total_hits"] not in codes:
+                summary["hits"]["total"] = None
+            if USER_HIT_CARD_PERMISSIONS["completes"] not in codes:
+                summary["completes"]["total"] = None
+            if USER_HIT_CARD_PERMISSIONS["conversion"] not in codes:
+                summary["conversion_rate"] = None
+            if USER_HIT_CARD_PERMISSIONS["active_users"] not in codes:
+                summary["active_users"] = None
+            if USER_HIT_CARD_PERMISSIONS["devices"] not in codes:
+                for device in ("desktop", "mobile", "tablet", "unclassified"):
+                    summary["completes"][device] = None
+            if USER_HIT_CARD_PERMISSIONS["ir"] not in codes:
+                summary["incidence_rate"] = None
+            return payload
+
         try:
-            rows, summary = aggregate_user_hits(request.user, request.query_params)
+            payload = cached_report_payload("user-hits-v5", request, load_user_hits)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        codes = effective_permission_codes(request.user)
-        if USER_HIT_CARD_PERMISSIONS["total_hits"] not in codes:
-            summary["hits"]["total"] = None
-        if USER_HIT_CARD_PERMISSIONS["completes"] not in codes:
-            summary["completes"]["total"] = None
-        if USER_HIT_CARD_PERMISSIONS["conversion"] not in codes:
-            summary["conversion_rate"] = None
-        if USER_HIT_CARD_PERMISSIONS["active_users"] not in codes:
-            summary["active_users"] = None
-        if USER_HIT_CARD_PERMISSIONS["devices"] not in codes:
-            for device in ("desktop", "mobile", "tablet", "unclassified"):
-                summary["completes"][device] = None
-        if USER_HIT_CARD_PERMISSIONS["ir"] not in codes:
-            summary["incidence_rate"] = None
+        permitted_columns = set(_permitted_columns(codes, USER_HIT_COLUMN_PERMISSIONS))
+        fields_by_column = {
+            "branch": ("branch",), "sub_branch": ("sub_branch",), "shift": ("shift",),
+            "user": ("user_id", "user_name", "username", "user_email"),
+            "date": ("date",), "hits": ("hits",), "completes": ("completes",),
+        }
+        visible_fields = {
+            field for column in permitted_columns for field in fields_by_column.get(column, ())
+        }
         paginator = SurveyPagination()
-        page = paginator.paginate_queryset(rows, request, view=self)
-        response = paginator.get_paginated_response(page)
-        response.data["summary"] = summary
+        compact_page = paginator.paginate_queryset(payload["rows"], request, view=self)
+        page_rows = expand_user_hit_rows(compact_page, payload["metadata"])
+        projected_rows = [
+            {field: value for field, value in row.items() if field in visible_fields}
+            for row in page_rows
+        ]
+        response = paginator.get_paginated_response(projected_rows)
+        response.data["summary"] = payload["summary"]
         return response
 
 
@@ -4204,13 +4527,20 @@ def _attempt_excel_rows(queryset, requesting_user=None):
     """Build Traffic Report rows without leaking upstream commercial data."""
 
     commercial_admin = can_view_report_commercials(requesting_user)
+    can_view_client_name = has_function_access(
+        requesting_user, STUDY_CLIENT_NAME_PERMISSION
+    )
     permitted = set(_permitted_columns(
         effective_permission_codes(requesting_user), STUDY_COLUMN_PERMISSIONS
     ))
     specs = {
-        "project_id": (["Project id", "Client name"], [19, 21]),
+        "project_id": (
+            ["Project id"] + (["Client name"] if can_view_client_name else []),
+            [19] + ([21] if can_view_client_name else []),
+        ),
         "survey_id": (["Cleint survey id"], [18]),
         "respondent_id": (["RID"], [14]),
+        "pid": (["PID"], [14]),
         "status": (["Status", "Status source"], [19, 18]),
         "final_status": (["Final status", "Invoice month"], [18, 15]),
         "country": (["Country"], [18]),
@@ -4248,9 +4578,13 @@ def _attempt_excel_rows(queryset, requesting_user=None):
                     else attempt.get_status_display()
                 )
             values_by_column = {
-                "project_id": [survey.local_id, client.name if client else survey.company_name],
+                "project_id": [survey.local_id] + (
+                    [client.name if client else survey.company_name]
+                    if can_view_client_name else []
+                ),
                 "survey_id": [survey.source_identifier],
                 "respondent_id": [attempt.rid],
+                "pid": [attempt.pid],
                 "status": [status_label, attempt.status_source],
                 "final_status": [
                     final_status.get_status_display() if final_status else "",

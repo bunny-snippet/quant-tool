@@ -1,0 +1,14 @@
+/* Shared revenue surface: dashboard and lazily loaded Traffic report. */
+html .revenue-card{position:relative;display:flex;align-items:center;gap:12px;min-width:0;min-height:112px;padding:16px;border:1px solid #24627b;border-radius:17px;background:linear-gradient(125deg,#182b49,#126f83);color:#fff;overflow:hidden;box-sizing:border-box}
+html .revenue-card .revenue-card-icon{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:10px;background:rgba(255,255,255,.12);color:#83e6ef}
+.revenue-card-icon svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+html .revenue-card .revenue-card-values{display:flex;flex:1;flex-direction:row;align-items:center;gap:14px;min-width:0;z-index:1}
+.revenue-card-values>div{min-width:0;flex:1}
+html .revenue-card small{display:block;color:#c7e1ed;font-size:9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.5}
+html .revenue-card small em{display:block;font-size:8px;letter-spacing:0;font-style:normal;color:#a9c9d7;text-transform:none;margin:0}
+html .revenue-card strong{display:block;margin-top:5px;color:#fff;font:800 clamp(17px,1.3vw,23px)/1.2 'Manrope',sans-serif;letter-spacing:-.4px;white-space:nowrap}
+.revenue-card-invoiced{border-left:1px solid rgba(255,255,255,.22);padding-left:14px}
+html .revenue-card-invoiced strong{color:#8df0c6}
+.revenue-card-combined .bi-kpi-accent{opacity:.18}
+.bi-kpi-grid>.revenue-card-combined{grid-column:span 2}
+@media(max-width:640px){html .revenue-card{padding:12px;gap:8px}html .revenue-card .revenue-card-values{gap:8px}.revenue-card-invoiced{padding-left:8px}html .revenue-card strong{font-size:18px}html .revenue-card small{font-size:8px}}

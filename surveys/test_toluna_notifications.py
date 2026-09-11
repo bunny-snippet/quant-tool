@@ -769,7 +769,7 @@ class TolunaNotificationTests(TestCase):
         term_page = self.client.get(reverse("termination-reasons"))
         self.assertEqual(term_page.status_code, 200)
         self.assertNotContains(term_page, 'form="reasonFilters" formaction=')
-        self.assertContains(term_page, 'class="primary-button export-button" href=')
+        self.assertContains(term_page, 'id="exportTermReports"')
 
         TolunaNotification.objects.create(
             event_type=TolunaNotification.EventType.SURVEY_CLOSED,

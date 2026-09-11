@@ -44,7 +44,9 @@ def sign_callback_url(unsigned_url: str, secret: str, algorithm: str = "sha256")
     ).hexdigest()
 
 
-def _unsigned_query_and_hash(raw_query: str) -> tuple[str, str] | tuple[None, None]:
+def _unsigned_query_and_hash(
+    raw_query: str, *, remove_hash_parameter: bool = False
+) -> tuple[str, str] | tuple[None, None]:
     segments = str(raw_query or "").split("&") if raw_query else []
     matches: list[tuple[int, str]] = []
     for index, segment in enumerate(segments):
@@ -60,8 +62,11 @@ def _unsigned_query_and_hash(raw_query: str) -> tuple[str, str] | tuple[None, No
         return None, None
 
     index, received_hash = matches[0]
-    raw_name = segments[index].partition("=")[0]
-    segments[index] = f"{raw_name}="
+    if remove_hash_parameter:
+        del segments[index]
+    else:
+        raw_name = segments[index].partition("=")[0]
+        segments[index] = f"{raw_name}="
     return "&".join(segments), received_hash
 
 
@@ -97,21 +102,24 @@ def _candidate_unsigned_urls(request, unsigned_query: str) -> list[str]:
     return urls
 
 
-def verify_callback_request(request) -> CallbackVerification:
-    """Verify one InnovateMR redirect without exposing the shared secret."""
+def _verify_callback_request(
+    request,
+    *,
+    secret: str,
+    algorithm: str,
+    remove_hash_parameter: bool = False,
+) -> CallbackVerification:
+    """Verify a provider-signed redirect without exposing its shared secret."""
 
-    secret = str(getattr(settings, "INNOVATEMR_CALLBACK_HASH_KEY", "") or "")
     if not secret:
         return CallbackVerification(False, "not_configured")
-
-    algorithm = str(
-        getattr(settings, "INNOVATEMR_CALLBACK_HASH_ALGORITHM", "sha256") or "sha256"
-    ).strip().lower()
+    algorithm = str(algorithm or "sha256").strip().lower()
     if algorithm not in SUPPORTED_ALGORITHMS:
         return CallbackVerification(False, "unsupported_algorithm")
 
     unsigned_query, received_hash = _unsigned_query_and_hash(
-        request.META.get("QUERY_STRING", "")
+        request.META.get("QUERY_STRING", ""),
+        remove_hash_parameter=remove_hash_parameter,
     )
     if unsigned_query is None:
         return CallbackVerification(False, "missing_or_duplicate_hash")
@@ -123,3 +131,24 @@ def verify_callback_request(request) -> CallbackVerification:
         if hmac.compare_digest(received_hash.casefold(), expected_hash.casefold()):
             return CallbackVerification(True)
     return CallbackVerification(False, "hash_mismatch")
+
+
+def verify_callback_request(request) -> CallbackVerification:
+    """Verify one InnovateMR redirect without exposing the shared secret."""
+
+    return _verify_callback_request(
+        request,
+        secret=str(getattr(settings, "INNOVATEMR_CALLBACK_HASH_KEY", "") or ""),
+        algorithm=str(getattr(settings, "INNOVATEMR_CALLBACK_HASH_ALGORITHM", "sha256") or "sha256"),
+    )
+
+
+def verify_biobrain_callback_request(request) -> CallbackVerification:
+    """Verify BioBrain over the full callback URL before its hash parameter."""
+
+    return _verify_callback_request(
+        request,
+        secret=str(getattr(settings, "BIOBRAIN_CALLBACK_HASH_KEY", "") or ""),
+        algorithm=str(getattr(settings, "BIOBRAIN_CALLBACK_HASH_ALGORITHM", "sha256") or "sha256"),
+        remove_hash_parameter=True,
+    )

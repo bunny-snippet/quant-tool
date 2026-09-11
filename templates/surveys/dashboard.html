@@ -1,15 +1,11 @@
 {% extends 'surveys/base.html' %}
 {% load static %}
 {% block title %}Analytics Dashboard · Exchange Hub{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/dashboard_tables.css' %}?v=5">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'surveys/dashboard_tables.css' %}?v=14">{% endblock %}
 {% block content %}
-<section class="bi-command-bar">
-  <div class="bi-command-copy">
-    <p class="eyebrow">Analytics command center</p>
-    <h1>Performance intelligence</h1>
-    <p>Live, permission-scoped performance across respondent traffic, revenue, clients and suppliers.</p>
-  </div>
-  <div class="bi-command-actions">
+<section class="bi-command-bar bi-command-bar-controls-only">
+  <h1 class="bi-command-title">Dashboard Matrix</h1>
+  <div class="bi-command-actions bi-command-actions-inline">
     <div class="bi-range-switch" role="group" aria-label="Analytics time range">
       <button type="button" class="active" data-dashboard-range="24h" aria-pressed="true">24 hr</button>
       <button type="button" data-dashboard-range="48h" aria-pressed="false">48 hr</button>
@@ -17,16 +13,13 @@
       <form id="dashboardDates" class="bi-custom-dates"><label class="bi-date-select"><span>From</span><input id="dashboardDateFrom" type="date" aria-label="From date" required></label><label class="bi-date-select"><span>To</span><input id="dashboardDateTo" type="date" aria-label="To date" required></label><button type="submit">Apply</button></form>
       <label class="bi-fy-select" data-dashboard-fy-control><span class="sr-only">Financial year</span><select id="dashboardFinancialYear" aria-label="Financial year"><option value="">Financial year</option></select></label>
     </div>
-    <div class="bi-command-secondary">
-      <div class="dashboard-global-client"><select id="dashboardClient" aria-label="Client"><option value="">All clients</option></select></div>
-      <span class="dashboard-live"><i></i><span id="dashboardRangeCaption">Last 24 hours</span><small id="dashboardUpdatedAt">Connecting…</small></span>
-    </div>
+    <div class="dashboard-global-client"><select id="dashboardClient" aria-label="Client"><option value="">All clients</option></select></div>
+    <span class="dashboard-live"><i></i><span id="dashboardRangeCaption">Last 24 hours</span><small id="dashboardUpdatedAt">Connecting…</small></span>
   </div>
 </section>
 
 {% if dashboard_cards %}<section class="bi-kpi-grid" aria-label="Selected-range performance summary">
-  {% if 'revenue' in dashboard_cards %}<article class="bi-kpi bi-kpi-featured"><span class="bi-kpi-icon"><svg viewBox="0 0 24 24"><path d="M4 18V8m5 10V5m5 13v-7m5 7V3"/></svg></span><div><small>Total revenue</small><strong id="dashboardRevenue">—</strong><span class="bi-kpi-trend" data-dashboard-trend="revenue"></span></div><i class="bi-kpi-accent"></i></article>{% endif %}
-  {% if 'revenue' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon green"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="m8 10 3 3 5-5"/></svg></span><div><small>Invoiced revenue</small><strong id="dashboardInvoicedRevenue">—</strong></div></article>{% endif %}
+  {% if 'revenue' in dashboard_cards %}{% include 'surveys/_revenue_card.html' with total_id='dashboardRevenue' invoice_id='dashboardInvoicedRevenue' combined=True %}{% endif %}
   {% if 'hits' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon cyan"><svg viewBox="0 0 24 24"><path d="M4 18 10 12l4 4 6-8"/><path d="M15 8h5v5"/></svg></span><div><small>Total entrants</small><strong id="dashboardHits">—</strong><span class="bi-kpi-trend" data-dashboard-trend="hits"></span></div></article>{% endif %}
   {% if 'completes' in dashboard_cards %}<article class="bi-kpi bi-kpi-completes"><span class="bi-kpi-icon green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8 12 2.5 2.5L16 9"/></svg></span><div><small>Completes</small><strong id="dashboardCompletes">—</strong><span class="bi-kpi-trend" data-dashboard-trend="completes"></span></div><div class="complete-card-details" id="dashboardCompleteDetails"></div></article>{% endif %}
   {% if 'conversion_rate' in dashboard_cards %}<article class="bi-kpi"><span class="bi-kpi-icon blue"><svg viewBox="0 0 24 24"><path d="M7 17 17 7M7 8h.01M17 16h.01"/></svg></span><div><small>Conversion</small><strong id="dashboardConversion">—</strong><span class="bi-kpi-trend" data-dashboard-trend="conversion_rate"></span></div></article>{% endif %}
@@ -54,7 +47,9 @@
 </section>{% endif %}
 
 {% if not dashboard_cards and not dashboard_charts %}<section class="dashboard-no-access"><span>◎</span><h2>No dashboard widgets assigned</h2><p>An administrator can enable cards and charts from Access Control.</p></section>{% endif %}
+<div class="dashboard-partner-grid">
 {% if dashboard_tables.client %}{% include 'surveys/_dashboard_partner_table.html' with table_key='client' table_title='Clients' name_heading='Clients name' %}{% endif %}
 {% if dashboard_tables.supplier %}{% include 'surveys/_dashboard_partner_table.html' with table_key='supplier' table_title='Suppliers' name_heading='Supplier' %}{% endif %}
+</div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=13" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'surveys/dashboard.js' %}?v=15" defer></script>{% endblock %}

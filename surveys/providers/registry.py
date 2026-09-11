@@ -7,6 +7,7 @@ def _provider_classes():
     from .track_opinion import TrackOpinionProvider
     from .toluna import TolunaProvider
     from .unimarket import UniMarketProvider
+    from .zamplia import ZampliaProvider
 
     return {
         AcuityAnalyticsProvider.code: AcuityAnalyticsProvider,
@@ -14,6 +15,7 @@ def _provider_classes():
         TrackOpinionProvider.code: TrackOpinionProvider,
         TolunaProvider.code: TolunaProvider,
         UniMarketProvider.code: UniMarketProvider,
+        ZampliaProvider.code: ZampliaProvider,
     }
 
 
